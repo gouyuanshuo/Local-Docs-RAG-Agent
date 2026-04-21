@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 import uvicorn
@@ -12,6 +13,7 @@ from local_docs_rag_agent.agent import LocalDocsAgent
 from local_docs_rag_agent.api.schemas import (
     AppInfoResponse,
     AskRequest,
+    DocumentsResponse,
     EvalRequest,
     HealthResponse,
     IngestResponse,
@@ -20,6 +22,7 @@ from local_docs_rag_agent.config import AppConfig
 from local_docs_rag_agent.evals.harness import run_eval
 from local_docs_rag_agent.presenters import serialize_answer, serialize_eval_summary
 from local_docs_rag_agent.rag.ingest import ensure_index, ingest_documents
+from local_docs_rag_agent.tools import list_documents
 
 
 
@@ -41,7 +44,9 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=[
             "http://127.0.0.1:5173",
+            "http://127.0.0.1:5174",
             "http://localhost:5173",
+            "http://localhost:5174",
         ],
         allow_credentials=True,
         allow_methods=["*"],
@@ -53,17 +58,36 @@ def create_app() -> FastAPI:
 
     @app.get("/api/health", response_model=HealthResponse)
     def health() -> HealthResponse:
-        return HealthResponse(status="ok")
+        return HealthResponse(
+            status="ok",
+            backend_time_utc=datetime.now(timezone.utc).isoformat(),
+        )
 
     @app.get("/api/info", response_model=AppInfoResponse)
     def info() -> AppInfoResponse:
         config = AppConfig.from_env()
+        documents = list_documents(config)
         return AppInfoResponse(
             name="Local Docs RAG Agent",
             runtime=config.agent_runtime,
             vector_backend=config.vector_backend,
             docs_dir=str(config.docs_dir),
+            docs_count=len(documents),
+            llm_provider=config.llm_provider,
+            llm_model=config.llm_model,
+            embedding_provider=config.embedding_provider,
+            embedding_model=config.embedding_model,
+            top_k=config.top_k,
+            chunk_size=config.chunk_size,
+            chunk_overlap=config.chunk_overlap,
+            qdrant_collection=config.qdrant_collection,
         )
+
+    @app.get("/api/documents", response_model=DocumentsResponse)
+    def documents() -> DocumentsResponse:
+        config = AppConfig.from_env()
+        docs = list_documents(config)
+        return DocumentsResponse(count=len(docs), documents=docs)
 
     @app.post("/api/ingest", response_model=IngestResponse)
     def ingest() -> IngestResponse:

@@ -41,6 +41,9 @@ textarea {
 }
 
 .hero {
+  display: grid;
+  grid-template-columns: 1.2fr 0.9fr;
+  gap: 22px;
   margin-bottom: 28px;
 }
 
@@ -72,11 +75,56 @@ h1 {
   font-size: 1.08rem;
 }
 
+.hero-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.stat-card {
+  padding: 18px;
+  border-radius: 24px;
+  background: rgba(17, 19, 25, 0.74);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.22);
+}
+
+.stat-card.accent {
+  background: linear-gradient(160deg, rgba(242, 138, 94, 0.18), rgba(19, 21, 29, 0.8));
+}
+
+.stat-card strong {
+  display: block;
+  font-size: 1.3rem;
+  margin: 6px 0;
+}
+
+.stat-label,
+.stat-foot {
+  color: #d6ccbe;
+}
+
+.stat-foot {
+  font-size: 0.92rem;
+}
+
 .statusbar,
 .meta-row {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.95fr);
+  gap: 20px;
+}
+
+.main-column,
+.side-column {
+  display: grid;
+  gap: 20px;
 }
 
 .pill,
@@ -95,12 +143,6 @@ h1 {
   color: #cfc5b6;
 }
 
-.grid {
-  display: grid;
-  grid-template-columns: 1.5fr 1fr;
-  gap: 20px;
-}
-
 .panel {
   padding: 24px;
   border-radius: 28px;
@@ -115,6 +157,15 @@ h1 {
   justify-content: space-between;
   gap: 16px;
   align-items: flex-start;
+}
+
+.panel-head.compact {
+  align-items: center;
+}
+
+.panel-subtle {
+  margin-bottom: 0;
+  color: #b8ad9d;
 }
 
 .runtime {
@@ -143,6 +194,18 @@ textarea {
 
 select {
   padding: 10px 14px;
+}
+
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+}
+
+.helper-text {
+  color: #b8ad9d;
+  font-size: 0.92rem;
 }
 
 .action {
@@ -174,6 +237,18 @@ select {
   gap: 24px;
 }
 
+.control-card {
+  padding: 16px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.control-card p,
+.control-card h3 {
+  margin-bottom: 10px;
+}
+
 .answer-card {
   margin-top: 18px;
   margin-bottom: 18px;
@@ -181,6 +256,37 @@ select {
   border-radius: 22px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.03));
   border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.answer-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.answer-text {
+  font-size: 1.03rem;
+  line-height: 1.75;
+  color: #f3ede3;
+}
+
+.source-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.source-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(242, 138, 94, 0.14);
+  color: #ffd8c5;
+  border: 1px solid rgba(242, 138, 94, 0.18);
 }
 
 .citation-list {
@@ -193,7 +299,7 @@ select {
   padding: 14px;
 }
 
-.citation-card header {
+.citation-head {
   display: flex;
   justify-content: space-between;
   gap: 12px;
@@ -201,7 +307,34 @@ select {
   color: #d8cec0;
 }
 
-.citation-card pre,
+.citation-head p {
+  margin: 6px 0 0;
+  color: #ab9f91;
+  font-size: 0.92rem;
+}
+
+.citation-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  height: 34px;
+  margin-right: 10px;
+  border-radius: 999px;
+  background: rgba(242, 138, 94, 0.16);
+  color: #ffd8c5;
+  font-weight: 700;
+}
+
+.citation-meta {
+  display: grid;
+  gap: 6px;
+  text-align: right;
+  color: #b9ae9f;
+  font-size: 0.92rem;
+}
+
+.citation-card blockquote,
 .output {
   margin: 0;
   padding: 14px;
@@ -210,18 +343,95 @@ select {
   word-break: break-word;
 }
 
+.citation-card blockquote {
+  border-left: 3px solid rgba(242, 138, 94, 0.45);
+  background: rgba(6, 8, 12, 0.42);
+}
+
 .output {
   margin-top: 18px;
 }
 
+.debug-panel {
+  margin-top: 14px;
+}
+
+.debug-panel summary {
+  cursor: pointer;
+  color: #d9cdbf;
+}
+
+.side-debug {
+  margin-top: 18px;
+}
+
+.config-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+}
+
+.config-list div {
+  display: grid;
+  gap: 4px;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.config-list div:last-child {
+  border-bottom: 0;
+}
+
+.config-list dt {
+  color: #b8ad9d;
+  font-size: 0.92rem;
+}
+
+.config-list dd {
+  margin: 0;
+  color: #f5ede2;
+}
+
+.document-list {
+  display: grid;
+  gap: 12px;
+}
+
+.document-card {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.document-card span {
+  color: #b8ad9d;
+  font-size: 0.92rem;
+  word-break: break-word;
+}
+
+.error-text {
+  color: #ffbeb5;
+}
+
 @media (max-width: 900px) {
-  .grid {
+  .hero,
+  .workspace,
+  .hero-stats {
     grid-template-columns: 1fr;
   }
 
   .panel-head,
-  .citation-card header {
+  .answer-head,
+  .citation-head,
+  .toolbar {
     flex-direction: column;
+  }
+
+  .citation-meta {
+    text-align: left;
   }
 
   .shell {

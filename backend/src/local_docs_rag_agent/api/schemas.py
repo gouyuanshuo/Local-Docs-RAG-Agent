@@ -19,6 +19,7 @@ class IngestResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str
+    backend_time_utc: str
 
 
 class AppInfoResponse(BaseModel):
@@ -26,3 +27,17 @@ class AppInfoResponse(BaseModel):
     runtime: str
     vector_backend: str
     docs_dir: str
+    docs_count: int
+    llm_provider: str
+    llm_model: str
+    embedding_provider: str
+    embedding_model: str
+    top_k: int
+    chunk_size: int
+    chunk_overlap: int
+    qdrant_collection: str
+
+
+class DocumentsResponse(BaseModel):
+    count: int
+    documents: list[str]

@@ -1,154 +1,229 @@
 # Local Docs RAG Agent
 
-Local Docs RAG Agent is a small AI application scaffold focused on the workflow:
+Local Docs RAG Agent is a small but end-to-end AI application built around this workflow:
 
 `Agent -> Tools -> RAG -> Citation -> Eval`
 
-This repository is intentionally lightweight. It gives you a clean MVP structure you can run locally today, while keeping clear extension points for:
+Instead of treating an LLM as a chatbot only, this project treats it like a working system: it can read local documents, retrieve relevant context, answer with citations, switch model backends, and run simple automated evaluation.
 
-- OpenAI as the first model provider
-- Qdrant as the retrieval backend
-- future Ollama/local model support
-- automatic evaluation and experiment comparison
+## Why this project exists
 
-## What is included
+Large models do not know your private notes, lecture slides, assignment briefs, or project docs by default. This repo explores what it takes to build a practical docs assistant around that limitation.
 
-- A Python package with clear module boundaries
-- A document ingestion pipeline for local `.md` / `.txt` files
-- A retriever that works locally out of the box
-- Optional Qdrant integration points
-- A provider abstraction for model backends
-- A simple docs QA agent that answers with citations
-- A JSONL eval harness
-- Sample docs and sample eval cases
+The goal is not model training. The goal is to build a usable AI application with:
+
+- document ingestion
+- retrieval over external knowledge
+- tool-using agent runtimes
+- cited answers
+- configurable providers
+- evaluation harnesses for iteration
+
+## What it does today
+
+- Ingests local `.md` and `.txt` files into a retrieval index
+- Supports local retrieval and Qdrant-backed retrieval
+- Answers questions with cited source chunks
+- Exposes two runtimes:
+  - `basic`
+  - `agents_sdk`
+- Supports OpenAI-compatible providers through `.env`
+- Works with Qwen via DashScope-compatible endpoints
+- Tracks simple eval metrics:
+  - keyword hit rate
+  - source hit rate
+  - citation span hit rate
+  - response time
+- Ships with a split frontend/backend setup:
+  - `frontend`: Vite + React + TypeScript
+  - `backend`: FastAPI + Python package
+
+## Demo flow
+
+The current happy path is:
+
+1. Put docs under `docs/`
+2. Run ingestion
+3. Ask a question
+4. Retrieve relevant chunks
+5. Generate an answer with citations
+6. Run evals to measure quality
+
+That means the repo already behaves like a small RAG product, not just a notebook experiment.
+
+## Architecture
+
+### Frontend
+
+- Vite
+- React
+- TypeScript
+
+The frontend talks to the backend over HTTP during development and can also be built into `frontend/dist` for backend-served deployment.
+
+### Backend
+
+- FastAPI
+- Python package under `backend/src/local_docs_rag_agent`
+
+The backend is responsible for:
+
+- config loading
+- provider setup
+- ingestion
+- retrieval
+- agent runtime dispatch
+- eval execution
+- API responses for the frontend
+
+### Retrieval layer
+
+- chunking
+- embedding generation
+- local hybrid retrieval
+- Qdrant vector retrieval
+- citation span tracking
+
+### Agent layer
+
+- `basic` runtime for a lightweight orchestration path
+- `agents_sdk` runtime for tool-enabled execution with OpenAI Agents SDK
 
 ## Repository layout
 
 ```text
 .
-|-- README.md
-|-- pyproject.toml
-|-- package.json
-|-- pnpm-workspace.yaml
-|-- .env.example
-|-- docs/
-|   `-- sample/
-|       `-- lecture5_attention.md
-|-- data/
-|   `-- evals/
-|       `-- sample_eval.jsonl
 |-- backend/
 |   `-- src/
 |       `-- local_docs_rag_agent/
+|           |-- api/
+|           |-- commands/
+|           |-- evals/
+|           |-- providers/
+|           |-- rag/
+|           |-- runtime/
 |           |-- agent.py
 |           |-- cli.py
 |           |-- config.py
 |           |-- models.py
-|           |-- tools.py
-|           |-- api/
-|           |-- providers/
-|           |-- rag/
-|           |-- runtime/
-|           `-- evals/
-`-- frontend/
-    |-- index.html
-    |-- package.json
-    `-- src/
+|           |-- presenters.py
+|           `-- tools.py
+|-- frontend/
+|   |-- src/
+|   |-- index.html
+|   |-- package.json
+|   `-- vite.config.ts
+|-- docs/
+|   `-- sample/
+|-- data/
+|   `-- evals/
+|-- scripts/
+|-- pyproject.toml
+|-- package.json
+|-- pnpm-workspace.yaml
+`-- README.md
 ```
 
 ## Quick start
 
-1. Create and activate a virtual environment:
+### 1. Create a virtual environment
 
 ```bash
 py -3.13 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 ```
 
-2. Install the package:
+### 2. Install backend dependencies
 
 ```bash
 python -m pip install -e .[agents,qdrant]
 ```
 
-3. Copy environment variables:
-
-```bash
-copy .env.example .env
-```
-
-The CLI automatically loads values from a project-local `.env`, so you do not need to manually export each variable before running commands.
-
-4. Build a local index from the sample docs:
-
-```bash
-local-docs-rag ingest
-```
-
-5. Ask a question:
-
-```bash
-local-docs-rag ask "How is attention explained in lecture 5?"
-```
-
-6. Run the sample eval harness:
-
-```bash
-local-docs-rag eval
-```
-
-7. Start the FastAPI app:
-
-```bash
-local-docs-rag-api
-```
-
-8. Install frontend dependencies:
+### 3. Install frontend dependencies
 
 ```bash
 pnpm install
 ```
 
-9. Start the separate frontend dev server:
+### 4. Copy environment variables
+
+```bash
+copy .env.example .env
+```
+
+The app auto-loads a project-local `.env`, so you do not need to export variables manually before each run.
+
+## Development workflow
+
+### Frontend
 
 ```bash
 pnpm run dev
 ```
 
-10. Start the backend dev server in another terminal:
+Vite runs on `http://127.0.0.1:5173` by default.
+
+### Backend
 
 ```bash
 pnpm run dev:backend
 ```
 
-Then open `http://127.0.0.1:5173` for the Vite frontend, or `http://127.0.0.1:8000` for the backend API.
+FastAPI runs on `http://127.0.0.1:8000`.
+
+### CLI
+
+You can still use the CLI directly:
+
+```bash
+local-docs-rag ingest
+local-docs-rag ask "How is attention explained in lecture 5?"
+local-docs-rag eval
+```
+
+## API
+
+The FastAPI app currently exposes:
+
+- `GET /api/health`
+- `GET /api/info`
+- `POST /api/ingest`
+- `POST /api/ask`
+- `POST /api/eval`
 
 ## Configuration
 
-The default setup uses:
+The most important settings live in `.env`.
 
-- local docs under `docs/`
-- a local JSONL chunk store under `data/index/chunks.jsonl`
-- OpenAI as the answer-generation provider
+### LLM
 
-If `LLM_API_KEY` is not set, the agent still retrieves context and returns an extractive fallback answer so the pipeline remains testable.
-
-Provider settings now live in `.env`:
-
+- `LLM_PROVIDER`
 - `LLM_API_KEY`
 - `LLM_BASE_URL`
 - `LLM_MODEL`
 - `LLM_API_STYLE`
-- `EMBEDDING_MODEL`
+
+### Embeddings
+
+- `EMBEDDING_PROVIDER`
+- `EMBEDDING_API_KEY`
 - `EMBEDDING_BASE_URL`
+- `EMBEDDING_MODEL`
 - `EMBEDDING_DIMENSIONS`
 
-Defaults:
+### Retrieval backend
 
-- OpenAI: leave `LLM_BASE_URL` empty and keep `LLM_API_STYLE=responses`
-- Qwen/DashScope OpenAI-compatible mode: set `LLM_BASE_URL` and usually use `LLM_API_STYLE=chat_completions`
+- `VECTOR_BACKEND=local`
+- `VECTOR_BACKEND=qdrant`
 
-Example `.env` for OpenAI:
+### Runtime
+
+- `AGENT_RUNTIME=basic`
+- `AGENT_RUNTIME=agents_sdk`
+
+## Example provider setups
+
+### OpenAI
 
 ```bash
 LLM_PROVIDER=openai
@@ -158,7 +233,7 @@ LLM_MODEL=gpt-4.1-mini
 LLM_API_STYLE=responses
 ```
 
-Example `.env` for Qwen via DashScope compatible mode:
+### Qwen via DashScope-compatible endpoint
 
 ```bash
 LLM_PROVIDER=qwen
@@ -173,78 +248,46 @@ EMBEDDING_MODEL=text-embedding-v4
 EMBEDDING_DIMENSIONS=1024
 ```
 
-## Retrieval backends
+## Project highlights
 
-- `VECTOR_BACKEND=local`: stores chunk records in JSONL and performs hybrid dense-plus-lexical retrieval locally
-- `VECTOR_BACKEND=qdrant`: stores dense embeddings in Qdrant and retrieves by vector similarity
+What gives this project portfolio value is not just “calling an API”, but combining several pieces into one coherent system:
 
-If you want to use Qdrant, install the extra dependency:
+- AI application design
+- retrieval engineering
+- provider abstraction
+- tool-capable agent runtime
+- citations and source tracking
+- evaluation-aware iteration
+- full-stack integration with a real frontend and backend split
 
-```bash
-py -3.13 -m pip install -e .[agents,qdrant]
-```
+## Current status
 
-## Runtime modes
+Completed or substantially completed:
 
-There are two answer runtimes:
+- stage 1: minimal runnable agent
+- stage 2: tools and runtime paths
+- stage 3: RAG and citations
+- stage 4: initial eval harness
+- stage 5: provider abstraction
+- stage 6: first round of engineering and frontend/backend separation
 
-- `basic`: the local fallback orchestrator already included in the repo
-- `agents_sdk`: OpenAI Agents SDK function-tool runtime for stage 2
+## Next steps
 
-Use either environment variables or CLI flags:
+Planned improvements include:
 
-```bash
-set AGENT_RUNTIME=agents_sdk
-local-docs-rag ask "How is attention explained in lecture 5?"
-```
+- richer eval datasets
+- more robust retry and failure handling
+- stronger Agents SDK orchestration
+- better frontend result presentation
+- optional Ollama/local model support
+- deployment polish
 
-or
+## Notes
 
-```bash
-local-docs-rag ask --runtime agents_sdk "How is attention explained in lecture 5?"
-```
+- On this machine, `py -3` may resolve to the free-threaded interpreter (`3.13t`), which can cause dependency issues with `pydantic-core`.
+- Prefer `py -3.13`.
+- `.env` is intentionally excluded from git.
 
-## Python note
+## License
 
-On this machine, `py -3` resolves to the free-threaded interpreter (`3.13t`), which may not have compatible wheels for `pydantic-core`.
-Prefer the standard interpreter:
-
-```bash
-py -3.13
-```
-
-## Frontend and backend
-
-The project now supports a real split dev workflow:
-
-- `frontend/`: Vite + React + TypeScript
-- `backend/`: FastAPI + Python package
-
-The backend enables CORS for the Vite dev server at `http://127.0.0.1:5173`.
-
-For production-style serving, `pnpm build` writes the frontend to `frontend/dist`, and the FastAPI app will serve that build from `/` when it exists.
-
-## API
-
-The FastAPI app exposes:
-
-- `GET /api/health`
-- `GET /api/info`
-- `POST /api/ingest`
-- `POST /api/ask`
-- `POST /api/eval`
-
-## Why this scaffold works for the MVP
-
-This version keeps the main chain simple and visible:
-
-- `ingest`: reads files, chunks them, writes retrievable records
-- `ask`: retrieves relevant chunks, builds a cited context, gets an answer
-- `eval`: runs a batch of questions and records simple quality signals
-
-That means you can validate architecture now, then upgrade individual layers later:
-
-- swap local store -> Qdrant
-- swap OpenAI provider -> Ollama provider
-- swap single agent orchestration -> Agents SDK tool calling runtime
-- expand eval metrics and tracing
+No license file has been added yet. If you plan to publish this repo publicly, adding one is a good next step.

@@ -24,13 +24,30 @@ type AppInfo = {
   runtime: string;
   vector_backend: string;
   docs_dir: string;
+  docs_count: number;
+  llm_provider: string;
+  llm_model: string;
+  embedding_provider: string;
+  embedding_model: string;
+  top_k: number;
+  chunk_size: number;
+  chunk_overlap: number;
+  qdrant_collection: string;
 };
 
 type Health = {
   status: string;
+  backend_time_utc: string;
 };
 
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "http://127.0.0.1:8000";
+type DocumentsResponse = {
+  count: number;
+  documents: string[];
+};
+
+const apiBaseUrl =
+  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ??
+  "http://127.0.0.1:8000";
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${path}`, {
@@ -53,11 +70,34 @@ function pretty(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
+function relativeTime(isoString: string): string {
+  const timestamp = new Date(isoString).getTime();
+  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+  if (seconds < 5) return "just now";
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ago`;
+}
+
+function fileLabel(path: string): string {
+  const parts = path.split("/");
+  return parts[parts.length - 1] ?? path;
+}
+
+function excerpt(text: string, limit = 220): string {
+  if (text.length <= limit) return text;
+  return `${text.slice(0, limit).trimEnd()}...`;
+}
+
 export default function App() {
   const [runtime, setRuntime] = useState<Runtime>("");
   const [question, setQuestion] = useState("How is attention explained in lecture 5?");
-  const [health, setHealth] = useState("Checking backend...");
-  const [info, setInfo] = useState("Loading config...");
+  const [health, setHealth] = useState<Health | null>(null);
+  const [info, setInfo] = useState<AppInfo | null>(null);
+  const [documents, setDocuments] = useState<string[]>([]);
+  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
   const [askResult, setAskResult] = useState<AskResponse | null>(null);
   const [askRaw, setAskRaw] = useState("Waiting for a question...");
   const [actionRaw, setActionRaw] = useState("System actions will appear here...");
@@ -70,16 +110,18 @@ export default function App() {
 
   async function bootstrap() {
     try {
-      const [healthResult, infoResult] = await Promise.all([
+      setBootstrapError(null);
+      const [healthResult, infoResult, documentsResult] = await Promise.all([
         requestJson<Health>("/api/health"),
         requestJson<AppInfo>("/api/info"),
+        requestJson<DocumentsResponse>("/api/documents"),
       ]);
-      setHealth(`Backend: ${healthResult.status}`);
-      setInfo(`Runtime ${infoResult.runtime} · Backend ${infoResult.vector_backend}`);
+      setHealth(healthResult);
+      setInfo(infoResult);
+      setDocuments(documentsResult.documents);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setHealth("Backend unavailable");
-      setInfo(message);
+      setBootstrapError(message);
     }
   }
 
@@ -137,88 +179,204 @@ export default function App() {
     }
   }
 
+  const statusLabel = bootstrapError
+    ? "Backend unavailable"
+    : health
+      ? `Backend ${health.status}`
+      : "Checking backend...";
+
   return (
     <main className="shell">
       <section className="hero">
-        <p className="eyebrow">Agent + RAG + Eval</p>
-        <h1>Local Docs RAG Agent</h1>
-        <p className="lede">
-          Separate frontend and backend, with a live docs QA workspace on top of your local retrieval pipeline.
-        </p>
-        <div className="statusbar">
-          <span className="pill">{health}</span>
-          <span className="pill muted">{info}</span>
+        <div className="hero-copy">
+          <p className="eyebrow">Agent + RAG + Eval</p>
+          <h1>Local Docs RAG Agent</h1>
+          <p className="lede">
+            A local-docs workspace for retrieval, citations, and evaluation with a split frontend and
+            backend development flow.
+          </p>
+        </div>
+        <div className="hero-stats">
+          <article className="stat-card accent">
+            <span className="stat-label">Backend status</span>
+            <strong>{statusLabel}</strong>
+            <span className="stat-foot">
+              {health ? `Updated ${relativeTime(health.backend_time_utc)}` : "Waiting for health check"}
+            </span>
+          </article>
+          <article className="stat-card">
+            <span className="stat-label">Documents</span>
+            <strong>{info?.docs_count ?? documents.length}</strong>
+            <span className="stat-foot">{info?.docs_dir ?? "docs/"}</span>
+          </article>
+          <article className="stat-card">
+            <span className="stat-label">Retrieval</span>
+            <strong>{info?.vector_backend ?? "loading..."}</strong>
+            <span className="stat-foot">top-k {info?.top_k ?? "-"}</span>
+          </article>
         </div>
       </section>
 
-      <section className="grid">
-        <article className="panel panel-ask">
-          <div className="panel-head">
-            <h2>Ask</h2>
-            <label className="runtime">
-              <span>Runtime</span>
-              <select value={runtime} onChange={(event) => setRuntime(event.target.value as Runtime)}>
-                <option value="">Default</option>
-                <option value="basic">basic</option>
-                <option value="agents_sdk">agents_sdk</option>
-              </select>
-            </label>
-          </div>
-          <textarea value={question} onChange={(event) => setQuestion(event.target.value)} />
-          <button className="action primary" onClick={handleAsk} disabled={isAsking}>
-            {isAsking ? "Thinking..." : "Ask Docs"}
-          </button>
-
-          {askResult ? (
-            <section className="answer-card">
-              <h3>Answer</h3>
-              <p>{askResult.answer}</p>
-              <div className="meta-row">
-                <span className="meta-pill">Runtime: {askResult.runtime}</span>
-                {askResult.citations.map((citation) => (
-                  <span key={citation} className="meta-pill">
-                    {citation}
-                  </span>
-                ))}
+      <section className="workspace">
+        <div className="main-column">
+          <article className="panel panel-ask">
+            <div className="panel-head">
+              <div>
+                <h2>Ask the docs</h2>
+                <p className="panel-subtle">Run the current runtime against indexed knowledge with cited output.</p>
               </div>
-              <div className="citation-list">
-                {askResult.citation_spans.map((span) => (
-                  <article key={span.chunk_id} className="citation-card">
-                    <header>
-                      <strong>{span.source_path}</strong>
-                      <span>
-                        chars {span.start_char}-{span.end_char}
-                      </span>
-                    </header>
-                    <pre>{span.text}</pre>
+              <label className="runtime">
+                <span>Runtime</span>
+                <select value={runtime} onChange={(event) => setRuntime(event.target.value as Runtime)}>
+                  <option value="">Default</option>
+                  <option value="basic">basic</option>
+                  <option value="agents_sdk">agents_sdk</option>
+                </select>
+              </label>
+            </div>
+
+            <textarea value={question} onChange={(event) => setQuestion(event.target.value)} />
+
+            <div className="toolbar">
+              <button className="action primary" onClick={handleAsk} disabled={isAsking}>
+                {isAsking ? "Thinking..." : "Ask Docs"}
+              </button>
+              <span className="helper-text">API base: {apiBaseUrl}</span>
+            </div>
+
+            {askResult ? (
+              <section className="answer-card">
+                <div className="answer-head">
+                  <div>
+                    <h3>Answer</h3>
+                    <p className="panel-subtle">Model output with source-aware retrieval context.</p>
+                  </div>
+                  <div className="meta-row">
+                    <span className="meta-pill">Runtime: {askResult.runtime}</span>
+                    <span className="meta-pill">{askResult.citation_spans.length} citation spans</span>
+                  </div>
+                </div>
+
+                <p className="answer-text">{askResult.answer}</p>
+
+                <div className="source-strip">
+                  {askResult.citations.map((citation) => (
+                    <span key={citation} className="source-chip">
+                      {fileLabel(citation)}
+                    </span>
+                  ))}
+                </div>
+
+                <div className="citation-list">
+                  {askResult.citation_spans.map((span, index) => (
+                    <article key={span.chunk_id} className="citation-card">
+                      <header className="citation-head">
+                        <div>
+                          <span className="citation-index">S{index + 1}</span>
+                          <strong>{fileLabel(span.source_path)}</strong>
+                          <p>{span.source_path}</p>
+                        </div>
+                        <div className="citation-meta">
+                          <span>chunk {span.chunk_index}</span>
+                          <span>
+                            chars {span.start_char}-{span.end_char}
+                          </span>
+                        </div>
+                      </header>
+                      <blockquote>{excerpt(span.text, 340)}</blockquote>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            <details className="debug-panel">
+              <summary>Raw answer payload</summary>
+              <pre className="output">{askRaw}</pre>
+            </details>
+          </article>
+        </div>
+
+        <aside className="side-column">
+          <article className="panel panel-side">
+            <h2>Run controls</h2>
+            <div className="stack">
+              <div className="control-card">
+                <h3>Index</h3>
+                <p>Refresh the retrieval index from the configured docs directory.</p>
+                <button className="action" onClick={handleIngest} disabled={isActing}>
+                  Run Ingest
+                </button>
+              </div>
+              <div className="control-card">
+                <h3>Eval</h3>
+                <p>Run the current sample eval set with the active runtime selection.</p>
+                <button className="action" onClick={handleEval} disabled={isActing}>
+                  Run Eval
+                </button>
+              </div>
+            </div>
+            <details className="debug-panel side-debug">
+              <summary>Raw action payload</summary>
+              <pre className="output">{actionRaw}</pre>
+            </details>
+          </article>
+
+          <article className="panel panel-side">
+            <h2>Current config</h2>
+            {bootstrapError ? <p className="error-text">{bootstrapError}</p> : null}
+            <dl className="config-list">
+              <div>
+                <dt>LLM</dt>
+                <dd>{info ? `${info.llm_provider} / ${info.llm_model}` : "loading..."}</dd>
+              </div>
+              <div>
+                <dt>Embeddings</dt>
+                <dd>{info ? `${info.embedding_provider} / ${info.embedding_model}` : "loading..."}</dd>
+              </div>
+              <div>
+                <dt>Vector backend</dt>
+                <dd>{info?.vector_backend ?? "loading..."}</dd>
+              </div>
+              <div>
+                <dt>Default runtime</dt>
+                <dd>{info?.runtime ?? "loading..."}</dd>
+              </div>
+              <div>
+                <dt>Chunking</dt>
+                <dd>
+                  {info ? `${info.chunk_size} size / ${info.chunk_overlap} overlap` : "loading..."}
+                </dd>
+              </div>
+              <div>
+                <dt>Qdrant collection</dt>
+                <dd>{info?.qdrant_collection ?? "loading..."}</dd>
+              </div>
+            </dl>
+          </article>
+
+          <article className="panel panel-side">
+            <div className="panel-head compact">
+              <div>
+                <h2>Documents</h2>
+                <p className="panel-subtle">Source files currently available to the retriever.</p>
+              </div>
+              <span className="meta-pill">{documents.length}</span>
+            </div>
+            <div className="document-list">
+              {documents.length > 0 ? (
+                documents.map((document) => (
+                  <article key={document} className="document-card">
+                    <strong>{fileLabel(document)}</strong>
+                    <span>{document}</span>
                   </article>
-                ))}
-              </div>
-            </section>
-          ) : null}
-
-          <pre className="output">{askRaw}</pre>
-        </article>
-
-        <article className="panel panel-actions">
-          <div className="stack">
-            <div>
-              <h2>Index</h2>
-              <p>Refresh the retrieval index from the configured docs directory.</p>
-              <button className="action" onClick={handleIngest} disabled={isActing}>
-                Run Ingest
-              </button>
+                ))
+              ) : (
+                <p className="panel-subtle">No documents found yet.</p>
+              )}
             </div>
-            <div>
-              <h2>Eval</h2>
-              <p>Run the current batch eval set against the configured backend.</p>
-              <button className="action" onClick={handleEval} disabled={isActing}>
-                Run Eval
-              </button>
-            </div>
-          </div>
-          <pre className="output">{actionRaw}</pre>
-        </article>
+          </article>
+        </aside>
       </section>
     </main>
   );
