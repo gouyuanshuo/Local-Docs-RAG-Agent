@@ -32,4 +32,3 @@ package-dir = {"" = "backend/src"}
 
 [tool.setuptools.packages.find]
 where = ["backend/src"]
-exclude = ["local_docs_rag_agent.local_docs_rag_agent*"]
