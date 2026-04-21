@@ -1,0 +1,11 @@
+{
+  "name": "local-docs-rag-agent",
+  "private": true,
+  "packageManager": "pnpm@10.18.0",
+  "scripts": {
+    "dev": "pnpm --filter local-docs-rag-agent-web dev",
+    "build": "pnpm --filter local-docs-rag-agent-web build",
+    "preview": "pnpm --filter local-docs-rag-agent-web preview",
+    "dev:backend": ".\\.venv\\Scripts\\python.exe -m uvicorn local_docs_rag_agent.api.app:app --reload --host 127.0.0.1 --port 8000"
+  }
+}

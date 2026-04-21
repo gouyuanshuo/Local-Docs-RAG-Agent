@@ -1,0 +1,2 @@
+{"question":"How is attention explained in lecture 5?","expected_keywords":["relevance score","weighted combination","relevant tokens"],"expected_sources":["docs/sample/lecture5_attention.md"],"expected_span_keywords":["relevance score","weighted combination of values","relevant tokens"]}
+{"question":"Does the lecture compare attention with recurrent models?","expected_keywords":["contrast","recurrent","direct access"],"expected_sources":["docs/sample/lecture5_attention.md"],"expected_span_keywords":["recurrent models","direct access to relevant context"]}

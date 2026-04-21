@@ -1,0 +1,3 @@
+[console_scripts]
+local-docs-rag = local_docs_rag_agent.cli:main
+local-docs-rag-api = local_docs_rag_agent.api.app:run

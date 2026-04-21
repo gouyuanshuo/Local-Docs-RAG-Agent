@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Local Docs RAG Agent</title>
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">Agent + RAG + Eval</p>
+        <h1>Local Docs RAG Agent</h1>
+        <p class="lede">
+          Ask questions over your local docs, reindex content, and run evals against the live backend.
+        </p>
+        <div class="statusbar">
+          <span id="health-pill" class="pill">Checking backend...</span>
+          <span id="info-pill" class="pill muted">Loading config...</span>
+        </div>
+      </section>
+
+      <section class="grid">
+        <article class="panel panel-ask">
+          <div class="panel-head">
+            <h2>Ask</h2>
+            <label class="runtime">
+              <span>Runtime</span>
+              <select id="runtime-select">
+                <option value="">Default</option>
+                <option value="basic">basic</option>
+                <option value="agents_sdk">agents_sdk</option>
+              </select>
+            </label>
+          </div>
+          <textarea id="question-input" placeholder="How is attention explained in lecture 5?"></textarea>
+          <button id="ask-button" class="action primary">Ask Docs</button>
+          <pre id="ask-output" class="output">Waiting for a question...</pre>
+        </article>
+
+        <article class="panel panel-actions">
+          <div class="stack">
+            <div>
+              <h2>Index</h2>
+              <p>Refresh the retrieval index from the configured docs directory.</p>
+              <button id="ingest-button" class="action">Run Ingest</button>
+            </div>
+            <div>
+              <h2>Eval</h2>
+              <p>Run the current batch eval set against the configured backend.</p>
+              <button id="eval-button" class="action">Run Eval</button>
+            </div>
+          </div>
+          <pre id="action-output" class="output">System actions will appear here...</pre>
+        </article>
+      </section>
+    </main>
+    <script src="/assets/app.js"></script>
+  </body>
+  </html>
