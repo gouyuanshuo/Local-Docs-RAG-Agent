@@ -4,6 +4,7 @@ import argparse
 
 from local_docs_rag_agent.commands.ask import run_ask
 from local_docs_rag_agent.commands.eval import run_eval_command
+from local_docs_rag_agent.commands.eval_compare import run_eval_compare_command
 from local_docs_rag_agent.commands.ingest import run_ingest
 from local_docs_rag_agent.config import AppConfig
 
@@ -31,6 +32,34 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Override the answer runtime for this command",
     )
 
+    compare_parser = subparsers.add_parser("eval-compare", help="Run eval across multiple retrieval/runtime configs")
+    compare_parser.add_argument(
+        "--runtime",
+        dest="runtimes",
+        choices=["basic", "agents_sdk"],
+        action="append",
+        help="One or more runtimes to compare. Repeat the flag to compare multiple runtimes.",
+    )
+    compare_parser.add_argument(
+        "--chunk-strategy",
+        dest="chunk_strategies",
+        choices=["fixed", "paragraph", "markdown"],
+        action="append",
+        help="One or more chunk strategies to compare. Repeat the flag to compare multiple strategies.",
+    )
+    compare_parser.add_argument(
+        "--vector-backend",
+        dest="vector_backends",
+        choices=["local", "qdrant"],
+        action="append",
+        help="One or more vector backends to compare. Repeat the flag to compare multiple backends.",
+    )
+    compare_parser.add_argument(
+        "--output",
+        default="data/evals/compare_latest.json",
+        help="Path to save the comparison report JSON",
+    )
+
     return parser
 
 
@@ -49,6 +78,16 @@ def main() -> None:
 
     if args.command == "eval":
         run_eval_command(config, runtime=args.runtime)
+        return
+
+    if args.command == "eval-compare":
+        run_eval_compare_command(
+            config,
+            runtimes=args.runtimes,
+            chunk_strategies=args.chunk_strategies,
+            vector_backends=args.vector_backends,
+            output_path=args.output,
+        )
         return
 
     parser.error(f"Unsupported command: {args.command}")

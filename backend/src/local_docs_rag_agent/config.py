@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -101,31 +101,7 @@ class AppConfig:
     def with_runtime(self, runtime: str | None) -> "AppConfig":
         if runtime is None:
             return self
-        return AppConfig(
-            llm_provider=self.llm_provider,
-            llm_api_key=self.llm_api_key,
-            llm_base_url=self.llm_base_url,
-            llm_model=self.llm_model,
-            llm_api_style=self.llm_api_style,
-            embedding_provider=self.embedding_provider,
-            embedding_api_key=self.embedding_api_key,
-            embedding_base_url=self.embedding_base_url,
-            embedding_model=self.embedding_model,
-            embedding_dimensions=self.embedding_dimensions,
-            openai_api_key=self.openai_api_key,
-            openai_model=self.openai_model,
-            docs_dir=self.docs_dir,
-            docs_exclude_patterns=list(self.docs_exclude_patterns),
-            index_path=self.index_path,
-            eval_path=self.eval_path,
-            agent_runtime=runtime.strip().lower(),
-            agents_max_turns=self.agents_max_turns,
-            vector_backend=self.vector_backend,
-            qdrant_url=self.qdrant_url,
-            qdrant_api_key=self.qdrant_api_key,
-            qdrant_collection=self.qdrant_collection,
-            top_k=self.top_k,
-            chunk_strategy=self.chunk_strategy,
-            chunk_size=self.chunk_size,
-            chunk_overlap=self.chunk_overlap,
-        )
+        return self.with_overrides(agent_runtime=runtime.strip().lower())
+
+    def with_overrides(self, **overrides: object) -> "AppConfig":
+        return replace(self, **overrides)
