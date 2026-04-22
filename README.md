@@ -93,6 +93,11 @@ The backend is responsible for:
 
 ```text
 .
+|-- .codex/
+|   `-- config.toml
+|-- skills/
+|   |-- backend-api/
+|   `-- review-bugfix/
 |-- backend/
 |   `-- src/
 |       `-- local_docs_rag_agent/
@@ -114,15 +119,38 @@ The backend is responsible for:
 |   |-- package.json
 |   `-- vite.config.ts
 |-- docs/
+|   |-- development-roadmap.md
 |   `-- sample/
 |-- data/
 |   `-- evals/
 |-- scripts/
+|-- AGENTS.md
+|-- spec.md
+|-- tasks.md
 |-- pyproject.toml
 |-- package.json
 |-- pnpm-workspace.yaml
 `-- README.md
 ```
+
+## Project docs
+
+These files define how the repo is organized and how work should move forward:
+
+- `AGENTS.md`
+  - project operating rules
+- `spec.md`
+  - system requirements and scope
+- `tasks.md`
+  - current task board and short-horizon execution list
+- `docs/development-roadmap.md`
+  - long-horizon roadmap and phase plan
+- `.codex/config.toml`
+  - project-local workflow hints
+- `skills/backend-api/SKILL.md`
+  - reusable backend implementation workflow
+- `skills/review-bugfix/SKILL.md`
+  - reusable review and bugfix workflow
 
 ## Quick start
 

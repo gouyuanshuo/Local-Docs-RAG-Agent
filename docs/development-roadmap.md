@@ -236,7 +236,12 @@ Retrieval engineering is one of the project’s main sources of portfolio value.
   - `markdown`
 - document filtering and retrieval-config snapshots are implemented
 - eval comparison matrix is implemented in CLI
-- next step: make `local vs qdrant` comparison smoother and expose the comparison result more clearly
+- compare API and frontend leaderboard are implemented
+- retrieval parameter comparison is implemented for:
+  - `top_k`
+  - `chunk_size`
+  - `chunk_overlap`
+- next step: run and analyze stronger `local vs qdrant` comparisons, then decide whether to close Phase C or continue deeper retrieval tuning
 
 ---
 

@@ -1,0 +1,25 @@
+# Project-local Codex workflow hints.
+# Actual approvals and sandbox enforcement still come from the Codex runtime.
+
+[project]
+name = "Local Docs RAG Agent"
+spec = "spec.md"
+tasks = "tasks.md"
+agents = "AGENTS.md"
+roadmap = "docs/development-roadmap.md"
+
+[workflow]
+read_agents_first = true
+read_spec_first = true
+check_tasks_before_coding = true
+update_tasks_after_coding = true
+review_after_code_changes = true
+
+[skills]
+backend_api = "skills/backend-api/SKILL.md"
+review_bugfix = "skills/review-bugfix/SKILL.md"
+
+[behavior]
+prefer_small_iterations = true
+prefer_verification_before_closeout = true
+prefer_roadmap_priority_order = true

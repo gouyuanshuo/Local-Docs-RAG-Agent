@@ -16,6 +16,9 @@ class EvalCompareRequest(BaseModel):
     runtimes: list[str] | None = None
     chunk_strategies: list[str] | None = None
     vector_backends: list[str] | None = None
+    top_ks: list[int] | None = None
+    chunk_sizes: list[int] | None = None
+    chunk_overlaps: list[int] | None = None
 
 
 class IngestResponse(BaseModel):

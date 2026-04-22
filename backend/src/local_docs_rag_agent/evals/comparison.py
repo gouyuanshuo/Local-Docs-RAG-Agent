@@ -13,6 +13,9 @@ def run_eval_matrix(
     runtimes: list[str],
     chunk_strategies: list[str],
     vector_backends: list[str],
+    top_ks: list[int],
+    chunk_sizes: list[int],
+    chunk_overlaps: list[int],
     output_path: Path | None = None,
 ) -> dict[str, object]:
     runs: list[dict[str, object]] = []
@@ -20,64 +23,73 @@ def run_eval_matrix(
     for runtime in runtimes:
         for vector_backend in vector_backends:
             for chunk_strategy in chunk_strategies:
-                run_config = config.with_overrides(
-                    agent_runtime=runtime,
-                    vector_backend=vector_backend,
-                    chunk_strategy=chunk_strategy,
-                )
-                run_label = f"{runtime}:{vector_backend}:{chunk_strategy}"
-                skip_reason = _skip_reason(run_config)
-                if skip_reason is not None:
-                    runs.append(
-                        {
-                            "label": run_label,
-                            "status": "skipped",
-                            "reason": skip_reason,
-                            "retrieval_config": _retrieval_config_snapshot(run_config),
-                            "runtime": run_config.agent_runtime,
-                        }
-                    )
-                    continue
+                for top_k in top_ks:
+                    for chunk_size in chunk_sizes:
+                        for chunk_overlap in chunk_overlaps:
+                            run_config = config.with_overrides(
+                                agent_runtime=runtime,
+                                vector_backend=vector_backend,
+                                chunk_strategy=chunk_strategy,
+                                top_k=top_k,
+                                chunk_size=chunk_size,
+                                chunk_overlap=chunk_overlap,
+                            )
+                            run_label = _run_label(run_config)
+                            skip_reason = _skip_reason(run_config)
+                            if skip_reason is not None:
+                                runs.append(
+                                    {
+                                        "label": run_label,
+                                        "status": "skipped",
+                                        "reason": skip_reason,
+                                        "retrieval_config": _retrieval_config_snapshot(run_config),
+                                        "runtime": run_config.agent_runtime,
+                                    }
+                                )
+                                continue
 
-                try:
-                    ingest_documents(run_config)
-                    results = run_eval(run_config)
-                    summary = serialize_eval_summary(results, runtime=run_config.agent_runtime, config=run_config)
-                    runs.append(
-                        {
-                            "label": run_label,
-                            "status": "ok",
-                            "summary": summary,
-                        }
-                    )
-                except Exception as exc:
-                    skip_reason = _qdrant_runtime_skip_reason(run_config, exc)
-                    if skip_reason is not None:
-                        runs.append(
-                            {
-                                "label": run_label,
-                                "status": "skipped",
-                                "reason": skip_reason,
-                                "retrieval_config": _retrieval_config_snapshot(run_config),
-                                "runtime": run_config.agent_runtime,
-                            }
-                        )
-                        continue
-                    runs.append(
-                        {
-                            "label": run_label,
-                            "status": "error",
-                            "error": f"{type(exc).__name__}: {exc}",
-                            "retrieval_config": _retrieval_config_snapshot(run_config),
-                            "runtime": run_config.agent_runtime,
-                        }
-                    )
+                            try:
+                                ingest_documents(run_config)
+                                results = run_eval(run_config)
+                                summary = serialize_eval_summary(results, runtime=run_config.agent_runtime, config=run_config)
+                                runs.append(
+                                    {
+                                        "label": run_label,
+                                        "status": "ok",
+                                        "summary": summary,
+                                    }
+                                )
+                            except Exception as exc:
+                                skip_reason = _qdrant_runtime_skip_reason(run_config, exc)
+                                if skip_reason is not None:
+                                    runs.append(
+                                        {
+                                            "label": run_label,
+                                            "status": "skipped",
+                                            "reason": skip_reason,
+                                            "retrieval_config": _retrieval_config_snapshot(run_config),
+                                            "runtime": run_config.agent_runtime,
+                                        }
+                                    )
+                                    continue
+                                runs.append(
+                                    {
+                                        "label": run_label,
+                                        "status": "error",
+                                        "error": f"{type(exc).__name__}: {exc}",
+                                        "retrieval_config": _retrieval_config_snapshot(run_config),
+                                        "runtime": run_config.agent_runtime,
+                                    }
+                                )
 
     payload = {
         "num_runs": len(runs),
         "runtimes": runtimes,
         "chunk_strategies": chunk_strategies,
         "vector_backends": vector_backends,
+        "top_ks": top_ks,
+        "chunk_sizes": chunk_sizes,
+        "chunk_overlaps": chunk_overlaps,
         "leaderboard": _build_leaderboard(runs),
         "runs": runs,
     }
@@ -103,6 +115,13 @@ def _retrieval_config_snapshot(config: AppConfig) -> dict[str, object]:
         "docs_dir": str(config.docs_dir),
         "docs_exclude_patterns": list(config.docs_exclude_patterns),
     }
+
+
+def _run_label(config: AppConfig) -> str:
+    return (
+        f"{config.agent_runtime}:{config.vector_backend}:{config.chunk_strategy}"
+        f":k{config.top_k}:s{config.chunk_size}:o{config.chunk_overlap}"
+    )
 
 
 def _skip_reason(config: AppConfig) -> str | None:

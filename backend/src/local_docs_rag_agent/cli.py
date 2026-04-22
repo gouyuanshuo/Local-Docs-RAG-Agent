@@ -55,6 +55,27 @@ def _build_parser() -> argparse.ArgumentParser:
         help="One or more vector backends to compare. Repeat the flag to compare multiple backends.",
     )
     compare_parser.add_argument(
+        "--top-k",
+        dest="top_ks",
+        type=int,
+        action="append",
+        help="One or more top-k values to compare. Repeat the flag to compare multiple values.",
+    )
+    compare_parser.add_argument(
+        "--chunk-size",
+        dest="chunk_sizes",
+        type=int,
+        action="append",
+        help="One or more chunk sizes to compare. Repeat the flag to compare multiple values.",
+    )
+    compare_parser.add_argument(
+        "--chunk-overlap",
+        dest="chunk_overlaps",
+        type=int,
+        action="append",
+        help="One or more chunk overlap values to compare. Repeat the flag to compare multiple values.",
+    )
+    compare_parser.add_argument(
         "--output",
         default="data/evals/compare_latest.json",
         help="Path to save the comparison report JSON",
@@ -86,6 +107,9 @@ def main() -> None:
             runtimes=args.runtimes,
             chunk_strategies=args.chunk_strategies,
             vector_backends=args.vector_backends,
+            top_ks=args.top_ks,
+            chunk_sizes=args.chunk_sizes,
+            chunk_overlaps=args.chunk_overlaps,
             output_path=args.output,
         )
         return

@@ -122,6 +122,9 @@ def create_app() -> FastAPI:
             runtimes=payload.runtimes or [config.agent_runtime],
             chunk_strategies=payload.chunk_strategies or ["fixed", "paragraph", "markdown"],
             vector_backends=payload.vector_backends or (["local", "qdrant"] if config.qdrant_url else ["local"]),
+            top_ks=payload.top_ks or [config.top_k],
+            chunk_sizes=payload.chunk_sizes or [config.chunk_size],
+            chunk_overlaps=payload.chunk_overlaps or [config.chunk_overlap],
         )
 
     @app.get("/", response_model=None)
