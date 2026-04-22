@@ -12,6 +12,12 @@ class EvalRequest(BaseModel):
     runtime: str | None = None
 
 
+class EvalCompareRequest(BaseModel):
+    runtimes: list[str] | None = None
+    chunk_strategies: list[str] | None = None
+    vector_backends: list[str] | None = None
+
+
 class IngestResponse(BaseModel):
     num_chunks: int
     vector_backend: str

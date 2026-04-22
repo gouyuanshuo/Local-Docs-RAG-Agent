@@ -48,6 +48,31 @@ type DocumentsResponse = {
   documents: string[];
 };
 
+type CompareLeaderboardRow = {
+  label: string;
+  answer_keyword_hit_rate: number;
+  retrieval_source_hit_rate: number;
+  retrieval_span_hit_rate: number;
+  citation_span_hit_rate: number;
+  avg_response_time_ms: number;
+};
+
+type CompareRun = {
+  label: string;
+  status: string;
+  reason?: string;
+  error?: string;
+};
+
+type CompareResponse = {
+  num_runs: number;
+  runtimes: string[];
+  chunk_strategies: string[];
+  vector_backends: string[];
+  leaderboard: CompareLeaderboardRow[];
+  runs: CompareRun[];
+};
+
 type ProviderStatus = {
   provider: string;
   mode: string;
@@ -120,6 +145,7 @@ export default function App() {
   const [documents, setDocuments] = useState<string[]>([]);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
   const [askResult, setAskResult] = useState<AskResponse | null>(null);
+  const [compareResult, setCompareResult] = useState<CompareResponse | null>(null);
   const [askRaw, setAskRaw] = useState("Waiting for a question...");
   const [actionRaw, setActionRaw] = useState("System actions will appear here...");
   const [isAsking, setIsAsking] = useState(false);
@@ -191,6 +217,27 @@ export default function App() {
         method: "POST",
         body: JSON.stringify({ runtime: runtime || null }),
       });
+      setActionRaw(pretty(payload));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setActionRaw(`Error:\n${message}`);
+    } finally {
+      setIsActing(false);
+    }
+  }
+
+  async function handleCompareEval() {
+    setIsActing(true);
+    setActionRaw("Running compare eval...");
+    setCompareResult(null);
+    try {
+      const payload = await requestJson<CompareResponse>("/api/eval/compare", {
+        method: "POST",
+        body: JSON.stringify({
+          runtimes: runtime ? [runtime] : undefined,
+        }),
+      });
+      setCompareResult(payload);
       setActionRaw(pretty(payload));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -363,11 +410,69 @@ export default function App() {
                   Run Eval
                 </button>
               </div>
+              <div className="control-card">
+                <h3>Compare</h3>
+                <p>Benchmark multiple retrieval setups and surface a simple leaderboard.</p>
+                <button className="action" onClick={handleCompareEval} disabled={isActing}>
+                  Run Compare
+                </button>
+              </div>
             </div>
             <details className="debug-panel side-debug">
               <summary>Raw action payload</summary>
               <pre className="output">{actionRaw}</pre>
             </details>
+          </article>
+
+          <article className="panel panel-side">
+            <div className="panel-head compact">
+              <div>
+                <h2>Compare leaderboard</h2>
+                <p className="panel-subtle">Quick retrieval experiment view for chunk strategies and backends.</p>
+              </div>
+              <span className="meta-pill">{compareResult?.leaderboard.length ?? 0}</span>
+            </div>
+            {compareResult ? (
+              <div className="compare-board">
+                {compareResult.leaderboard.length > 0 ? (
+                  compareResult.leaderboard.map((row, index) => (
+                    <article key={row.label} className="compare-card">
+                      <div className="compare-head">
+                        <div>
+                          <span className="citation-index">#{index + 1}</span>
+                          <strong>{row.label}</strong>
+                        </div>
+                        <span className="meta-pill">{row.avg_response_time_ms.toFixed(2)} ms</span>
+                      </div>
+                      <div className="compare-metrics">
+                        <span>retrieval span {row.retrieval_span_hit_rate}</span>
+                        <span>retrieval source {row.retrieval_source_hit_rate}</span>
+                        <span>citation span {row.citation_span_hit_rate}</span>
+                        <span>answer hit {row.answer_keyword_hit_rate}</span>
+                      </div>
+                    </article>
+                  ))
+                ) : (
+                  <p className="panel-subtle">No successful compare runs yet.</p>
+                )}
+
+                <div className="compare-status-list">
+                  {compareResult.runs
+                    .filter((run) => run.status !== "ok")
+                    .map((run) => (
+                      <article key={run.label} className="compare-status-card">
+                        <strong>{run.label}</strong>
+                        <span className={`status-chip ${run.status === "skipped" ? "warn" : "warn"}`}>
+                          {run.status}
+                        </span>
+                        <p>{run.reason ?? run.error ?? "No details"}</p>
+                      </article>
+                    ))}
+                </div>
+              </div>
+            ) : (
+              <p className="panel-subtle">Run Compare to generate a retrieval leaderboard.</p>
+            )}
           </article>
 
           <article className="panel panel-side">

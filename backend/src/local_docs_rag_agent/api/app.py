@@ -14,10 +14,12 @@ from local_docs_rag_agent.api.schemas import (
     AppInfoResponse,
     AskRequest,
     DocumentsResponse,
+    EvalCompareRequest,
     EvalRequest,
     HealthResponse,
     IngestResponse,
 )
+from local_docs_rag_agent.evals.comparison import run_eval_matrix
 from local_docs_rag_agent.config import AppConfig
 from local_docs_rag_agent.evals.harness import run_eval
 from local_docs_rag_agent.presenters import serialize_answer, serialize_eval_summary
@@ -111,6 +113,16 @@ def create_app() -> FastAPI:
         ensure_index(config)
         results = run_eval(config)
         return serialize_eval_summary(results, runtime=config.agent_runtime, config=config)
+
+    @app.post("/api/eval/compare")
+    def compare_eval(payload: EvalCompareRequest) -> dict[str, object]:
+        config = AppConfig.from_env()
+        return run_eval_matrix(
+            config=config,
+            runtimes=payload.runtimes or [config.agent_runtime],
+            chunk_strategies=payload.chunk_strategies or ["fixed", "paragraph", "markdown"],
+            vector_backends=payload.vector_backends or (["local", "qdrant"] if config.qdrant_url else ["local"]),
+        )
 
     @app.get("/", response_model=None)
     def index() -> FileResponse | JSONResponse:
