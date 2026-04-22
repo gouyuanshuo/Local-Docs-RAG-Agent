@@ -228,6 +228,16 @@ If fallback behavior is invisible, eval results and optimization decisions becom
 
 Retrieval engineering is one of the project’s main sources of portfolio value.
 
+### Current status
+
+- configurable chunk strategies are implemented:
+  - `fixed`
+  - `paragraph`
+  - `markdown`
+- document filtering and retrieval-config snapshots are implemented
+- eval comparison matrix is implemented in CLI
+- next step: make `local vs qdrant` comparison smoother and expose the comparison result more clearly
+
 ---
 
 ## Phase D: Qdrant engineering

@@ -26,6 +26,18 @@ def run_eval_matrix(
                     chunk_strategy=chunk_strategy,
                 )
                 run_label = f"{runtime}:{vector_backend}:{chunk_strategy}"
+                skip_reason = _skip_reason(run_config)
+                if skip_reason is not None:
+                    runs.append(
+                        {
+                            "label": run_label,
+                            "status": "skipped",
+                            "reason": skip_reason,
+                            "retrieval_config": _retrieval_config_snapshot(run_config),
+                            "runtime": run_config.agent_runtime,
+                        }
+                    )
+                    continue
 
                 try:
                     ingest_documents(run_config)
@@ -39,20 +51,24 @@ def run_eval_matrix(
                         }
                     )
                 except Exception as exc:
+                    skip_reason = _qdrant_runtime_skip_reason(run_config, exc)
+                    if skip_reason is not None:
+                        runs.append(
+                            {
+                                "label": run_label,
+                                "status": "skipped",
+                                "reason": skip_reason,
+                                "retrieval_config": _retrieval_config_snapshot(run_config),
+                                "runtime": run_config.agent_runtime,
+                            }
+                        )
+                        continue
                     runs.append(
                         {
                             "label": run_label,
                             "status": "error",
                             "error": f"{type(exc).__name__}: {exc}",
-                            "retrieval_config": {
-                                "vector_backend": run_config.vector_backend,
-                                "chunk_strategy": run_config.chunk_strategy,
-                                "chunk_size": run_config.chunk_size,
-                                "chunk_overlap": run_config.chunk_overlap,
-                                "top_k": run_config.top_k,
-                                "docs_dir": str(run_config.docs_dir),
-                                "docs_exclude_patterns": list(run_config.docs_exclude_patterns),
-                            },
+                            "retrieval_config": _retrieval_config_snapshot(run_config),
                             "runtime": run_config.agent_runtime,
                         }
                     )
@@ -75,6 +91,39 @@ def _dump_json(payload: dict[str, object]) -> str:
     import json
 
     return json.dumps(payload, ensure_ascii=True, indent=2)
+
+
+def _retrieval_config_snapshot(config: AppConfig) -> dict[str, object]:
+    return {
+        "vector_backend": config.vector_backend,
+        "chunk_strategy": config.chunk_strategy,
+        "chunk_size": config.chunk_size,
+        "chunk_overlap": config.chunk_overlap,
+        "top_k": config.top_k,
+        "docs_dir": str(config.docs_dir),
+        "docs_exclude_patterns": list(config.docs_exclude_patterns),
+    }
+
+
+def _skip_reason(config: AppConfig) -> str | None:
+    if config.vector_backend == "qdrant" and not config.qdrant_url:
+        return "missing_qdrant_url"
+    return None
+
+
+def _qdrant_runtime_skip_reason(config: AppConfig, exc: Exception) -> str | None:
+    if config.vector_backend != "qdrant":
+        return None
+
+    error_name = type(exc).__name__
+    error_text = f"{error_name}: {exc}"
+    if error_name in {"ResponseHandlingException", "UnexpectedResponse"}:
+        return "qdrant_unreachable"
+    if "Connection refused" in error_text or "WinError 10061" in error_text:
+        return "qdrant_unreachable"
+    if "qdrant-client is not installed" in error_text:
+        return "missing_qdrant_client"
+    return None
 
 
 def _build_leaderboard(runs: list[dict[str, object]]) -> list[dict[str, object]]:
