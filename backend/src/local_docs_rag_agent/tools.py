@@ -7,7 +7,7 @@ from local_docs_rag_agent.rag.ingest import build_store, collect_document_paths
 
 
 def list_documents(config: AppConfig) -> list[str]:
-    return [path.as_posix() for path in collect_document_paths(config.docs_dir)]
+    return [path.as_posix() for path in collect_document_paths(config.docs_dir, config.docs_exclude_patterns)]
 
 
 def search_documents(config: AppConfig, query: str, top_k: int | None = None) -> list[dict[str, str | float]]:

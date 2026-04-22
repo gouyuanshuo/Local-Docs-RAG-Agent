@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from fnmatch import fnmatch
 from pathlib import Path
 
 from local_docs_rag_agent.config import AppConfig
@@ -26,15 +27,26 @@ def build_store(config: AppConfig) -> ChunkStore:
     return LocalJsonlChunkStore(config.index_path, embedding_provider=embedding_provider)
 
 
-def collect_document_paths(docs_dir: Path) -> list[Path]:
+def collect_document_paths(docs_dir: Path, exclude_patterns: list[str] | None = None) -> list[Path]:
+    patterns = exclude_patterns or []
     return sorted(
-        path for path in docs_dir.rglob("*") if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS
+        path
+        for path in docs_dir.rglob("*")
+        if path.is_file()
+        and path.suffix.lower() in SUPPORTED_EXTENSIONS
+        and not _is_excluded(path, docs_dir, patterns)
     )
+
+
+def _is_excluded(path: Path, docs_dir: Path, exclude_patterns: list[str]) -> bool:
+    relative_path = path.relative_to(docs_dir).as_posix()
+    full_path = path.as_posix()
+    return any(fnmatch(relative_path, pattern) or fnmatch(full_path, pattern) for pattern in exclude_patterns)
 
 
 def ingest_documents(config: AppConfig) -> list[DocumentChunk]:
     chunks: list[DocumentChunk] = []
-    for path in collect_document_paths(config.docs_dir):
+    for path in collect_document_paths(config.docs_dir, config.docs_exclude_patterns):
         text = path.read_text(encoding="utf-8")
         chunks.extend(
             chunk_text(

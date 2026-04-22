@@ -72,6 +72,7 @@ def create_app() -> FastAPI:
             runtime=config.agent_runtime,
             vector_backend=config.vector_backend,
             docs_dir=str(config.docs_dir),
+            docs_exclude_patterns=config.docs_exclude_patterns,
             docs_count=len(documents),
             llm_provider=config.llm_provider,
             llm_model=config.llm_model,
@@ -109,7 +110,7 @@ def create_app() -> FastAPI:
         config = AppConfig.from_env().with_runtime(payload.runtime)
         ensure_index(config)
         results = run_eval(config)
-        return serialize_eval_summary(results, runtime=config.agent_runtime)
+        return serialize_eval_summary(results, runtime=config.agent_runtime, config=config)
 
     @app.get("/", response_model=None)
     def index() -> FileResponse | JSONResponse:

@@ -25,6 +25,7 @@ type AppInfo = {
   runtime: string;
   vector_backend: string;
   docs_dir: string;
+  docs_exclude_patterns: string[];
   docs_count: number;
   llm_provider: string;
   llm_model: string;
@@ -395,6 +396,14 @@ export default function App() {
                   {info
                     ? `${info.chunk_strategy} / ${info.chunk_size} size / ${info.chunk_overlap} overlap`
                     : "loading..."}
+                </dd>
+              </div>
+              <div>
+                <dt>Exclude patterns</dt>
+                <dd>
+                  {info?.docs_exclude_patterns.length
+                    ? info.docs_exclude_patterns.join(", ")
+                    : "none"}
                 </dd>
               </div>
               <div>

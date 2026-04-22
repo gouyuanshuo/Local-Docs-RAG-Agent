@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from local_docs_rag_agent.config import AppConfig
 from local_docs_rag_agent.models import AgentAnswer, EvalResult
 
 
@@ -44,10 +45,28 @@ def _avg(results: list[EvalResult], attr: str, precision: int = 4) -> float:
     return round(sum(getattr(result, attr) for result in results) / len(results), precision)
 
 
-def serialize_eval_summary(results: list[EvalResult], runtime: str) -> dict[str, object]:
+def serialize_eval_summary(
+    results: list[EvalResult],
+    runtime: str,
+    config: AppConfig | None = None,
+) -> dict[str, object]:
+    retrieval_config = (
+        {
+            "vector_backend": config.vector_backend,
+            "chunk_strategy": config.chunk_strategy,
+            "chunk_size": config.chunk_size,
+            "chunk_overlap": config.chunk_overlap,
+            "top_k": config.top_k,
+            "docs_dir": str(config.docs_dir),
+            "docs_exclude_patterns": list(config.docs_exclude_patterns),
+        }
+        if config
+        else None
+    )
     return {
         "num_cases": len(results),
         "runtime": runtime,
+        "retrieval_config": retrieval_config,
         "answer_keyword_hit_rate": _avg(results, "answer_keyword_hit_rate"),
         "retrieval_source_hit_rate": _avg(results, "retrieval_source_hit_rate"),
         "retrieval_span_hit_rate": _avg(results, "retrieval_span_hit_rate"),

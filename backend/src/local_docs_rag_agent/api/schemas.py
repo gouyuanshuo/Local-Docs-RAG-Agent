@@ -27,6 +27,7 @@ class AppInfoResponse(BaseModel):
     runtime: str
     vector_backend: str
     docs_dir: str
+    docs_exclude_patterns: list[str]
     docs_count: int
     llm_provider: str
     llm_model: str

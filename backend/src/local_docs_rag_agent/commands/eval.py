@@ -12,5 +12,5 @@ def run_eval_command(config: AppConfig, runtime: str | None = None) -> None:
     config = config.with_runtime(runtime)
     ensure_index(config)
     results = run_eval(config)
-    summary = serialize_eval_summary(results, runtime=config.agent_runtime)
+    summary = serialize_eval_summary(results, runtime=config.agent_runtime, config=config)
     print(json.dumps(summary, ensure_ascii=True, indent=2))

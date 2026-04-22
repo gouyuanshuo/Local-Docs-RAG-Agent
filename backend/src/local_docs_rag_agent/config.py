@@ -22,6 +22,11 @@ def _optional_int_env(name: str) -> int | None:
     return int(value) if value else None
 
 
+def _list_env(name: str) -> list[str]:
+    value = os.getenv(name, "")
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
 def _default_embedding_model(provider: str) -> str:
     if provider == "qwen":
         return "text-embedding-v4"
@@ -43,6 +48,7 @@ class AppConfig:
     openai_api_key: str | None
     openai_model: str
     docs_dir: Path
+    docs_exclude_patterns: list[str]
     index_path: Path
     eval_path: Path
     agent_runtime: str
@@ -77,6 +83,7 @@ class AppConfig:
             openai_api_key=os.getenv("OPENAI_API_KEY"),
             openai_model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
             docs_dir=Path(os.getenv("DOCS_DIR", "docs")),
+            docs_exclude_patterns=_list_env("DOCS_EXCLUDE_PATTERNS"),
             index_path=Path(os.getenv("INDEX_PATH", "data/index/chunks.jsonl")),
             eval_path=Path(os.getenv("EVAL_PATH", "data/evals/sample_eval.jsonl")),
             agent_runtime=os.getenv("AGENT_RUNTIME", "basic").strip().lower(),
@@ -108,6 +115,7 @@ class AppConfig:
             openai_api_key=self.openai_api_key,
             openai_model=self.openai_model,
             docs_dir=self.docs_dir,
+            docs_exclude_patterns=list(self.docs_exclude_patterns),
             index_path=self.index_path,
             eval_path=self.eval_path,
             agent_runtime=runtime.strip().lower(),
