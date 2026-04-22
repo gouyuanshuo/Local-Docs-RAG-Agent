@@ -33,6 +33,7 @@ class AppInfoResponse(BaseModel):
     embedding_provider: str
     embedding_model: str
     top_k: int
+    chunk_strategy: str
     chunk_size: int
     chunk_overlap: int
     qdrant_collection: str

@@ -31,6 +31,7 @@ type AppInfo = {
   embedding_provider: string;
   embedding_model: string;
   top_k: number;
+  chunk_strategy: string;
   chunk_size: number;
   chunk_overlap: number;
   qdrant_collection: string;
@@ -278,7 +279,7 @@ export default function App() {
 
                 <div className="diagnostics-strip">
                   <span className={`status-chip ${askResult.diagnostics.actual_runtime !== askResult.diagnostics.requested_runtime ? "warn" : ""}`}>
-                    requested {askResult.diagnostics.requested_runtime} → actual {askResult.diagnostics.actual_runtime}
+                    requested {askResult.diagnostics.requested_runtime} {"->"} actual {askResult.diagnostics.actual_runtime}
                   </span>
                   <span className={`status-chip ${askResult.diagnostics.chat_provider.mode !== "live" ? "warn" : "ok"}`}>
                     chat {providerLabel(askResult.diagnostics.chat_provider)}
@@ -391,7 +392,9 @@ export default function App() {
               <div>
                 <dt>Chunking</dt>
                 <dd>
-                  {info ? `${info.chunk_size} size / ${info.chunk_overlap} overlap` : "loading..."}
+                  {info
+                    ? `${info.chunk_strategy} / ${info.chunk_size} size / ${info.chunk_overlap} overlap`
+                    : "loading..."}
                 </dd>
               </div>
               <div>

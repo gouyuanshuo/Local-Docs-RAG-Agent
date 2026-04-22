@@ -59,7 +59,8 @@ class LocalJsonlChunkStore:
         for chunk in self.load():
             dense_score = _cosine_similarity(query_embedding, chunk.embedding or [])
             lexical_score = _lexical_overlap_score(query_terms, _tokenize(chunk.text))
-            score = max(dense_score, lexical_score, (dense_score + lexical_score) / 2)
+            metadata_score = _metadata_overlap_score(query_terms, chunk)
+            score = _hybrid_score(dense_score, lexical_score, metadata_score)
             if score > 0:
                 hits.append(
                     RetrievalHit(
@@ -186,6 +187,22 @@ def _lexical_overlap_score(left: set[str], right: set[str]) -> float:
         return 0.0
     overlap = len(left & right)
     return overlap / max(len(left), 1)
+
+
+def _metadata_overlap_score(query_terms: set[str], chunk: DocumentChunk) -> float:
+    metadata_terms = _tokenize(chunk.title)
+    section_title = chunk.metadata.get("section_title")
+    source_title = chunk.metadata.get("source_title")
+    if isinstance(section_title, str):
+        metadata_terms |= _tokenize(section_title)
+    if isinstance(source_title, str):
+        metadata_terms |= _tokenize(source_title)
+    return _lexical_overlap_score(query_terms, metadata_terms)
+
+
+def _hybrid_score(dense_score: float, lexical_score: float, metadata_score: float) -> float:
+    weighted_mix = (dense_score * 0.65) + (lexical_score * 0.25) + (metadata_score * 0.10)
+    return max(dense_score, lexical_score, weighted_mix)
 
 
 def _build_citation_span(chunk: DocumentChunk) -> CitationSpan:

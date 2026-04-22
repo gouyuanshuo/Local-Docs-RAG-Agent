@@ -40,6 +40,7 @@ def ingest_documents(config: AppConfig) -> list[DocumentChunk]:
             chunk_text(
                 source_path=path,
                 text=text,
+                chunk_strategy=config.chunk_strategy,
                 chunk_size=config.chunk_size,
                 chunk_overlap=config.chunk_overlap,
             )

@@ -78,6 +78,7 @@ def create_app() -> FastAPI:
             embedding_provider=config.embedding_provider,
             embedding_model=config.embedding_model,
             top_k=config.top_k,
+            chunk_strategy=config.chunk_strategy,
             chunk_size=config.chunk_size,
             chunk_overlap=config.chunk_overlap,
             qdrant_collection=config.qdrant_collection,

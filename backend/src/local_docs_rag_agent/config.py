@@ -52,6 +52,7 @@ class AppConfig:
     qdrant_api_key: str | None
     qdrant_collection: str
     top_k: int
+    chunk_strategy: str
     chunk_size: int
     chunk_overlap: int
 
@@ -85,6 +86,7 @@ class AppConfig:
             qdrant_api_key=os.getenv("QDRANT_API_KEY"),
             qdrant_collection=os.getenv("QDRANT_COLLECTION", "local-docs-rag"),
             top_k=_int_env("TOP_K", 4),
+            chunk_strategy=os.getenv("CHUNK_STRATEGY", "markdown").strip().lower(),
             chunk_size=_int_env("CHUNK_SIZE", 800),
             chunk_overlap=_int_env("CHUNK_OVERLAP", 120),
         )
@@ -115,6 +117,7 @@ class AppConfig:
             qdrant_api_key=self.qdrant_api_key,
             qdrant_collection=self.qdrant_collection,
             top_k=self.top_k,
+            chunk_strategy=self.chunk_strategy,
             chunk_size=self.chunk_size,
             chunk_overlap=self.chunk_overlap,
         )
