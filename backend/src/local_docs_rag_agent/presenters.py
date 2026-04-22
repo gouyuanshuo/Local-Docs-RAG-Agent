@@ -23,38 +23,43 @@ def serialize_answer(answer: AgentAnswer, runtime: str) -> dict[str, object]:
     }
 
 
+def _avg(results: list[EvalResult], attr: str, precision: int = 4) -> float:
+    if not results:
+        return 0.0
+    return round(sum(getattr(result, attr) for result in results) / len(results), precision)
+
+
 def serialize_eval_summary(results: list[EvalResult], runtime: str) -> dict[str, object]:
     return {
         "num_cases": len(results),
         "runtime": runtime,
-        "avg_keyword_hit_rate": round(
-            sum(result.keyword_hit_rate for result in results) / len(results), 4
-        )
-        if results
-        else 0.0,
-        "source_hit_rate": round(
-            sum(1 for result in results if result.source_hit) / len(results), 4
-        )
-        if results
-        else 0.0,
-        "avg_citation_span_hit_rate": round(
-            sum(result.citation_span_hit_rate for result in results) / len(results), 4
-        )
-        if results
-        else 0.0,
-        "avg_response_time_ms": round(
-            sum(result.response_time_ms for result in results) / len(results), 2
-        )
-        if results
-        else 0.0,
+        "answer_keyword_hit_rate": _avg(results, "answer_keyword_hit_rate"),
+        "retrieval_source_hit_rate": _avg(results, "retrieval_source_hit_rate"),
+        "retrieval_span_hit_rate": _avg(results, "retrieval_span_hit_rate"),
+        "citation_source_hit_rate": _avg(results, "citation_source_hit_rate"),
+        "citation_span_hit_rate": _avg(results, "citation_span_hit_rate"),
+        "avg_response_time_ms": _avg(results, "response_time_ms", precision=2),
+        # Backward-compatible aliases for older UI/consumers.
+        "avg_keyword_hit_rate": _avg(results, "answer_keyword_hit_rate"),
+        "source_hit_rate": _avg(results, "citation_source_hit_rate"),
+        "avg_citation_span_hit_rate": _avg(results, "citation_span_hit_rate"),
         "results": [
             {
                 "question": result.question,
-                "keyword_hit_rate": result.keyword_hit_rate,
-                "source_hit": result.source_hit,
+                "answer": result.answer,
+                "citations": result.citations,
+                "retrieved_sources": result.retrieved_sources,
+                "answer_keyword_hit_rate": result.answer_keyword_hit_rate,
+                "retrieval_source_hit_rate": result.retrieval_source_hit_rate,
+                "retrieval_span_hit_rate": result.retrieval_span_hit_rate,
+                "citation_source_hit_rate": result.citation_source_hit_rate,
                 "citation_span_hit_rate": result.citation_span_hit_rate,
                 "response_time_ms": result.response_time_ms,
-                "citations": result.citations,
+                "expected_source_paths": result.expected_source_paths,
+                "expected_answer_keywords": result.expected_answer_keywords,
+                "expected_span_keywords": result.expected_span_keywords,
+                "expected_retrieval_keywords": result.expected_retrieval_keywords,
+                "failure_reasons": result.failure_reasons,
             }
             for result in results
         ],
