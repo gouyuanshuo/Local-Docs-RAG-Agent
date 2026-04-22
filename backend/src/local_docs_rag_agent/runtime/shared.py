@@ -3,13 +3,20 @@ from __future__ import annotations
 from textwrap import dedent
 
 from local_docs_rag_agent.config import AppConfig
-from local_docs_rag_agent.models import AgentAnswer, CitationSpan, RetrievalHit
+from local_docs_rag_agent.models import (
+    AgentAnswer,
+    AnswerDiagnostics,
+    CitationSpan,
+    ProviderStatus,
+    RetrievalHit,
+)
 from local_docs_rag_agent.rag.ingest import build_store
 
 
-def retrieve_hits(config: AppConfig, question: str) -> list[RetrievalHit]:
+def retrieve_hits(config: AppConfig, question: str) -> tuple[list[RetrievalHit], ProviderStatus]:
     store = build_store(config)
-    return store.search(query=question, top_k=config.top_k)
+    hits = store.search(query=question, top_k=config.top_k)
+    return hits, store.embedding_status
 
 
 def build_answer_context(hits: list[RetrievalHit]) -> str:
@@ -81,11 +88,17 @@ def merge_hits(existing: list[RetrievalHit], new_hits: list[RetrievalHit]) -> No
         existing.append(hit)
 
 
-def build_agent_answer(question: str, answer: str, hits: list[RetrievalHit]) -> AgentAnswer:
+def build_agent_answer(
+    question: str,
+    answer: str,
+    hits: list[RetrievalHit],
+    diagnostics: AnswerDiagnostics,
+) -> AgentAnswer:
     return AgentAnswer(
         question=question,
         answer=answer,
         citations=collect_citations(hits),
         citation_spans=collect_citation_spans(hits),
         retrieved_chunks=hits,
+        diagnostics=diagnostics,
     )

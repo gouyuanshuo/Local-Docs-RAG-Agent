@@ -7,7 +7,7 @@ from uuid import uuid5, NAMESPACE_URL
 from pathlib import Path
 from typing import Protocol
 
-from local_docs_rag_agent.models import CitationSpan, DocumentChunk, RetrievalHit
+from local_docs_rag_agent.models import CitationSpan, DocumentChunk, ProviderStatus, RetrievalHit
 from local_docs_rag_agent.rag.embeddings import EmbeddingProvider
 
 
@@ -22,6 +22,10 @@ class ChunkStore(Protocol):
         raise NotImplementedError
 
     def search(self, query: str, top_k: int) -> list[RetrievalHit]:
+        raise NotImplementedError
+
+    @property
+    def embedding_status(self) -> ProviderStatus:
         raise NotImplementedError
 
 
@@ -66,6 +70,10 @@ class LocalJsonlChunkStore:
                 )
         hits.sort(key=lambda item: item.score, reverse=True)
         return hits[:top_k]
+
+    @property
+    def embedding_status(self) -> ProviderStatus:
+        return self._embedding_provider.status
 
 
 class QdrantChunkStore:
@@ -152,6 +160,10 @@ class QdrantChunkStore:
                 )
             )
         return hits
+
+    @property
+    def embedding_status(self) -> ProviderStatus:
+        return self._embedding_provider.status
 
 
 def _cosine_similarity(left: list[float], right: list[float]) -> float:

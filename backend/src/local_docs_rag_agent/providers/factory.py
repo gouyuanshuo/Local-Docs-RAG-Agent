@@ -22,4 +22,5 @@ def build_embedding_provider(config: AppConfig) -> EmbeddingProvider:
         base_url=config.embedding_base_url,
         model=config.embedding_model,
         dimensions=config.embedding_dimensions,
+        provider_label=config.embedding_provider,
     )

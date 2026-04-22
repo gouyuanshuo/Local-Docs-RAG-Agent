@@ -101,7 +101,7 @@ def create_app() -> FastAPI:
         ensure_index(config)
         agent = LocalDocsAgent(config)
         answer = agent.answer(payload.question)
-        return serialize_answer(answer, runtime=config.agent_runtime)
+        return serialize_answer(answer, runtime=answer.diagnostics.actual_runtime)
 
     @app.post("/api/eval")
     def evaluate(payload: EvalRequest) -> dict[str, object]:

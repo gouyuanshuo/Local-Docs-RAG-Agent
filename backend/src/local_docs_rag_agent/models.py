@@ -42,12 +42,29 @@ class RetrievalHit:
 
 
 @dataclass(slots=True)
+class ProviderStatus:
+    provider: str
+    mode: str
+    reason: str | None = None
+
+
+@dataclass(slots=True)
+class AnswerDiagnostics:
+    requested_runtime: str
+    actual_runtime: str
+    vector_backend: str
+    chat_provider: ProviderStatus
+    embedding_provider: ProviderStatus
+
+
+@dataclass(slots=True)
 class AgentAnswer:
     question: str
     answer: str
     citations: list[str]
     citation_spans: list[CitationSpan]
     retrieved_chunks: list[RetrievalHit]
+    diagnostics: AnswerDiagnostics
 
 
 @dataclass(slots=True)

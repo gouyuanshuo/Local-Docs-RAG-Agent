@@ -13,5 +13,5 @@ def run_ask(config: AppConfig, question: str, runtime: str | None = None) -> Non
     ensure_index(config)
     agent = LocalDocsAgent(config)
     answer = agent.answer(question)
-    payload = serialize_answer(answer, runtime=config.agent_runtime)
+    payload = serialize_answer(answer, runtime=answer.diagnostics.actual_runtime)
     print(json.dumps(payload, ensure_ascii=True, indent=2))

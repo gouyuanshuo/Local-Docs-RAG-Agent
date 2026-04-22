@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from textwrap import dedent
 
+from local_docs_rag_agent.models import ProviderStatus
 from local_docs_rag_agent.providers.base import ChatProvider
 
 
@@ -17,7 +18,14 @@ class OpenAICompatibleChatProvider(ChatProvider):
         self._model = model
         self._api_style = api_style
         self._provider_label = provider_label
+        self._status = ProviderStatus(provider=provider_label.lower(), mode="ready")
         self._client = self._build_client(api_key, base_url) if api_key else None
+        if not api_key:
+            self._status = ProviderStatus(
+                provider=provider_label.lower(),
+                mode="fallback",
+                reason="missing_api_key",
+            )
 
     def answer(self, question: str, context: str) -> str:
         if not self._client:
@@ -56,21 +64,48 @@ class OpenAICompatibleChatProvider(ChatProvider):
                     ],
                 )
                 message = response.choices[0].message.content
-                return (
-                    message.strip()
-                    if message
-                    else self._fallback_answer(question=question, context=context)
+                if message:
+                    self._status = ProviderStatus(provider=self._provider_label.lower(), mode="live")
+                    return message.strip()
+                self._status = ProviderStatus(
+                    provider=self._provider_label.lower(),
+                    mode="fallback",
+                    reason="empty_provider_output",
                 )
+                return self._fallback_answer(question=question, context=context)
 
             response = self._client.responses.create(model=self._model, input=prompt)
-            return response.output_text.strip()
-        except Exception:
+            output_text = response.output_text.strip()
+            if output_text:
+                self._status = ProviderStatus(provider=self._provider_label.lower(), mode="live")
+                return output_text
+            self._status = ProviderStatus(
+                provider=self._provider_label.lower(),
+                mode="fallback",
+                reason="empty_provider_output",
+            )
             return self._fallback_answer(question=question, context=context)
+        except Exception as exc:
+            self._status = ProviderStatus(
+                provider=self._provider_label.lower(),
+                mode="fallback",
+                reason=f"provider_error:{exc.__class__.__name__}",
+            )
+            return self._fallback_answer(question=question, context=context)
+
+    @property
+    def status(self) -> ProviderStatus:
+        return self._status
 
     def _build_client(self, api_key: str, base_url: str | None):
         try:
             from openai import OpenAI
         except Exception:
+            self._status = ProviderStatus(
+                provider=self._provider_label.lower(),
+                mode="fallback",
+                reason="openai_client_unavailable",
+            )
             return None
         client_kwargs = {"api_key": api_key}
         if base_url:

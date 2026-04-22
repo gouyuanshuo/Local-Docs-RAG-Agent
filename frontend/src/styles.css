@@ -279,6 +279,51 @@ select {
   margin-bottom: 16px;
 }
 
+.diagnostics-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: #ece3d7;
+}
+
+.status-chip.ok {
+  border-color: rgba(117, 220, 169, 0.25);
+  background: rgba(117, 220, 169, 0.12);
+  color: #d6ffe8;
+}
+
+.status-chip.warn {
+  border-color: rgba(242, 138, 94, 0.24);
+  background: rgba(242, 138, 94, 0.14);
+  color: #ffd9c6;
+}
+
+.reason-list {
+  margin-bottom: 14px;
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.reason-list p {
+  margin-bottom: 8px;
+}
+
+.reason-list p:last-child {
+  margin-bottom: 0;
+}
+
 .source-chip {
   display: inline-flex;
   align-items: center;

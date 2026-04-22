@@ -8,6 +8,7 @@ type AskResponse = {
   citations: string[];
   citation_spans: CitationSpan[];
   runtime: string;
+  diagnostics: AnswerDiagnostics;
 };
 
 type CitationSpan = {
@@ -43,6 +44,20 @@ type Health = {
 type DocumentsResponse = {
   count: number;
   documents: string[];
+};
+
+type ProviderStatus = {
+  provider: string;
+  mode: string;
+  reason: string | null;
+};
+
+type AnswerDiagnostics = {
+  requested_runtime: string;
+  actual_runtime: string;
+  vector_backend: string;
+  chat_provider: ProviderStatus;
+  embedding_provider: ProviderStatus;
 };
 
 const apiBaseUrl =
@@ -89,6 +104,10 @@ function fileLabel(path: string): string {
 function excerpt(text: string, limit = 220): string {
   if (text.length <= limit) return text;
   return `${text.slice(0, limit).trimEnd()}...`;
+}
+
+function providerLabel(status: ProviderStatus): string {
+  return `${status.provider} · ${status.mode}`;
 }
 
 export default function App() {
@@ -252,10 +271,37 @@ export default function App() {
                     <p className="panel-subtle">Model output with source-aware retrieval context.</p>
                   </div>
                   <div className="meta-row">
-                    <span className="meta-pill">Runtime: {askResult.runtime}</span>
+                    <span className="meta-pill">Runtime: {askResult.diagnostics.actual_runtime}</span>
                     <span className="meta-pill">{askResult.citation_spans.length} citation spans</span>
                   </div>
                 </div>
+
+                <div className="diagnostics-strip">
+                  <span className={`status-chip ${askResult.diagnostics.actual_runtime !== askResult.diagnostics.requested_runtime ? "warn" : ""}`}>
+                    requested {askResult.diagnostics.requested_runtime} → actual {askResult.diagnostics.actual_runtime}
+                  </span>
+                  <span className={`status-chip ${askResult.diagnostics.chat_provider.mode !== "live" ? "warn" : "ok"}`}>
+                    chat {providerLabel(askResult.diagnostics.chat_provider)}
+                  </span>
+                  <span className={`status-chip ${askResult.diagnostics.embedding_provider.mode !== "live" ? "warn" : "ok"}`}>
+                    embedding {providerLabel(askResult.diagnostics.embedding_provider)}
+                  </span>
+                </div>
+
+                {(askResult.diagnostics.chat_provider.reason || askResult.diagnostics.embedding_provider.reason) ? (
+                  <div className="reason-list">
+                    {askResult.diagnostics.chat_provider.reason ? (
+                      <p>
+                        <strong>Chat status:</strong> {askResult.diagnostics.chat_provider.reason}
+                      </p>
+                    ) : null}
+                    {askResult.diagnostics.embedding_provider.reason ? (
+                      <p>
+                        <strong>Embedding status:</strong> {askResult.diagnostics.embedding_provider.reason}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 <p className="answer-text">{askResult.answer}</p>
 

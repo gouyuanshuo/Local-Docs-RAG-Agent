@@ -20,6 +20,21 @@ def serialize_answer(answer: AgentAnswer, runtime: str) -> dict[str, object]:
             for span in answer.citation_spans
         ],
         "runtime": runtime,
+        "diagnostics": {
+            "requested_runtime": answer.diagnostics.requested_runtime,
+            "actual_runtime": answer.diagnostics.actual_runtime,
+            "vector_backend": answer.diagnostics.vector_backend,
+            "chat_provider": {
+                "provider": answer.diagnostics.chat_provider.provider,
+                "mode": answer.diagnostics.chat_provider.mode,
+                "reason": answer.diagnostics.chat_provider.reason,
+            },
+            "embedding_provider": {
+                "provider": answer.diagnostics.embedding_provider.provider,
+                "mode": answer.diagnostics.embedding_provider.mode,
+                "reason": answer.diagnostics.embedding_provider.reason,
+            },
+        },
     }
 
 

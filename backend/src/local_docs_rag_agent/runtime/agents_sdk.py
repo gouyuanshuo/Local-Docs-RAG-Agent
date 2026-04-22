@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from textwrap import dedent
 
 from local_docs_rag_agent.config import AppConfig
-from local_docs_rag_agent.models import AgentAnswer, RetrievalHit
+from local_docs_rag_agent.models import AgentAnswer, AnswerDiagnostics, ProviderStatus, RetrievalHit
 from local_docs_rag_agent.runtime.basic import answer_with_basic_runtime
 from local_docs_rag_agent.runtime.shared import (
     build_agent_answer,
@@ -19,11 +19,20 @@ from local_docs_rag_agent.tools import get_system_time, list_documents
 class AgentRuntimeContext:
     config: AppConfig
     retrieved_hits: list[RetrievalHit] = field(default_factory=list)
+    embedding_status: ProviderStatus = field(
+        default_factory=lambda: ProviderStatus(provider="embedding", mode="unknown", reason="search_not_run")
+    )
 
 
 def answer_with_agents_sdk(config: AppConfig, question: str) -> AgentAnswer:
     if not _supports_agents_sdk() or not config.llm_api_key:
-        return answer_with_basic_runtime(config, question)
+        fallback_reason = "agents_sdk_unavailable" if not _supports_agents_sdk() else "missing_llm_api_key"
+        return answer_with_basic_runtime(
+            config,
+            question,
+            requested_runtime="agents_sdk",
+            runtime_reason=f"runtime_fallback:{fallback_reason}",
+        )
 
     from agents import Agent, RunContextWrapper, Runner, function_tool, set_default_openai_client
     from openai import AsyncOpenAI
@@ -53,7 +62,8 @@ def answer_with_agents_sdk(config: AppConfig, question: str) -> AgentAnswer:
         top_k: int | None = None,
     ) -> str:
         """Search local documents for relevant evidence before answering a docs question."""
-        hits = retrieve_hits(ctx.context.config, query)
+        hits, embedding_status = retrieve_hits(ctx.context.config, query)
+        ctx.context.embedding_status = embedding_status
         if top_k is not None:
             hits = hits[:top_k]
         merge_hits(ctx.context.retrieved_hits, hits)
@@ -81,17 +91,42 @@ def answer_with_agents_sdk(config: AppConfig, question: str) -> AgentAnswer:
     )
 
     run_context = AgentRuntimeContext(config=config)
-    result = Runner.run_sync(
-        agent,
-        question,
-        context=run_context,
-        max_turns=config.agents_max_turns,
-    )
+    try:
+        result = Runner.run_sync(
+            agent,
+            question,
+            context=run_context,
+            max_turns=config.agents_max_turns,
+        )
+    except Exception as exc:
+        return answer_with_basic_runtime(
+            config,
+            question,
+            requested_runtime="agents_sdk",
+            runtime_reason=f"runtime_fallback:agents_sdk_error:{exc.__class__.__name__}",
+        )
     final_output = str(result.final_output).strip()
     if not final_output:
-        return answer_with_basic_runtime(config, question)
+        return answer_with_basic_runtime(
+            config,
+            question,
+            requested_runtime="agents_sdk",
+            runtime_reason="runtime_fallback:empty_agent_output",
+        )
 
-    return build_agent_answer(question=question, answer=final_output, hits=run_context.retrieved_hits)
+    diagnostics = AnswerDiagnostics(
+        requested_runtime="agents_sdk",
+        actual_runtime="agents_sdk",
+        vector_backend=config.vector_backend,
+        chat_provider=ProviderStatus(provider=config.llm_provider, mode="live"),
+        embedding_provider=run_context.embedding_status,
+    )
+    return build_agent_answer(
+        question=question,
+        answer=final_output,
+        hits=run_context.retrieved_hits,
+        diagnostics=diagnostics,
+    )
 
 
 def _supports_agents_sdk() -> bool:

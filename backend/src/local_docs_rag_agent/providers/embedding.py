@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import math
 
+from local_docs_rag_agent.models import ProviderStatus
 from local_docs_rag_agent.providers.base import EmbeddingProvider
 
 
@@ -13,10 +14,15 @@ class OpenAICompatibleEmbeddingProvider(EmbeddingProvider):
         base_url: str | None,
         model: str,
         dimensions: int | None,
+        provider_label: str = "embedding",
     ) -> None:
+        self._provider_label = provider_label.lower()
+        self._status = ProviderStatus(provider=self._provider_label, mode="ready")
         self._client = self._build_client(api_key=api_key, base_url=base_url) if api_key else None
         self._model = model
         self._dimensions = dimensions
+        if not api_key:
+            self._status = ProviderStatus(provider=self._provider_label, mode="fallback", reason="missing_api_key")
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         if not texts:
@@ -33,14 +39,29 @@ class OpenAICompatibleEmbeddingProvider(EmbeddingProvider):
 
         try:
             response = self._client.embeddings.create(**request)
+            self._status = ProviderStatus(provider=self._provider_label, mode="live")
             return [item.embedding for item in response.data]
-        except Exception:
+        except Exception as exc:
+            self._status = ProviderStatus(
+                provider=self._provider_label,
+                mode="fallback",
+                reason=f"provider_error:{exc.__class__.__name__}",
+            )
             return [_hash_embed(text) for text in texts]
+
+    @property
+    def status(self) -> ProviderStatus:
+        return self._status
 
     def _build_client(self, api_key: str, base_url: str | None):
         try:
             from openai import OpenAI
         except Exception:
+            self._status = ProviderStatus(
+                provider=self._provider_label,
+                mode="fallback",
+                reason="openai_client_unavailable",
+            )
             return None
 
         client_kwargs = {"api_key": api_key}
