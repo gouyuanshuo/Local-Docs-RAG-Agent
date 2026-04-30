@@ -16,4 +16,5 @@ data/*.err.log
 data/ask_output.json
 data/eval_output.json
 data/evals/compare_latest.json
+data/evals/local_vs_qdrant_compare.json
 data/index/

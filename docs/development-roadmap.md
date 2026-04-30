@@ -241,7 +241,10 @@ Retrieval engineering is one of the project’s main sources of portfolio value.
   - `top_k`
   - `chunk_size`
   - `chunk_overlap`
-- next step: run and analyze stronger `local vs qdrant` comparisons, then decide whether to close Phase C or continue deeper retrieval tuning
+- stronger `local vs qdrant` comparisons have now been run successfully
+- with current sample eval data, both backends are comparable on quality and differ mainly in latency by configuration
+- Phase C baseline objective is now considered complete
+- next primary focus: `Phase D: Qdrant engineering` for incremental ingest and lifecycle management
 
 ---
 
@@ -262,6 +265,24 @@ Retrieval engineering is one of the project’s main sources of portfolio value.
 ### Why this is not earlier
 
 It matters, but measurement and reliability improve project credibility more directly.
+
+### Current status
+
+- first implementation of incremental Qdrant ingest is now in place
+- destructive delete-and-recreate behavior has been replaced with:
+  - source-level replacement deletes
+  - source-level stale deletes
+  - point upsert for changed documents
+- checksum + manifest tracking has been added to ingestion
+- Qdrant ingest now fails fast when embedding provider is fallback, to prevent mixed vector dimensions
+- embedding retries + backoff are now configurable for transient failures:
+  - `EMBEDDING_MAX_RETRIES`
+  - `EMBEDDING_RETRY_BACKOFF_MS`
+- Qdrant network-unreachable failures are now normalized into clearer action hints
+- `source_path` payload index bootstrap has been added for safe source-level deletes
+- Qdrant client timeout is now configurable:
+  - `QDRANT_TIMEOUT_S`
+- verified end-to-end `qdrant ingest -> ask -> eval` on live provider after clearing broken local proxy env settings
 
 ---
 

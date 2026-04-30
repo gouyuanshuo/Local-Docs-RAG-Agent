@@ -45,11 +45,14 @@ class AppConfig:
     embedding_base_url: str | None
     embedding_model: str
     embedding_dimensions: int | None
+    embedding_max_retries: int
+    embedding_retry_backoff_ms: int
     openai_api_key: str | None
     openai_model: str
     docs_dir: Path
     docs_exclude_patterns: list[str]
     index_path: Path
+    ingest_manifest_path: Path
     eval_path: Path
     agent_runtime: str
     agents_max_turns: int
@@ -57,6 +60,7 @@ class AppConfig:
     qdrant_url: str | None
     qdrant_api_key: str | None
     qdrant_collection: str
+    qdrant_timeout_s: int
     top_k: int
     chunk_strategy: str
     chunk_size: int
@@ -80,11 +84,14 @@ class AppConfig:
             embedding_base_url=os.getenv("EMBEDDING_BASE_URL") or os.getenv("LLM_BASE_URL"),
             embedding_model=os.getenv("EMBEDDING_MODEL") or _default_embedding_model(embedding_provider),
             embedding_dimensions=_optional_int_env("EMBEDDING_DIMENSIONS"),
+            embedding_max_retries=_int_env("EMBEDDING_MAX_RETRIES", 2),
+            embedding_retry_backoff_ms=_int_env("EMBEDDING_RETRY_BACKOFF_MS", 800),
             openai_api_key=os.getenv("OPENAI_API_KEY"),
             openai_model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
             docs_dir=Path(os.getenv("DOCS_DIR", "docs")),
             docs_exclude_patterns=_list_env("DOCS_EXCLUDE_PATTERNS"),
             index_path=Path(os.getenv("INDEX_PATH", "data/index/chunks.jsonl")),
+            ingest_manifest_path=Path(os.getenv("INGEST_MANIFEST_PATH", "data/index/ingest_manifest.json")),
             eval_path=Path(os.getenv("EVAL_PATH", "data/evals/sample_eval.jsonl")),
             agent_runtime=os.getenv("AGENT_RUNTIME", "basic").strip().lower(),
             agents_max_turns=_int_env("AGENTS_MAX_TURNS", 6),
@@ -92,6 +99,7 @@ class AppConfig:
             qdrant_url=os.getenv("QDRANT_URL"),
             qdrant_api_key=os.getenv("QDRANT_API_KEY"),
             qdrant_collection=os.getenv("QDRANT_COLLECTION", "local-docs-rag"),
+            qdrant_timeout_s=_int_env("QDRANT_TIMEOUT_S", 30),
             top_k=_int_env("TOP_K", 4),
             chunk_strategy=os.getenv("CHUNK_STRATEGY", "markdown").strip().lower(),
             chunk_size=_int_env("CHUNK_SIZE", 800),

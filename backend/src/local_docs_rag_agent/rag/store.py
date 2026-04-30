@@ -15,7 +15,12 @@ TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
 
 
 class ChunkStore(Protocol):
-    def save(self, chunks: list[DocumentChunk]) -> None:
+    def save(
+        self,
+        chunks: list[DocumentChunk],
+        removed_source_paths: list[str] | None = None,
+        replaced_source_paths: list[str] | None = None,
+    ) -> None:
         raise NotImplementedError
 
     def load(self) -> list[DocumentChunk]:
@@ -34,7 +39,12 @@ class LocalJsonlChunkStore:
         self._index_path = index_path
         self._embedding_provider = embedding_provider
 
-    def save(self, chunks: list[DocumentChunk]) -> None:
+    def save(
+        self,
+        chunks: list[DocumentChunk],
+        removed_source_paths: list[str] | None = None,
+        replaced_source_paths: list[str] | None = None,
+    ) -> None:
         self._index_path.parent.mkdir(parents=True, exist_ok=True)
         with self._index_path.open("w", encoding="utf-8") as handle:
             for chunk in chunks:
@@ -83,6 +93,7 @@ class QdrantChunkStore:
         url: str,
         api_key: str | None,
         collection_name: str,
+        timeout_s: int,
         embedding_provider: EmbeddingProvider,
     ) -> None:
         try:
@@ -92,11 +103,17 @@ class QdrantChunkStore:
                 "qdrant-client is not installed. Install with `pip install -e .[qdrant]`."
             ) from exc
 
-        self._client = QdrantClient(url=url, api_key=api_key)
+        self._client = QdrantClient(url=url, api_key=api_key, timeout=timeout_s)
+        self._url = url
         self._collection_name = collection_name
         self._embedding_provider = embedding_provider
 
-    def save(self, chunks: list[DocumentChunk]) -> None:
+    def save(
+        self,
+        chunks: list[DocumentChunk],
+        removed_source_paths: list[str] | None = None,
+        replaced_source_paths: list[str] | None = None,
+    ) -> None:
         try:
             from qdrant_client import models
         except ImportError as exc:
@@ -104,67 +121,160 @@ class QdrantChunkStore:
                 "qdrant-client is not installed. Install with `pip install -e .[qdrant]`."
             ) from exc
 
+        removed_source_paths = removed_source_paths or []
+        replaced_source_paths = replaced_source_paths or []
         vectors = [chunk.embedding for chunk in chunks if chunk.embedding]
-        if not vectors:
-            raise ValueError("Embeddings must be present before saving to Qdrant.")
+        vector_size = len(vectors[0]) if vectors else None
 
-        vector_size = len(vectors[0])
-        if self._client.collection_exists(self._collection_name):
-            self._client.delete_collection(self._collection_name)
-
-        self._client.create_collection(
-            collection_name=self._collection_name,
-            vectors_config=models.VectorParams(size=vector_size, distance=models.Distance.COSINE),
-        )
-        self._client.upsert(
-            collection_name=self._collection_name,
-            points=[
-                models.PointStruct(
-                    id=str(_qdrant_point_id(chunk.chunk_id)),
-                    vector=chunk.embedding,
-                    payload=chunk.to_dict(),
+        try:
+            collection_exists = self._client.collection_exists(self._collection_name)
+            if not collection_exists and vector_size is None:
+                return
+            if collection_exists:
+                if vector_size is not None:
+                    existing_size = _collection_vector_size(self._client, self._collection_name)
+                    if existing_size != vector_size:
+                        raise RuntimeError(
+                            "Qdrant collection vector size mismatch. "
+                            f"collection={existing_size}, incoming={vector_size}. "
+                            "Delete/recreate the collection or re-run ingest with a consistent embedding mode."
+                        )
+            else:
+                self._client.create_collection(
+                    collection_name=self._collection_name,
+                    vectors_config=models.VectorParams(size=vector_size, distance=models.Distance.COSINE),
                 )
-                for chunk in chunks
-                if chunk.embedding
-            ],
-        )
+            self._ensure_source_path_index()
+
+            self._delete_by_source_paths(removed_source_paths)
+            self._delete_by_source_paths(replaced_source_paths)
+
+            if vectors:
+                self._client.upsert(
+                    collection_name=self._collection_name,
+                    points=[
+                        models.PointStruct(
+                            id=str(_qdrant_point_id(chunk.chunk_id)),
+                            vector=chunk.embedding,
+                            payload=chunk.to_dict(),
+                        )
+                        for chunk in chunks
+                        if chunk.embedding
+                    ],
+                )
+        except Exception as exc:
+            raise _qdrant_operation_error(
+                operation="save",
+                url=self._url,
+                collection_name=self._collection_name,
+                exc=exc,
+            ) from exc
 
     def load(self) -> list[DocumentChunk]:
-        records, _ = self._client.scroll(
-            collection_name=self._collection_name,
-            with_payload=True,
-            limit=10_000,
-        )
-        return [DocumentChunk.from_dict(record.payload) for record in records if record.payload]
+        try:
+            records, _ = self._client.scroll(
+                collection_name=self._collection_name,
+                with_payload=True,
+                limit=10_000,
+            )
+            return [DocumentChunk.from_dict(record.payload) for record in records if record.payload]
+        except Exception as exc:
+            raise _qdrant_operation_error(
+                operation="load",
+                url=self._url,
+                collection_name=self._collection_name,
+                exc=exc,
+            ) from exc
 
     def search(self, query: str, top_k: int) -> list[RetrievalHit]:
         query_embedding = self._embedding_provider.embed_texts([query])[0]
-        response = self._client.query_points(
-            collection_name=self._collection_name,
-            query=query_embedding,
-            limit=top_k,
-            with_payload=True,
-            with_vectors=False,
-        )
-        points = getattr(response, "points", response)
-
-        hits: list[RetrievalHit] = []
-        for point in points:
-            if not point.payload:
-                continue
-            chunk = DocumentChunk.from_dict(point.payload)
-            hits.append(
-                RetrievalHit(
-                    chunk=chunk,
-                    score=float(point.score),
-                    citation_span=_build_citation_span(chunk),
-                )
+        try:
+            response = self._client.query_points(
+                collection_name=self._collection_name,
+                query=query_embedding,
+                limit=top_k,
+                with_payload=True,
+                with_vectors=False,
             )
-        return hits
+            points = getattr(response, "points", response)
+
+            hits: list[RetrievalHit] = []
+            for point in points:
+                if not point.payload:
+                    continue
+                chunk = DocumentChunk.from_dict(point.payload)
+                hits.append(
+                    RetrievalHit(
+                        chunk=chunk,
+                        score=float(point.score),
+                        citation_span=_build_citation_span(chunk),
+                    )
+                )
+            return hits
+        except Exception as exc:
+            raise _qdrant_operation_error(
+                operation="search",
+                url=self._url,
+                collection_name=self._collection_name,
+                exc=exc,
+            ) from exc
 
     @property
     def embedding_status(self) -> ProviderStatus:
         return self._embedding_provider.status
+
+    def _delete_by_source_paths(self, source_paths: list[str]) -> None:
+        if not source_paths:
+            return
+        try:
+            from qdrant_client import models
+        except ImportError as exc:
+            raise RuntimeError(
+                "qdrant-client is not installed. Install with `pip install -e .[qdrant]`."
+            ) from exc
+
+        for source_path in source_paths:
+            try:
+                self._client.delete(
+                    collection_name=self._collection_name,
+                    points_selector=models.FilterSelector(
+                        filter=models.Filter(
+                            must=[
+                                models.FieldCondition(
+                                    key="source_path",
+                                    match=models.MatchValue(value=source_path),
+                                )
+                            ]
+                        )
+                    ),
+                )
+            except Exception as exc:
+                raise _qdrant_operation_error(
+                    operation="delete",
+                    url=self._url,
+                    collection_name=self._collection_name,
+                    exc=exc,
+                ) from exc
+
+    def _ensure_source_path_index(self) -> None:
+        try:
+            from qdrant_client import models
+        except ImportError as exc:
+            raise RuntimeError(
+                "qdrant-client is not installed. Install with `pip install -e .[qdrant]`."
+            ) from exc
+        try:
+            self._client.create_payload_index(
+                collection_name=self._collection_name,
+                field_name="source_path",
+                field_schema=models.PayloadSchemaType.KEYWORD,
+                wait=True,
+            )
+        except Exception as exc:
+            message = str(exc).lower()
+            if "already exists" in message or "exists" in message:
+                return
+            raise
 
 
 def _cosine_similarity(left: list[float], right: list[float]) -> float:
@@ -218,3 +328,50 @@ def _build_citation_span(chunk: DocumentChunk) -> CitationSpan:
 
 def _qdrant_point_id(chunk_id: str):
     return uuid5(NAMESPACE_URL, chunk_id)
+
+
+def _collection_vector_size(client, collection_name: str) -> int:
+    collection = client.get_collection(collection_name)
+    vectors = collection.config.params.vectors
+    if hasattr(vectors, "size"):
+        return int(vectors.size)
+    if isinstance(vectors, dict):
+        first = next(iter(vectors.values()))
+        if hasattr(first, "size"):
+            return int(first.size)
+    raise RuntimeError("Unable to determine Qdrant collection vector size.")
+
+
+def _qdrant_operation_error(operation: str, url: str, collection_name: str, exc: Exception) -> RuntimeError:
+    exc_name = exc.__class__.__name__
+    message = str(exc)
+    if _looks_like_qdrant_unreachable(message):
+        return RuntimeError(
+            "Qdrant operation failed because the service appears unreachable.\n"
+            f"operation={operation} collection={collection_name} url={url}\n"
+            f"error={exc_name}: {message}\n"
+            "action_hint=check QDRANT_URL, confirm network access, and verify the service is running."
+        )
+    return RuntimeError(
+        "Qdrant operation failed.\n"
+        f"operation={operation} collection={collection_name} url={url}\n"
+        f"error={exc_name}: {message}"
+    )
+
+
+def _looks_like_qdrant_unreachable(message: str) -> bool:
+    lowered = message.lower()
+    return any(
+        token in lowered
+        for token in (
+            "connection refused",
+            "actively refused",
+            "failed to establish a new connection",
+            "name or service not known",
+            "temporary failure in name resolution",
+            "nodename nor servname provided",
+            "winerror 10061",
+            "connecterror",
+            "responsehandlingexception",
+        )
+    )

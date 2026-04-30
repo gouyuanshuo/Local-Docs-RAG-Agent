@@ -23,11 +23,11 @@ After coding:
 
 Current active phase:
 
-- `Phase C: Retrieval engineering reinforcement`
+- `Phase D: Qdrant engineering`
 
 Current theme:
 
-- make retrieval quality easier to compare, understand, and tune
+- make Qdrant indexing lifecycle stable and maintainable
 
 ## Active tasks
 
@@ -38,14 +38,22 @@ Current theme:
 - [x] Add eval comparison matrix in CLI
 - [x] Add compare API and frontend leaderboard
 - [x] Add retrieval parameter comparison for `top_k`, `chunk_size`, and `chunk_overlap`
-- [ ] Run and analyze a stronger `local vs qdrant` comparison with a stable reachable Qdrant backend
-- [ ] Decide whether Phase C is complete enough to move primary focus to Phase D
+- [x] Run and analyze a stronger `local vs qdrant` comparison with a stable reachable Qdrant backend
+- [x] Resolve current Qdrant connectivity issue blocking real compare runs (`qdrant_unreachable`)
+- [x] Decide whether Phase C is complete enough to move primary focus to Phase D
+- [ ] Optional: run broader retrieval tuning sweeps (more questions and larger docs) if needed
 
 ### Phase D preparation
 
-- [ ] Design incremental Qdrant ingest behavior
-- [ ] Define checksum/manifest strategy for document-level updates
-- [ ] Define stale document deletion behavior
+- [x] Design incremental Qdrant ingest behavior
+- [x] Define checksum/manifest strategy for document-level updates
+- [x] Define stale document deletion behavior
+- [x] Improve Qdrant ingest error reporting when embedding provider is fallback/transient
+- [x] Add optional backoff/retry policy before failing Qdrant ingest on embedding instability
+- [x] Normalize Qdrant network-unreachable errors into actionable ingest diagnostics
+- [x] Add `source_path` payload index bootstrap for Qdrant delete filters
+- [x] Add configurable Qdrant client timeout (`QDRANT_TIMEOUT_S`)
+- [ ] Normalize proxy-env handling for external providers (`HTTP_PROXY/HTTPS_PROXY/ALL_PROXY`) in dev docs/bootstrap
 
 ## Review notes
 

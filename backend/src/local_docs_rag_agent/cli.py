@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 
 from local_docs_rag_agent.commands.ask import run_ask
 from local_docs_rag_agent.commands.eval import run_eval_command
@@ -88,33 +89,36 @@ def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
     config = AppConfig.from_env()
+    try:
+        if args.command == "ingest":
+            run_ingest(config)
+            return
 
-    if args.command == "ingest":
-        run_ingest(config)
-        return
+        if args.command == "ask":
+            run_ask(config, question=args.question, runtime=args.runtime)
+            return
 
-    if args.command == "ask":
-        run_ask(config, question=args.question, runtime=args.runtime)
-        return
+        if args.command == "eval":
+            run_eval_command(config, runtime=args.runtime)
+            return
 
-    if args.command == "eval":
-        run_eval_command(config, runtime=args.runtime)
-        return
+        if args.command == "eval-compare":
+            run_eval_compare_command(
+                config,
+                runtimes=args.runtimes,
+                chunk_strategies=args.chunk_strategies,
+                vector_backends=args.vector_backends,
+                top_ks=args.top_ks,
+                chunk_sizes=args.chunk_sizes,
+                chunk_overlaps=args.chunk_overlaps,
+                output_path=args.output,
+            )
+            return
 
-    if args.command == "eval-compare":
-        run_eval_compare_command(
-            config,
-            runtimes=args.runtimes,
-            chunk_strategies=args.chunk_strategies,
-            vector_backends=args.vector_backends,
-            top_ks=args.top_ks,
-            chunk_sizes=args.chunk_sizes,
-            chunk_overlaps=args.chunk_overlaps,
-            output_path=args.output,
-        )
-        return
-
-    parser.error(f"Unsupported command: {args.command}")
+        parser.error(f"Unsupported command: {args.command}")
+    except RuntimeError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
 
 
 if __name__ == "__main__":

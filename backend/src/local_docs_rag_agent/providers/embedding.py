@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import time
 
 from local_docs_rag_agent.models import ProviderStatus
 from local_docs_rag_agent.providers.base import EmbeddingProvider
@@ -14,6 +15,8 @@ class OpenAICompatibleEmbeddingProvider(EmbeddingProvider):
         base_url: str | None,
         model: str,
         dimensions: int | None,
+        max_retries: int = 2,
+        retry_backoff_ms: int = 800,
         provider_label: str = "embedding",
     ) -> None:
         self._provider_label = provider_label.lower()
@@ -21,6 +24,8 @@ class OpenAICompatibleEmbeddingProvider(EmbeddingProvider):
         self._client = self._build_client(api_key=api_key, base_url=base_url) if api_key else None
         self._model = model
         self._dimensions = dimensions
+        self._max_retries = max(0, max_retries)
+        self._retry_backoff_ms = max(0, retry_backoff_ms)
         if not api_key:
             self._status = ProviderStatus(provider=self._provider_label, mode="fallback", reason="missing_api_key")
 
@@ -37,17 +42,26 @@ class OpenAICompatibleEmbeddingProvider(EmbeddingProvider):
         if self._dimensions is not None:
             request["dimensions"] = self._dimensions
 
-        try:
-            response = self._client.embeddings.create(**request)
-            self._status = ProviderStatus(provider=self._provider_label, mode="live")
-            return [item.embedding for item in response.data]
-        except Exception as exc:
-            self._status = ProviderStatus(
-                provider=self._provider_label,
-                mode="fallback",
-                reason=f"provider_error:{exc.__class__.__name__}",
-            )
-            return [_hash_embed(text) for text in texts]
+        attempt = 0
+        while True:
+            try:
+                response = self._client.embeddings.create(**request)
+                reason = f"recovered_after_retry:{attempt}" if attempt > 0 else None
+                self._status = ProviderStatus(provider=self._provider_label, mode="live", reason=reason)
+                return [item.embedding for item in response.data]
+            except Exception as exc:
+                if _is_transient_embedding_error(exc) and attempt < self._max_retries:
+                    sleep_ms = self._retry_backoff_ms * (2**attempt)
+                    if sleep_ms > 0:
+                        time.sleep(sleep_ms / 1000.0)
+                    attempt += 1
+                    continue
+                self._status = ProviderStatus(
+                    provider=self._provider_label,
+                    mode="fallback",
+                    reason=_fallback_reason(exc=exc, attempts=attempt + 1, max_retries=self._max_retries),
+                )
+                return [_hash_embed(text) for text in texts]
 
     @property
     def status(self) -> ProviderStatus:
@@ -86,3 +100,37 @@ def _hash_embed(text: str, size: int = 128) -> list[float]:
     if norm == 0:
         return values
     return [value / norm for value in values]
+
+
+def _is_transient_embedding_error(exc: Exception) -> bool:
+    class_name = exc.__class__.__name__
+    if class_name in {
+        "APITimeoutError",
+        "APIConnectionError",
+        "RateLimitError",
+        "InternalServerError",
+        "ServiceUnavailableError",
+    }:
+        return True
+    status_code = getattr(exc, "status_code", None)
+    if status_code in {408, 409, 429, 500, 502, 503, 504}:
+        return True
+    message = str(exc).lower()
+    return any(
+        token in message
+        for token in (
+            "timed out",
+            "timeout",
+            "temporarily",
+            "try again",
+            "connection reset",
+            "connection aborted",
+        )
+    )
+
+
+def _fallback_reason(exc: Exception, attempts: int, max_retries: int) -> str:
+    class_name = exc.__class__.__name__
+    if _is_transient_embedding_error(exc):
+        return f"provider_transient_error:{class_name}:retry_exhausted:{attempts}:max_retries:{max_retries}"
+    return f"provider_error:{class_name}"
