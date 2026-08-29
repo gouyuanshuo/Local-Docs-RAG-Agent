@@ -8,6 +8,7 @@ from local_docs_rag_agent.commands.eval import run_eval_command
 from local_docs_rag_agent.commands.eval_compare import run_eval_compare_command
 from local_docs_rag_agent.commands.ingest import run_ingest
 from local_docs_rag_agent.config import AppConfig
+from local_docs_rag_agent.exceptions import LocalDocsError
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -33,7 +34,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Override the answer runtime for this command",
     )
 
-    compare_parser = subparsers.add_parser("eval-compare", help="Run eval across multiple retrieval/runtime configs")
+    compare_parser = subparsers.add_parser(
+        "eval-compare", help="Run eval across multiple retrieval/runtime configs"
+    )
     compare_parser.add_argument(
         "--runtime",
         dest="runtimes",
@@ -46,14 +49,19 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="chunk_strategies",
         choices=["fixed", "paragraph", "markdown"],
         action="append",
-        help="One or more chunk strategies to compare. Repeat the flag to compare multiple strategies.",
+        help=(
+            "One or more chunk strategies to compare. "
+            "Repeat the flag to compare multiple strategies."
+        ),
     )
     compare_parser.add_argument(
         "--vector-backend",
         dest="vector_backends",
         choices=["local", "qdrant"],
         action="append",
-        help="One or more vector backends to compare. Repeat the flag to compare multiple backends.",
+        help=(
+            "One or more vector backends to compare. Repeat the flag to compare multiple backends."
+        ),
     )
     compare_parser.add_argument(
         "--top-k",
@@ -74,7 +82,10 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="chunk_overlaps",
         type=int,
         action="append",
-        help="One or more chunk overlap values to compare. Repeat the flag to compare multiple values.",
+        help=(
+            "One or more chunk overlap values to compare. "
+            "Repeat the flag to compare multiple values."
+        ),
     )
     compare_parser.add_argument(
         "--output",
@@ -88,8 +99,8 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
-    config = AppConfig.from_env()
     try:
+        config = AppConfig.from_env()
         if args.command == "ingest":
             run_ingest(config)
             return
@@ -116,7 +127,7 @@ def main() -> None:
             return
 
         parser.error(f"Unsupported command: {args.command}")
-    except RuntimeError as exc:
+    except (LocalDocsError, RuntimeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
 

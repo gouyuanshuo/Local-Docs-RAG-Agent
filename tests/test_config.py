@@ -4,6 +4,7 @@ import pytest
 
 from local_docs_rag_agent import config as config_module
 from local_docs_rag_agent.config import AppConfig
+from local_docs_rag_agent.exceptions import ConfigurationError
 
 
 @pytest.fixture(autouse=True)
@@ -36,3 +37,13 @@ def test_external_http_trust_env_rejects_invalid_values(monkeypatch: pytest.Monk
 
     with pytest.raises(ValueError, match="EXTERNAL_HTTP_TRUST_ENV"):
         AppConfig.from_env()
+
+
+def test_chunk_overlap_must_be_smaller_than_chunk_size() -> None:
+    with pytest.raises(ConfigurationError, match="CHUNK_OVERLAP"):
+        AppConfig.from_env().with_overrides(chunk_size=10, chunk_overlap=10)
+
+
+def test_unknown_override_is_rejected() -> None:
+    with pytest.raises(ConfigurationError, match="Unknown AppConfig"):
+        AppConfig.from_env().with_overrides(does_not_exist=True)

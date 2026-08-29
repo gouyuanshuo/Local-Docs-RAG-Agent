@@ -3,7 +3,11 @@ from __future__ import annotations
 from local_docs_rag_agent.config import AppConfig
 from local_docs_rag_agent.models import AgentAnswer, AnswerDiagnostics, ProviderStatus
 from local_docs_rag_agent.providers.factory import build_chat_provider
-from local_docs_rag_agent.runtime.shared import build_agent_answer, build_answer_context, retrieve_hits
+from local_docs_rag_agent.runtime.shared import (
+    build_agent_answer,
+    build_answer_context,
+    retrieve_hits,
+)
 
 
 def answer_with_basic_runtime(
@@ -21,7 +25,9 @@ def answer_with_basic_runtime(
         chat_status = ProviderStatus(
             provider=chat_status.provider,
             mode=chat_status.mode,
-            reason=runtime_reason if chat_status.reason is None else f"{chat_status.reason};{runtime_reason}",
+            reason=runtime_reason
+            if chat_status.reason is None
+            else f"{chat_status.reason};{runtime_reason}",
         )
 
     diagnostics = AnswerDiagnostics(

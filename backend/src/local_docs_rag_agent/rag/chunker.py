@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
+from local_docs_rag_agent.exceptions import ConfigurationError
 from local_docs_rag_agent.models import DocumentChunk
-
 
 DEFAULT_CHUNK_STRATEGY = "markdown"
 SUPPORTED_CHUNK_STRATEGIES = {"fixed", "paragraph", "markdown"}
@@ -35,17 +36,31 @@ def chunk_text(
     chunk_overlap: int,
     chunk_strategy: str = DEFAULT_CHUNK_STRATEGY,
 ) -> list[DocumentChunk]:
-    clean_text = text.strip()
-    if not clean_text:
+    _validate_chunk_parameters(chunk_size, chunk_overlap)
+    if not text.strip():
         return []
 
     strategy = _normalize_strategy(chunk_strategy)
     source_title = source_path.stem.replace("_", " ").strip() or source_path.name
     if strategy == "fixed":
-        return _chunk_fixed(source_path, clean_text, source_title, chunk_size, chunk_overlap)
+        return _chunk_fixed(source_path, text, source_title, chunk_size, chunk_overlap)
     if strategy == "paragraph":
-        return _chunk_paragraphs(source_path, clean_text, source_title, chunk_size, chunk_overlap, markdown_aware=False)
-    return _chunk_paragraphs(source_path, clean_text, source_title, chunk_size, chunk_overlap, markdown_aware=True)
+        return _chunk_paragraphs(
+            source_path,
+            text,
+            source_title,
+            chunk_size,
+            chunk_overlap,
+            markdown_aware=False,
+        )
+    return _chunk_paragraphs(
+        source_path,
+        text,
+        source_title,
+        chunk_size,
+        chunk_overlap,
+        markdown_aware=True,
+    )
 
 
 def _normalize_strategy(chunk_strategy: str | None) -> str:
@@ -54,7 +69,20 @@ def _normalize_strategy(chunk_strategy: str | None) -> str:
     normalized = chunk_strategy.strip().lower()
     if normalized in SUPPORTED_CHUNK_STRATEGIES:
         return normalized
-    return DEFAULT_CHUNK_STRATEGY
+    allowed = ", ".join(sorted(SUPPORTED_CHUNK_STRATEGIES))
+    raise ConfigurationError(f"Chunk strategy must be one of {allowed}; got {chunk_strategy!r}")
+
+
+def _validate_chunk_parameters(chunk_size: int, chunk_overlap: int) -> None:
+    if chunk_size <= 0:
+        raise ConfigurationError(f"Chunk size must be greater than 0, got {chunk_size}")
+    if chunk_overlap < 0:
+        raise ConfigurationError(f"Chunk overlap must be at least 0, got {chunk_overlap}")
+    if chunk_overlap >= chunk_size:
+        raise ConfigurationError(
+            "Chunk overlap must be smaller than chunk size "
+            f"(overlap={chunk_overlap}, size={chunk_size})"
+        )
 
 
 def _chunk_fixed(
@@ -71,16 +99,16 @@ def _chunk_fixed(
 
     while start < len(text):
         end = min(len(text), start + chunk_size)
-        chunk_body = text[start:end].strip()
+        chunk_body, content_start, content_end = _strip_span(text, start, end)
         if chunk_body:
-            section = _section_for_offset(sections, start)
+            section = _section_for_offset(sections, content_start)
             title = section.title if section else source_title
             metadata = _build_metadata(
                 strategy="fixed",
                 source_title=source_title,
                 section=section,
-                start_char=start,
-                end_char=end,
+                start_char=content_start,
+                end_char=content_end,
             )
             chunks.append(
                 _make_chunk(
@@ -88,8 +116,8 @@ def _chunk_fixed(
                     title=title,
                     text=chunk_body,
                     chunk_index=chunk_index,
-                    start_char=start,
-                    end_char=end,
+                    start_char=content_start,
+                    end_char=content_end,
                     metadata=metadata,
                 )
             )
@@ -113,6 +141,12 @@ def _chunk_paragraphs(
     blocks = _extract_paragraph_blocks(text, source_title, markdown_aware=markdown_aware)
     if not blocks:
         return _chunk_fixed(source_path, text, source_title, chunk_size, chunk_overlap)
+    blocks = _split_oversized_blocks(
+        blocks,
+        source_text=text,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+    )
 
     chunks: list[DocumentChunk] = []
     start_index = 0
@@ -129,9 +163,11 @@ def _chunk_paragraphs(
 
         while cursor < len(blocks):
             block = blocks[cursor]
-            candidate_parts = text_parts + [block.text]
+            candidate_parts = [*text_parts, block.text]
             candidate_text = "\n\n".join(candidate_parts).strip()
-            section_changed = markdown_aware and cursor > start_index and block.section_title != current_section
+            section_changed = (
+                markdown_aware and cursor > start_index and block.section_title != current_section
+            )
             if candidate_text and len(candidate_text) > chunk_size and text_parts:
                 break
             if section_changed and text_parts:
@@ -257,15 +293,20 @@ def _extract_sections(text: str, source_title: str) -> list[Section]:
 
     if sections:
         return sections
-    return [Section(title=source_title, heading_level=None, start_char=0, end_char=len(text), text=text)]
+    return [
+        Section(title=source_title, heading_level=None, start_char=0, end_char=len(text), text=text)
+    ]
 
 
-def _extract_paragraph_blocks(text: str, source_title: str, markdown_aware: bool) -> list[ParagraphBlock]:
+def _extract_paragraph_blocks(
+    text: str, source_title: str, markdown_aware: bool
+) -> list[ParagraphBlock]:
     blocks: list[ParagraphBlock] = []
     section_title = source_title
     heading_level: int | None = None
     paragraph_lines: list[str] = []
     paragraph_start: int | None = None
+    paragraph_end: int | None = None
     offset = 0
 
     for line in text.splitlines(keepends=True):
@@ -277,12 +318,13 @@ def _extract_paragraph_blocks(text: str, source_title: str, markdown_aware: bool
                 blocks,
                 paragraph_lines,
                 paragraph_start,
-                offset,
+                paragraph_end,
                 section_title,
                 heading_level,
             )
             paragraph_lines = []
             paragraph_start = None
+            paragraph_end = None
             heading_level, section_title = heading_match
             offset += len(raw_line)
             continue
@@ -291,17 +333,19 @@ def _extract_paragraph_blocks(text: str, source_title: str, markdown_aware: bool
             if paragraph_start is None:
                 paragraph_start = offset
             paragraph_lines.append(raw_line.rstrip("\n"))
+            paragraph_end = offset + len(raw_line.rstrip("\r\n"))
         else:
             _flush_paragraph(
                 blocks,
                 paragraph_lines,
                 paragraph_start,
-                offset,
+                paragraph_end,
                 section_title,
                 heading_level,
             )
             paragraph_lines = []
             paragraph_start = None
+            paragraph_end = None
 
         offset += len(raw_line)
 
@@ -309,7 +353,7 @@ def _extract_paragraph_blocks(text: str, source_title: str, markdown_aware: bool
         blocks,
         paragraph_lines,
         paragraph_start,
-        len(text),
+        paragraph_end,
         section_title,
         heading_level,
     )
@@ -320,11 +364,11 @@ def _flush_paragraph(
     blocks: list[ParagraphBlock],
     paragraph_lines: list[str],
     paragraph_start: int | None,
-    paragraph_end: int,
+    paragraph_end: int | None,
     section_title: str,
     heading_level: int | None,
 ) -> None:
-    if not paragraph_lines or paragraph_start is None:
+    if not paragraph_lines or paragraph_start is None or paragraph_end is None:
         return
     text = "\n".join(line.rstrip() for line in paragraph_lines).strip()
     if not text:
@@ -340,14 +384,45 @@ def _flush_paragraph(
     )
 
 
-def _iter_lines_with_offsets(text: str):
+def _split_oversized_blocks(
+    blocks: list[ParagraphBlock],
+    *,
+    source_text: str,
+    chunk_size: int,
+    chunk_overlap: int,
+) -> list[ParagraphBlock]:
+    normalized: list[ParagraphBlock] = []
+    for block in blocks:
+        if len(block.text) <= chunk_size:
+            normalized.append(block)
+            continue
+
+        start = block.start_char
+        while start < block.end_char:
+            end = min(block.end_char, start + chunk_size)
+            body, content_start, content_end = _strip_span(source_text, start, end)
+            if body:
+                normalized.append(
+                    ParagraphBlock(
+                        text=body,
+                        start_char=content_start,
+                        end_char=content_end,
+                        section_title=block.section_title,
+                        heading_level=block.heading_level,
+                    )
+                )
+            if end >= block.end_char:
+                break
+            start = end - chunk_overlap
+    return normalized
+
+
+def _iter_lines_with_offsets(text: str) -> Iterator[tuple[int, int, str]]:
     offset = 0
     for line in text.splitlines(keepends=True):
         start = offset
         offset += len(line)
         yield start, offset, line.rstrip("\n")
-    if not text.endswith("\n"):
-        return
 
 
 def _parse_markdown_heading(line: str) -> tuple[int | None, str]:
@@ -385,3 +460,12 @@ def _build_metadata(
         "section_title": section.title if section else source_title,
         "heading_level": section.heading_level if section else None,
     }
+
+
+def _strip_span(text: str, start: int, end: int) -> tuple[str, int, int]:
+    raw = text[start:end]
+    leading = len(raw) - len(raw.lstrip())
+    trailing = len(raw) - len(raw.rstrip())
+    content_start = start + leading
+    content_end = end - trailing
+    return text[content_start:content_end], content_start, content_end

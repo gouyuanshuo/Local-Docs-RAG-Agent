@@ -2,37 +2,53 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from fnmatch import fnmatch
 from pathlib import Path
 
 from local_docs_rag_agent.config import AppConfig
+from local_docs_rag_agent.exceptions import ConfigurationError, ProviderUnavailableError
 from local_docs_rag_agent.models import DocumentChunk
 from local_docs_rag_agent.providers.base import EmbeddingProvider
 from local_docs_rag_agent.providers.factory import build_embedding_provider
 from local_docs_rag_agent.rag.chunker import chunk_text
+from local_docs_rag_agent.rag.manifest import IngestManifest
 from local_docs_rag_agent.rag.store import ChunkStore, LocalJsonlChunkStore, QdrantChunkStore
 
+SUPPORTED_EXTENSIONS = frozenset({".md", ".txt"})
 
-SUPPORTED_EXTENSIONS = {".md", ".txt"}
+
+@dataclass(frozen=True, slots=True)
+class IngestPlan:
+    removed_sources: tuple[str, ...]
+    changed_sources: tuple[str, ...]
+    sources_to_index: tuple[str, ...]
 
 
-def build_store(config: AppConfig, embedding_provider: EmbeddingProvider | None = None) -> ChunkStore:
-    embedding_provider = embedding_provider or build_embedding_provider(config)
+def build_store(
+    config: AppConfig,
+    embedding_provider: EmbeddingProvider | None = None,
+) -> ChunkStore:
+    provider = embedding_provider or build_embedding_provider(config)
     if config.vector_backend == "qdrant":
         if not config.qdrant_url:
-            raise ValueError("QDRANT_URL must be set when VECTOR_BACKEND=qdrant")
+            raise ConfigurationError("QDRANT_URL must be set when VECTOR_BACKEND=qdrant")
         return QdrantChunkStore(
             url=config.qdrant_url,
             api_key=config.qdrant_api_key,
             collection_name=config.qdrant_collection,
             timeout_s=config.qdrant_timeout_s,
-            embedding_provider=embedding_provider,
+            embedding_provider=provider,
             trust_env=config.external_http_trust_env,
         )
-    return LocalJsonlChunkStore(config.index_path, embedding_provider=embedding_provider)
+    return LocalJsonlChunkStore(config.index_path, embedding_provider=provider)
 
 
-def collect_document_paths(docs_dir: Path, exclude_patterns: list[str] | None = None) -> list[Path]:
+def collect_document_paths(
+    docs_dir: Path,
+    exclude_patterns: list[str] | None = None,
+) -> list[Path]:
+    _require_docs_directory(docs_dir)
     patterns = exclude_patterns or []
     return sorted(
         path
@@ -43,148 +59,202 @@ def collect_document_paths(docs_dir: Path, exclude_patterns: list[str] | None = 
     )
 
 
-def _is_excluded(path: Path, docs_dir: Path, exclude_patterns: list[str]) -> bool:
-    relative_path = path.relative_to(docs_dir).as_posix()
-    full_path = path.as_posix()
-    return any(fnmatch(relative_path, pattern) or fnmatch(full_path, pattern) for pattern in exclude_patterns)
-
-
 def ingest_documents(config: AppConfig) -> list[DocumentChunk]:
-    source_texts = {
-        path.as_posix(): path.read_text(encoding="utf-8")
-        for path in collect_document_paths(config.docs_dir, config.docs_exclude_patterns)
-    }
+    source_texts = _read_source_texts(config)
     source_checksums = {source_path: _checksum(text) for source_path, text in source_texts.items()}
-
+    previous_manifest = IngestManifest.load(config.ingest_manifest_path)
     embedding_provider = build_embedding_provider(config)
     store = build_store(config, embedding_provider=embedding_provider)
-    previous_manifest = _read_manifest(config.ingest_manifest_path)
-    previous_sources = previous_manifest.get("sources", {})
-
-    removed_sources = sorted(set(previous_sources) - set(source_texts))
-    changed_sources = sorted(
-        source_path
-        for source_path, checksum in source_checksums.items()
-        if previous_sources.get(source_path, {}).get("checksum") != checksum
+    desired_fingerprint = _index_fingerprint(
+        config,
+        embedding_mode="live" if config.embedding_api_key else "fallback",
+    )
+    plan = _build_ingest_plan(
+        source_checksums=source_checksums,
+        previous_manifest=previous_manifest,
+        index_all=(
+            config.vector_backend == "local"
+            or (isinstance(store, QdrantChunkStore) and not store.collection_exists())
+            or previous_manifest.index_fingerprint != desired_fingerprint
+        ),
     )
 
-    qdrant_collection_missing = (
-        isinstance(store, QdrantChunkStore) and not store.collection_exists()
+    chunks = _chunk_sources(config, source_texts, plan.sources_to_index)
+    _attach_embeddings(chunks, embedding_provider)
+    if config.vector_backend == "qdrant" and chunks:
+        _require_live_embeddings(embedding_provider)
+
+    is_qdrant = config.vector_backend == "qdrant"
+    store.save(
+        chunks,
+        removed_source_paths=list(plan.removed_sources) if is_qdrant else None,
+        # Include changed-to-empty sources so their stale Qdrant points are deleted.
+        replaced_source_paths=list(plan.sources_to_index) if is_qdrant else None,
     )
-    if config.vector_backend == "local":
-        sources_to_chunk = sorted(source_texts)
-    elif qdrant_collection_missing:
-        sources_to_chunk = sorted(source_texts)
-    else:
-        sources_to_chunk = changed_sources
+    previous_manifest.updated(
+        source_checksums=source_checksums,
+        indexed_sources=set(plan.sources_to_index),
+        chunks=chunks,
+        index_fingerprint=_index_fingerprint(
+            config,
+            embedding_mode=(
+                embedding_provider.status.mode
+                if chunks
+                else ("live" if config.embedding_api_key else "fallback")
+            ),
+        ),
+    ).save(config.ingest_manifest_path)
+    return chunks
+
+
+def ensure_index(config: AppConfig) -> None:
+    manifest = IngestManifest.load(config.ingest_manifest_path)
+    expected_fingerprint = _index_fingerprint(
+        config,
+        embedding_mode="live" if config.embedding_api_key else "fallback",
+    )
+    configuration_changed = manifest.index_fingerprint != expected_fingerprint
+    if config.vector_backend == "qdrant":
+        if configuration_changed or _is_qdrant_collection_missing(config):
+            ingest_documents(config)
+        return
+    if configuration_changed or not config.index_path.exists():
+        ingest_documents(config)
+
+
+def _read_source_texts(config: AppConfig) -> dict[str, str]:
+    source_texts: dict[str, str] = {}
+    for path in collect_document_paths(
+        config.docs_dir,
+        config.docs_exclude_patterns,
+    ):
+        try:
+            source_texts[path.as_posix()] = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise ConfigurationError(f"Could not read source document {path}: {exc}") from exc
+    return source_texts
+
+
+def _build_ingest_plan(
+    *,
+    source_checksums: dict[str, str],
+    previous_manifest: IngestManifest,
+    index_all: bool,
+) -> IngestPlan:
+    previous_sources = previous_manifest.sources
+    removed_sources = tuple(sorted(set(previous_sources) - set(source_checksums)))
+    changed_sources = tuple(
+        sorted(
+            source_path
+            for source_path, checksum in source_checksums.items()
+            if source_path not in previous_sources
+            or previous_sources[source_path].checksum != checksum
+        )
+    )
+    sources_to_index = tuple(sorted(source_checksums)) if index_all else changed_sources
+    return IngestPlan(
+        removed_sources=removed_sources,
+        changed_sources=changed_sources,
+        sources_to_index=sources_to_index,
+    )
+
+
+def _chunk_sources(
+    config: AppConfig,
+    source_texts: dict[str, str],
+    source_paths: tuple[str, ...],
+) -> list[DocumentChunk]:
     chunks: list[DocumentChunk] = []
-    for source_path in sources_to_chunk:
-        text = source_texts[source_path]
+    for source_path in source_paths:
         chunks.extend(
             chunk_text(
                 source_path=Path(source_path),
-                text=text,
+                text=source_texts[source_path],
                 chunk_strategy=config.chunk_strategy,
                 chunk_size=config.chunk_size,
                 chunk_overlap=config.chunk_overlap,
             )
         )
-
-    embeddings = embedding_provider.embed_texts([chunk.text for chunk in chunks]) if chunks else []
-    for chunk, embedding in zip(chunks, embeddings):
-        chunk.embedding = embedding
-
-    if config.vector_backend == "qdrant" and chunks and embedding_provider.status.mode != "live":
-        status = embedding_provider.status
-        reason = status.reason or "unknown_reason"
-        action_hint = (
-            "embedding transient failure exhausted retries; try ingest again or increase "
-            "EMBEDDING_MAX_RETRIES / EMBEDDING_RETRY_BACKOFF_MS."
-            if reason.startswith("provider_transient_error:")
-            else "provider is not live; verify EMBEDDING_API_KEY / EMBEDDING_BASE_URL / EMBEDDING_MODEL."
-        )
-        raise RuntimeError(
-            "Qdrant ingest aborted because embedding provider is not live.\n"
-            f"provider={status.provider} mode={status.mode} reason={reason}\n"
-            f"action_hint={action_hint}"
-        )
-
-    replaced_sources = sorted({chunk.source_path for chunk in chunks}) if config.vector_backend == "qdrant" else []
-    store.save(
-        chunks,
-        removed_source_paths=removed_sources if config.vector_backend == "qdrant" else None,
-        replaced_source_paths=replaced_sources if config.vector_backend == "qdrant" else None,
-    )
-    _write_manifest(
-        config.ingest_manifest_path,
-        previous_sources=previous_sources,
-        source_checksums=source_checksums,
-        changed_chunks=chunks,
-        removed_sources=removed_sources,
-    )
     return chunks
 
 
-def ensure_index(config: AppConfig) -> None:
-    if config.vector_backend == "qdrant":
-        if _is_qdrant_collection_missing(config):
-            ingest_documents(config)
+def _attach_embeddings(
+    chunks: list[DocumentChunk],
+    embedding_provider: EmbeddingProvider,
+) -> None:
+    if not chunks:
         return
-    if config.index_path.exists():
+    embeddings = embedding_provider.embed_texts([chunk.text for chunk in chunks])
+    if len(embeddings) != len(chunks):
+        raise ProviderUnavailableError(
+            "Embedding provider returned a different number of vectors than input chunks",
+            action_hint=f"Expected {len(chunks)} vectors, received {len(embeddings)}.",
+        )
+    for chunk, embedding in zip(chunks, embeddings, strict=True):
+        if not embedding:
+            raise ProviderUnavailableError(
+                f"Embedding provider returned an empty vector for {chunk.chunk_id}"
+            )
+        chunk.embedding = embedding
+
+
+def _require_live_embeddings(embedding_provider: EmbeddingProvider) -> None:
+    status = embedding_provider.status
+    if status.mode == "live":
         return
-    ingest_documents(config)
+    reason = status.reason or "unknown_reason"
+    action_hint = (
+        "Try ingest again or increase EMBEDDING_MAX_RETRIES and EMBEDDING_RETRY_BACKOFF_MS."
+        if reason.startswith("provider_transient_error:")
+        else "Verify EMBEDDING_API_KEY, EMBEDDING_BASE_URL, and EMBEDDING_MODEL."
+    )
+    raise ProviderUnavailableError(
+        "Qdrant ingest requires a live embedding provider",
+        action_hint=(
+            f"Provider {status.provider!r} is in {status.mode!r} mode ({reason}). {action_hint}"
+        ),
+    )
+
+
+def _require_docs_directory(docs_dir: Path) -> None:
+    if not docs_dir.exists():
+        raise ConfigurationError(
+            f"DOCS_DIR does not exist: {docs_dir}",
+            action_hint="Create the directory or set DOCS_DIR to an existing directory.",
+        )
+    if not docs_dir.is_dir():
+        raise ConfigurationError(f"DOCS_DIR is not a directory: {docs_dir}")
+
+
+def _is_excluded(path: Path, docs_dir: Path, exclude_patterns: list[str]) -> bool:
+    relative_path = path.relative_to(docs_dir).as_posix()
+    full_path = path.as_posix()
+    return any(
+        fnmatch(relative_path, pattern) or fnmatch(full_path, pattern)
+        for pattern in exclude_patterns
+    )
 
 
 def _is_qdrant_collection_missing(config: AppConfig) -> bool:
-    if config.vector_backend != "qdrant":
-        return False
     store = build_store(config)
-    if not isinstance(store, QdrantChunkStore):
-        return False
-    return not store.collection_exists()
+    return isinstance(store, QdrantChunkStore) and not store.collection_exists()
 
 
 def _checksum(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _read_manifest(path: Path) -> dict[str, object]:
-    if not path.exists():
-        return {"sources": {}}
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict) or "sources" not in payload:
-        return {"sources": {}}
-    if not isinstance(payload["sources"], dict):
-        return {"sources": {}}
-    return payload
-
-
-def _write_manifest(
-    path: Path,
-    previous_sources: dict[str, object],
-    source_checksums: dict[str, str],
-    changed_chunks: list[DocumentChunk],
-    removed_sources: list[str],
-) -> None:
-    next_sources = {
-        source_path: dict(payload) if isinstance(payload, dict) else {}
-        for source_path, payload in previous_sources.items()
+def _index_fingerprint(config: AppConfig, *, embedding_mode: str) -> str:
+    payload = {
+        "vector_backend": config.vector_backend,
+        "embedding_provider": config.embedding_provider,
+        "embedding_base_url": config.embedding_base_url,
+        "embedding_model": config.embedding_model,
+        "embedding_dimensions": config.embedding_dimensions,
+        "embedding_mode": embedding_mode,
+        "chunk_strategy": config.chunk_strategy,
+        "chunk_size": config.chunk_size,
+        "chunk_overlap": config.chunk_overlap,
     }
-    for source_path in removed_sources:
-        next_sources.pop(source_path, None)
-
-    chunk_ids_by_source: dict[str, list[str]] = {}
-    for chunk in changed_chunks:
-        chunk_ids_by_source.setdefault(chunk.source_path, []).append(chunk.chunk_id)
-
-    for source_path, checksum in source_checksums.items():
-        existing = next_sources.get(source_path, {})
-        if not isinstance(existing, dict):
-            existing = {}
-        next_sources[source_path] = {
-            "checksum": checksum,
-            "chunk_ids": chunk_ids_by_source.get(source_path, existing.get("chunk_ids", [])),
-        }
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"sources": next_sources}, ensure_ascii=True, indent=2), encoding="utf-8")
+    serialized = json.dumps(payload, ensure_ascii=True, sort_keys=True)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()

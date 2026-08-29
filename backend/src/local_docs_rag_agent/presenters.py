@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from local_docs_rag_agent.config import AppConfig
 from local_docs_rag_agent.models import AgentAnswer, EvalResult
 
 
-def serialize_answer(answer: AgentAnswer, runtime: str) -> dict[str, object]:
+def serialize_answer(answer: AgentAnswer) -> dict[str, object]:
     return {
         "question": answer.question,
         "answer": answer.answer,
@@ -20,7 +22,7 @@ def serialize_answer(answer: AgentAnswer, runtime: str) -> dict[str, object]:
             }
             for span in answer.citation_spans
         ],
-        "runtime": runtime,
+        "runtime": answer.diagnostics.actual_runtime,
         "diagnostics": {
             "requested_runtime": answer.diagnostics.requested_runtime,
             "actual_runtime": answer.diagnostics.actual_runtime,
@@ -39,10 +41,11 @@ def serialize_answer(answer: AgentAnswer, runtime: str) -> dict[str, object]:
     }
 
 
-def _avg(results: list[EvalResult], attr: str, precision: int = 4) -> float:
-    if not results:
+def _average(values: Iterable[float], precision: int = 4) -> float:
+    materialized = list(values)
+    if not materialized:
         return 0.0
-    return round(sum(getattr(result, attr) for result in results) / len(results), precision)
+    return round(sum(materialized) / len(materialized), precision)
 
 
 def serialize_eval_summary(
@@ -67,16 +70,21 @@ def serialize_eval_summary(
         "num_cases": len(results),
         "runtime": runtime,
         "retrieval_config": retrieval_config,
-        "answer_keyword_hit_rate": _avg(results, "answer_keyword_hit_rate"),
-        "retrieval_source_hit_rate": _avg(results, "retrieval_source_hit_rate"),
-        "retrieval_span_hit_rate": _avg(results, "retrieval_span_hit_rate"),
-        "citation_source_hit_rate": _avg(results, "citation_source_hit_rate"),
-        "citation_span_hit_rate": _avg(results, "citation_span_hit_rate"),
-        "avg_response_time_ms": _avg(results, "response_time_ms", precision=2),
+        "answer_keyword_hit_rate": _average(result.answer_keyword_hit_rate for result in results),
+        "retrieval_source_hit_rate": _average(
+            result.retrieval_source_hit_rate for result in results
+        ),
+        "retrieval_span_hit_rate": _average(result.retrieval_span_hit_rate for result in results),
+        "citation_source_hit_rate": _average(result.citation_source_hit_rate for result in results),
+        "citation_span_hit_rate": _average(result.citation_span_hit_rate for result in results),
+        "avg_response_time_ms": _average(
+            (result.response_time_ms for result in results),
+            precision=2,
+        ),
         # Backward-compatible aliases for older UI/consumers.
-        "avg_keyword_hit_rate": _avg(results, "answer_keyword_hit_rate"),
-        "source_hit_rate": _avg(results, "citation_source_hit_rate"),
-        "avg_citation_span_hit_rate": _avg(results, "citation_span_hit_rate"),
+        "avg_keyword_hit_rate": _average(result.answer_keyword_hit_rate for result in results),
+        "source_hit_rate": _average(result.citation_source_hit_rate for result in results),
+        "avg_citation_span_hit_rate": _average(result.citation_span_hit_rate for result in results),
         "results": [
             {
                 "question": result.question,

@@ -13,3 +13,20 @@ def test_info_exposes_external_http_proxy_setting(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json()["external_http_trust_env"] is False
+
+
+def test_expected_application_error_has_stable_response(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("DOCS_DIR", str(tmp_path / "missing"))
+    client = TestClient(create_app())
+
+    response = client.get("/api/documents")
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "invalid_configuration"
+    assert "does not exist" in response.json()["detail"]
+
+
+def test_ask_rejects_blank_question() -> None:
+    response = TestClient(create_app()).post("/api/ask", json={"question": "   "})
+
+    assert response.status_code == 422

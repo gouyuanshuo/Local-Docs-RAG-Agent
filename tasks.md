@@ -6,18 +6,18 @@ This file is the short-horizon task board for the repository.
 
 Before coding:
 
-- [ ] Read `AGENTS.md`
-- [ ] Read `spec.md`
-- [ ] Read `tasks.md`
-- [ ] Check `docs/development-roadmap.md`
-- [ ] Open the relevant local skill if needed
+- [x] Read `AGENTS.md`
+- [x] Read `spec.md`
+- [x] Read `tasks.md`
+- [x] Check `docs/development-roadmap.md`
+- [x] Open the relevant local skill if needed
 
 After coding:
 
-- [ ] Run a relevant verification path
-- [ ] Review the changed code
-- [ ] Mark completed tasks below
-- [ ] Add follow-up tasks if new work appears
+- [x] Run a relevant verification path
+- [x] Review the changed code
+- [x] Mark completed tasks below
+- [x] Add follow-up tasks if new work appears
 
 ## Current focus
 
@@ -57,6 +57,23 @@ Current theme:
 - [x] Normalize proxy-env handling for external providers (`HTTP_PROXY/HTTPS_PROXY/ALL_PROXY`) in dev docs/bootstrap
 - [x] Add focused automated tests for embedding batching/retry and incremental Qdrant lifecycle behavior
 - [ ] Re-run live `qdrant ingest -> ask -> eval` from a network path that can reach the configured cloud endpoint (current direct check resets with `WinError 10054`)
+
+### Engineering hardening review (2026-08-29)
+
+- [x] Create a clean Git baseline before the refactor (`3c9e342`)
+- [x] Audit all Python source, test, and script files with Ruff, mypy, tests, and coverage
+- [x] Validate configuration and persisted JSON at module boundaries
+- [x] Split local store, Qdrant store, scoring, manifest, and atomic file I/O concerns
+- [x] Fix missing-directory and changed-to-empty ingest consistency failures
+- [x] Rebuild stale indexes when embedding or chunk configuration fingerprints change
+- [x] Remove Qdrant result truncation and reject invalid/fallback vectors
+- [x] Split FastAPI application assembly, routes, and typed schemas
+- [x] Remove unused compatibility wrapper modules
+- [x] Add architecture and deep-review documentation
+- [x] Add strict Ruff/mypy development gates and regression tests
+- [ ] Add CI enforcement for Ruff, mypy, pytest, compileall, and frontend build
+- [ ] Split `frontend/src/App.tsx` into API, hooks, and feature components
+- [ ] Add deterministic Agents SDK fake-runner integration tests
 
 ## Review notes
 

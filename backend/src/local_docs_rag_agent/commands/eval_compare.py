@@ -6,7 +6,6 @@ from pathlib import Path
 from local_docs_rag_agent.config import AppConfig
 from local_docs_rag_agent.evals.comparison import run_eval_matrix
 
-
 DEFAULT_CHUNK_STRATEGIES = ["fixed", "paragraph", "markdown"]
 
 

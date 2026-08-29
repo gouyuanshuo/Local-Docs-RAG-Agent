@@ -64,7 +64,7 @@ The goal is to let an LLM do useful work around private/local documents:
 ### Main backend modules
 
 - `api/`
-  - HTTP endpoints and schemas
+  - application assembly, HTTP routes, typed schemas, and error mapping
 - `commands/`
   - CLI entrypoints
 - `providers/`
@@ -73,9 +73,10 @@ The goal is to let an LLM do useful work around private/local documents:
   - provider factory
 - `rag/`
   - chunking
-  - embedding flow
-  - local store
-  - Qdrant store
+  - ingest planning and typed manifest
+  - atomic local store
+  - paginated Qdrant store
+  - local retrieval scoring
 - `runtime/`
   - `basic`
   - `agents_sdk`
@@ -365,6 +366,15 @@ OpenAI-compatible + Qwen is already enough to validate the current system.
 - baseline tests
 - release-ready env docs
 - deployment guide
+
+### Current status
+
+- a repository-wide Python review and modular refactor was completed on 2026-08-29
+- Ruff and mypy strict are configured as local quality gates
+- regression coverage now includes configuration invariants, chunk offsets, ingest
+  consistency, persisted-data corruption, Qdrant pagination, and API error contracts
+- backend architecture and extension rules are documented in `docs/architecture.md`
+- next engineering steps are CI enforcement and frontend module decomposition
 
 ---
 

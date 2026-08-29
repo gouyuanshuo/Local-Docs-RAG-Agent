@@ -37,7 +37,7 @@ def main() -> None:
         print(completion.choices[0].message.content)
     except Exception as exc:
         print(f"错误信息: {exc}")
-        print("请参考文档：https://help.aliyun.com/model-studio/developer-reference/error-code")
+        print("请参考文档: https://help.aliyun.com/model-studio/developer-reference/error-code")
 
 
 if __name__ == "__main__":

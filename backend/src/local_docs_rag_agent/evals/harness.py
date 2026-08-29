@@ -6,47 +6,78 @@ from pathlib import Path
 
 from local_docs_rag_agent.agent import LocalDocsAgent
 from local_docs_rag_agent.config import AppConfig
+from local_docs_rag_agent.exceptions import DataFormatError
 from local_docs_rag_agent.models import EvalCase, EvalResult
 
 
 def _normalize_eval_case(payload: dict[str, object]) -> EvalCase:
-    answer_keywords = payload.get("expected_answer_keywords") or payload.get("expected_keywords") or []
-    source_paths = payload.get("expected_source_paths") or payload.get("expected_sources") or []
-    span_keywords = payload.get("expected_span_keywords") or []
-    retrieval_keywords = payload.get("expected_retrieval_keywords") or span_keywords
+    question = payload.get("question")
+    if not isinstance(question, str) or not question.strip():
+        raise DataFormatError("Eval case question must be a non-empty string")
+    answer_keywords = _string_list(
+        payload.get("expected_answer_keywords", payload.get("expected_keywords", [])),
+        "expected_answer_keywords",
+    )
+    source_paths = _string_list(
+        payload.get("expected_source_paths", payload.get("expected_sources", [])),
+        "expected_source_paths",
+    )
+    span_keywords = _string_list(
+        payload.get("expected_span_keywords", []),
+        "expected_span_keywords",
+    )
+    retrieval_keywords = _string_list(
+        payload.get("expected_retrieval_keywords", span_keywords),
+        "expected_retrieval_keywords",
+    )
+    notes = payload.get("notes")
+    if notes is not None and not isinstance(notes, str):
+        raise DataFormatError("Eval case notes must be a string or null")
 
     return EvalCase(
-        question=str(payload["question"]),
-        expected_answer_keywords=[str(keyword) for keyword in answer_keywords],
-        expected_source_paths=[str(source) for source in source_paths],
-        expected_span_keywords=[str(keyword) for keyword in span_keywords],
-        expected_retrieval_keywords=[str(keyword) for keyword in retrieval_keywords],
-        notes=str(payload["notes"]) if payload.get("notes") is not None else None,
+        question=question.strip(),
+        expected_answer_keywords=answer_keywords,
+        expected_source_paths=source_paths,
+        expected_span_keywords=span_keywords,
+        expected_retrieval_keywords=retrieval_keywords,
+        notes=notes,
     )
 
 
 def load_eval_cases(eval_path: Path) -> list[EvalCase]:
     cases: list[EvalCase] = []
-    with eval_path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
-            if not line:
-                continue
-            payload = json.loads(line)
-            cases.append(_normalize_eval_case(payload))
+    line_number: int | str = "unknown"
+    try:
+        with eval_path.open("r", encoding="utf-8") as handle:
+            for current_line_number, line in enumerate(handle, start=1):
+                line_number = current_line_number
+                if not line.strip():
+                    continue
+                payload = json.loads(line)
+                if not isinstance(payload, dict):
+                    raise DataFormatError("Eval case must be a JSON object")
+                cases.append(_normalize_eval_case(payload))
+    except DataFormatError as exc:
+        raise DataFormatError(
+            f"Invalid eval file {eval_path} at line {line_number}: {exc}"
+        ) from exc
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise DataFormatError(
+            f"Could not read eval file {eval_path} at line {line_number}: {exc}"
+        ) from exc
     return cases
 
 
 def _match_rate(expected_items: list[str], observed_text: str) -> float:
     if not expected_items:
-        return 0.0
+        return 1.0
     hits = sum(1 for item in expected_items if item.lower() in observed_text)
     return hits / len(expected_items)
 
 
 def _source_rate(expected_sources: list[str], observed_sources: list[str]) -> float:
     if not expected_sources:
-        return 0.0
+        return 1.0
     observed = set(observed_sources)
     hits = sum(1 for source in expected_sources if source in observed)
     return hits / len(expected_sources)
@@ -80,7 +111,9 @@ def run_eval(config: AppConfig) -> list[EvalResult]:
         answer_lower = response.answer.lower()
         citation_text = " ".join(span.text for span in response.citation_spans).lower()
         retrieved_text = " ".join(hit.chunk.text for hit in response.retrieved_chunks).lower()
-        retrieved_sources = list(dict.fromkeys(hit.chunk.source_path for hit in response.retrieved_chunks))
+        retrieved_sources = list(
+            dict.fromkeys(hit.chunk.source_path for hit in response.retrieved_chunks)
+        )
 
         result = EvalResult(
             question=case.question,
@@ -102,3 +135,11 @@ def run_eval(config: AppConfig) -> list[EvalResult]:
         results.append(result)
 
     return results
+
+
+def _string_list(value: object, field_name: str) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise DataFormatError(f"Eval case {field_name} must be a list of strings")
+    return [item for item in value if item]

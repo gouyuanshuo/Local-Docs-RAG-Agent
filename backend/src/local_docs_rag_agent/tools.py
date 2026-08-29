@@ -1,16 +1,21 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from local_docs_rag_agent.config import AppConfig
 from local_docs_rag_agent.rag.ingest import build_store, collect_document_paths
 
 
 def list_documents(config: AppConfig) -> list[str]:
-    return [path.as_posix() for path in collect_document_paths(config.docs_dir, config.docs_exclude_patterns)]
+    return [
+        path.as_posix()
+        for path in collect_document_paths(config.docs_dir, config.docs_exclude_patterns)
+    ]
 
 
-def search_documents(config: AppConfig, query: str, top_k: int | None = None) -> list[dict[str, str | float]]:
+def search_documents(
+    config: AppConfig, query: str, top_k: int | None = None
+) -> list[dict[str, str | float]]:
     store = build_store(config)
     hits = store.search(query=query, top_k=top_k or config.top_k)
     return [
@@ -27,4 +32,4 @@ def search_documents(config: AppConfig, query: str, top_k: int | None = None) ->
 
 
 def get_system_time() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()

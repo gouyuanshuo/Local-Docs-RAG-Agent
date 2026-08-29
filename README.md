@@ -145,6 +145,10 @@ These files define how the repo is organized and how work should move forward:
   - current task board and short-horizon execution list
 - `docs/development-roadmap.md`
   - long-horizon roadmap and phase plan
+- `docs/architecture.md`
+  - module boundaries, dependency direction, state ownership, and extension rules
+- `docs/code-review-2026-08-29.md`
+  - deep review findings, resolved defects, and remaining risks
 - `.codex/config.toml`
   - project-local workflow hints
 - `skills/backend-api/SKILL.md`
@@ -311,6 +315,16 @@ Install the development extra and run the focused backend suite:
 ```bash
 python -m pip install -e .[agents,qdrant,dev]
 python -m pytest
+```
+
+Run the complete deterministic quality gate with:
+
+```bash
+python -m ruff check backend/src tests scripts
+python -m mypy backend/src
+python -m pytest
+python -m compileall -q backend/src
+pnpm run build
 ```
 
 The suite covers provider configuration, embedding batching/retry behavior, Qdrant
