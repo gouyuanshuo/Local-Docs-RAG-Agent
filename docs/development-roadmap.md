@@ -282,7 +282,13 @@ It matters, but measurement and reliability improve project credibility more dir
 - `source_path` payload index bootstrap has been added for safe source-level deletes
 - Qdrant client timeout is now configurable:
   - `QDRANT_TIMEOUT_S`
+- embedding calls are split into configurable request batches:
+  - `EMBEDDING_BATCH_SIZE`
+- external HTTP clients now have an explicit environment-proxy switch:
+  - `EXTERNAL_HTTP_TRUST_ENV`
+- focused automated tests now cover embedding batching/retry and incremental Qdrant lifecycle behavior
 - verified end-to-end `qdrant ingest -> ask -> eval` on live provider after clearing broken local proxy env settings
+- a later read-only connectivity check on 2026-08-29 reached a remote connection reset (`WinError 10054`), so live end-to-end verification should be repeated from a reachable network path
 
 ---
 

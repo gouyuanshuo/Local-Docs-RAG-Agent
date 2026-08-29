@@ -53,7 +53,10 @@ Current theme:
 - [x] Normalize Qdrant network-unreachable errors into actionable ingest diagnostics
 - [x] Add `source_path` payload index bootstrap for Qdrant delete filters
 - [x] Add configurable Qdrant client timeout (`QDRANT_TIMEOUT_S`)
-- [ ] Normalize proxy-env handling for external providers (`HTTP_PROXY/HTTPS_PROXY/ALL_PROXY`) in dev docs/bootstrap
+- [x] Add configurable embedding request batching (`EMBEDDING_BATCH_SIZE`)
+- [x] Normalize proxy-env handling for external providers (`HTTP_PROXY/HTTPS_PROXY/ALL_PROXY`) in dev docs/bootstrap
+- [x] Add focused automated tests for embedding batching/retry and incremental Qdrant lifecycle behavior
+- [ ] Re-run live `qdrant ingest -> ask -> eval` from a network path that can reach the configured cloud endpoint (current direct check resets with `WinError 10054`)
 
 ## Review notes
 

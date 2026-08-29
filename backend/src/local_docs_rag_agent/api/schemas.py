@@ -47,6 +47,7 @@ class AppInfoResponse(BaseModel):
     chunk_size: int
     chunk_overlap: int
     qdrant_collection: str
+    external_http_trust_env: bool
 
 
 class DocumentsResponse(BaseModel):

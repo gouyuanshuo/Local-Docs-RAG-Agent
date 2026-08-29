@@ -27,6 +27,7 @@ def build_store(config: AppConfig, embedding_provider: EmbeddingProvider | None 
             collection_name=config.qdrant_collection,
             timeout_s=config.qdrant_timeout_s,
             embedding_provider=embedding_provider,
+            trust_env=config.external_http_trust_env,
         )
     return LocalJsonlChunkStore(config.index_path, embedding_provider=embedding_provider)
 
@@ -56,6 +57,7 @@ def ingest_documents(config: AppConfig) -> list[DocumentChunk]:
     source_checksums = {source_path: _checksum(text) for source_path, text in source_texts.items()}
 
     embedding_provider = build_embedding_provider(config)
+    store = build_store(config, embedding_provider=embedding_provider)
     previous_manifest = _read_manifest(config.ingest_manifest_path)
     previous_sources = previous_manifest.get("sources", {})
 
@@ -66,7 +68,15 @@ def ingest_documents(config: AppConfig) -> list[DocumentChunk]:
         if previous_sources.get(source_path, {}).get("checksum") != checksum
     )
 
-    sources_to_chunk = sorted(source_texts) if config.vector_backend == "local" else changed_sources
+    qdrant_collection_missing = (
+        isinstance(store, QdrantChunkStore) and not store.collection_exists()
+    )
+    if config.vector_backend == "local":
+        sources_to_chunk = sorted(source_texts)
+    elif qdrant_collection_missing:
+        sources_to_chunk = sorted(source_texts)
+    else:
+        sources_to_chunk = changed_sources
     chunks: list[DocumentChunk] = []
     for source_path in sources_to_chunk:
         text = source_texts[source_path]
@@ -99,7 +109,6 @@ def ingest_documents(config: AppConfig) -> list[DocumentChunk]:
             f"action_hint={action_hint}"
         )
 
-    store = build_store(config, embedding_provider=embedding_provider)
     replaced_sources = sorted({chunk.source_path for chunk in chunks}) if config.vector_backend == "qdrant" else []
     store.save(
         chunks,
@@ -117,11 +126,22 @@ def ingest_documents(config: AppConfig) -> list[DocumentChunk]:
 
 
 def ensure_index(config: AppConfig) -> None:
-    if config.vector_backend != "local":
+    if config.vector_backend == "qdrant":
+        if _is_qdrant_collection_missing(config):
+            ingest_documents(config)
         return
     if config.index_path.exists():
         return
     ingest_documents(config)
+
+
+def _is_qdrant_collection_missing(config: AppConfig) -> bool:
+    if config.vector_backend != "qdrant":
+        return False
+    store = build_store(config)
+    if not isinstance(store, QdrantChunkStore):
+        return False
+    return not store.collection_exists()
 
 
 def _checksum(text: str) -> str:

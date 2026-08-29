@@ -22,6 +22,9 @@ agents = [
 qdrant = [
     "qdrant-client>=1.9.0",
 ]
+dev = [
+    "pytest>=8.0.0",
+]
 
 [project.scripts]
 local-docs-rag = "local_docs_rag_agent.cli:main"
@@ -32,3 +35,7 @@ package-dir = {"" = "backend/src"}
 
 [tool.setuptools.packages.find]
 where = ["backend/src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["backend/src"]

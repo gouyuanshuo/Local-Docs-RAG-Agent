@@ -14,10 +14,12 @@ class OpenAICompatibleChatProvider(ChatProvider):
         base_url: str | None = None,
         api_style: str = "responses",
         provider_label: str = "LLM",
+        trust_env: bool = True,
     ) -> None:
         self._model = model
         self._api_style = api_style
         self._provider_label = provider_label
+        self._trust_env = trust_env
         self._status = ProviderStatus(provider=provider_label.lower(), mode="ready")
         self._client = self._build_client(api_key, base_url) if api_key else None
         if not api_key:
@@ -99,7 +101,7 @@ class OpenAICompatibleChatProvider(ChatProvider):
 
     def _build_client(self, api_key: str, base_url: str | None):
         try:
-            from openai import OpenAI
+            from openai import DefaultHttpxClient, OpenAI
         except Exception:
             self._status = ProviderStatus(
                 provider=self._provider_label.lower(),
@@ -110,6 +112,8 @@ class OpenAICompatibleChatProvider(ChatProvider):
         client_kwargs = {"api_key": api_key}
         if base_url:
             client_kwargs["base_url"] = base_url
+        if not self._trust_env:
+            client_kwargs["http_client"] = DefaultHttpxClient(trust_env=False)
         return OpenAI(**client_kwargs)
 
     def _fallback_answer(self, question: str, context: str) -> str:

@@ -36,6 +36,7 @@ type AppInfo = {
   chunk_size: number;
   chunk_overlap: number;
   qdrant_collection: string;
+  external_http_trust_env: boolean;
 };
 
 type Health = {
@@ -514,6 +515,12 @@ export default function App() {
               <div>
                 <dt>Qdrant collection</dt>
                 <dd>{info?.qdrant_collection ?? "loading..."}</dd>
+              </div>
+              <div>
+                <dt>Environment proxy</dt>
+                <dd>
+                  {info ? (info.external_http_trust_env ? "enabled" : "ignored") : "loading..."}
+                </dd>
               </div>
             </dl>
           </article>

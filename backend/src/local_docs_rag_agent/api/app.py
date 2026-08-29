@@ -50,6 +50,7 @@ def create_app() -> FastAPI:
             "http://localhost:5173",
             "http://localhost:5174",
         ],
+        allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?$",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -85,6 +86,7 @@ def create_app() -> FastAPI:
             chunk_size=config.chunk_size,
             chunk_overlap=config.chunk_overlap,
             qdrant_collection=config.qdrant_collection,
+            external_http_trust_env=config.external_http_trust_env,
         )
 
     @app.get("/api/documents", response_model=DocumentsResponse)

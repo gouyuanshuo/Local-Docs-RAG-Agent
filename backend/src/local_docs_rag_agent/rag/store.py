@@ -95,6 +95,7 @@ class QdrantChunkStore:
         collection_name: str,
         timeout_s: int,
         embedding_provider: EmbeddingProvider,
+        trust_env: bool = True,
     ) -> None:
         try:
             from qdrant_client import QdrantClient
@@ -103,10 +104,28 @@ class QdrantChunkStore:
                 "qdrant-client is not installed. Install with `pip install -e .[qdrant]`."
             ) from exc
 
-        self._client = QdrantClient(url=url, api_key=api_key, timeout=timeout_s)
+        self._client = QdrantClient(
+            url=url,
+            api_key=api_key,
+            timeout=timeout_s,
+            trust_env=trust_env,
+        )
         self._url = url
         self._collection_name = collection_name
         self._embedding_provider = embedding_provider
+        self._trust_env = trust_env
+
+    def collection_exists(self) -> bool:
+        try:
+            return bool(self._client.collection_exists(self._collection_name))
+        except Exception as exc:
+            raise _qdrant_operation_error(
+                operation="collection_exists",
+                url=self._url,
+                collection_name=self._collection_name,
+                exc=exc,
+                trust_env=self._trust_env,
+            ) from exc
 
     def save(
         self,
@@ -168,6 +187,7 @@ class QdrantChunkStore:
                 url=self._url,
                 collection_name=self._collection_name,
                 exc=exc,
+                trust_env=self._trust_env,
             ) from exc
 
     def load(self) -> list[DocumentChunk]:
@@ -184,6 +204,7 @@ class QdrantChunkStore:
                 url=self._url,
                 collection_name=self._collection_name,
                 exc=exc,
+                trust_env=self._trust_env,
             ) from exc
 
     def search(self, query: str, top_k: int) -> list[RetrievalHit]:
@@ -217,6 +238,7 @@ class QdrantChunkStore:
                 url=self._url,
                 collection_name=self._collection_name,
                 exc=exc,
+                trust_env=self._trust_env,
             ) from exc
 
     @property
@@ -254,6 +276,7 @@ class QdrantChunkStore:
                     url=self._url,
                     collection_name=self._collection_name,
                     exc=exc,
+                    trust_env=self._trust_env,
                 ) from exc
 
     def _ensure_source_path_index(self) -> None:
@@ -342,15 +365,26 @@ def _collection_vector_size(client, collection_name: str) -> int:
     raise RuntimeError("Unable to determine Qdrant collection vector size.")
 
 
-def _qdrant_operation_error(operation: str, url: str, collection_name: str, exc: Exception) -> RuntimeError:
+def _qdrant_operation_error(
+    operation: str,
+    url: str,
+    collection_name: str,
+    exc: Exception,
+    trust_env: bool | None = None,
+) -> RuntimeError:
     exc_name = exc.__class__.__name__
     message = str(exc)
     if _looks_like_qdrant_unreachable(message):
+        if trust_env is False:
+            proxy_hint = "Environment proxies are already disabled for this client."
+        else:
+            proxy_hint = "If stale proxy variables are present, set EXTERNAL_HTTP_TRUST_ENV=false."
         return RuntimeError(
             "Qdrant operation failed because the service appears unreachable.\n"
             f"operation={operation} collection={collection_name} url={url}\n"
             f"error={exc_name}: {message}\n"
-            "action_hint=check QDRANT_URL, confirm network access, and verify the service is running."
+            "action_hint=check QDRANT_URL, confirm network access, and verify the service is running. "
+            f"{proxy_hint}"
         )
     return RuntimeError(
         "Qdrant operation failed.\n"
@@ -371,7 +405,11 @@ def _looks_like_qdrant_unreachable(message: str) -> bool:
             "temporary failure in name resolution",
             "nodename nor servname provided",
             "winerror 10061",
+            "winerror 10054",
             "connecterror",
             "responsehandlingexception",
+            "connection reset",
+            "forcibly closed",
+            "server disconnected",
         )
     )

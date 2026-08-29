@@ -22,6 +22,18 @@ def _optional_int_env(name: str) -> int | None:
     return int(value) if value else None
 
 
+def _bool_env(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be one of: true, false, 1, 0, yes, no, on, off")
+
+
 def _list_env(name: str) -> list[str]:
     value = os.getenv(name, "")
     return [item.strip() for item in value.split(",") if item.strip()]
@@ -45,6 +57,7 @@ class AppConfig:
     embedding_base_url: str | None
     embedding_model: str
     embedding_dimensions: int | None
+    embedding_batch_size: int
     embedding_max_retries: int
     embedding_retry_backoff_ms: int
     openai_api_key: str | None
@@ -61,6 +74,7 @@ class AppConfig:
     qdrant_api_key: str | None
     qdrant_collection: str
     qdrant_timeout_s: int
+    external_http_trust_env: bool
     top_k: int
     chunk_strategy: str
     chunk_size: int
@@ -84,6 +98,7 @@ class AppConfig:
             embedding_base_url=os.getenv("EMBEDDING_BASE_URL") or os.getenv("LLM_BASE_URL"),
             embedding_model=os.getenv("EMBEDDING_MODEL") or _default_embedding_model(embedding_provider),
             embedding_dimensions=_optional_int_env("EMBEDDING_DIMENSIONS"),
+            embedding_batch_size=_int_env("EMBEDDING_BATCH_SIZE", 10),
             embedding_max_retries=_int_env("EMBEDDING_MAX_RETRIES", 2),
             embedding_retry_backoff_ms=_int_env("EMBEDDING_RETRY_BACKOFF_MS", 800),
             openai_api_key=os.getenv("OPENAI_API_KEY"),
@@ -100,6 +115,7 @@ class AppConfig:
             qdrant_api_key=os.getenv("QDRANT_API_KEY"),
             qdrant_collection=os.getenv("QDRANT_COLLECTION", "local-docs-rag"),
             qdrant_timeout_s=_int_env("QDRANT_TIMEOUT_S", 30),
+            external_http_trust_env=_bool_env("EXTERNAL_HTTP_TRUST_ENV", True),
             top_k=_int_env("TOP_K", 4),
             chunk_strategy=os.getenv("CHUNK_STRATEGY", "markdown").strip().lower(),
             chunk_size=_int_env("CHUNK_SIZE", 800),

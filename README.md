@@ -215,9 +215,11 @@ The FastAPI app currently exposes:
 
 - `GET /api/health`
 - `GET /api/info`
+- `GET /api/documents`
 - `POST /api/ingest`
 - `POST /api/ask`
 - `POST /api/eval`
+- `POST /api/eval/compare`
 
 ## Configuration
 
@@ -238,11 +240,36 @@ The most important settings live in `.env`.
 - `EMBEDDING_BASE_URL`
 - `EMBEDDING_MODEL`
 - `EMBEDDING_DIMENSIONS`
+- `EMBEDDING_BATCH_SIZE`
+- `EMBEDDING_MAX_RETRIES`
+- `EMBEDDING_RETRY_BACKOFF_MS`
 
 ### Retrieval backend
 
 - `VECTOR_BACKEND=local`
 - `VECTOR_BACKEND=qdrant`
+- `QDRANT_URL`
+- `QDRANT_API_KEY`
+- `QDRANT_COLLECTION`
+- `QDRANT_TIMEOUT_S`
+
+### External HTTP proxy behavior
+
+OpenAI-compatible chat, embeddings, Agents SDK, and Qdrant clients honor standard
+`HTTP_PROXY`, `HTTPS_PROXY`, and `ALL_PROXY` variables by default. If a stale local
+proxy causes connection-refused errors, set this in `.env` instead of changing the
+machine-wide environment:
+
+```bash
+EXTERNAL_HTTP_TRUST_ENV=false
+```
+
+Keep the default value `true` when the provider is reachable only through a proxy.
+Use the read-only connectivity check to see the normalized Qdrant diagnostic:
+
+```bash
+python scripts/test_qdrant.py
+```
 
 ### Runtime
 
@@ -274,7 +301,21 @@ EMBEDDING_API_KEY=your_dashscope_key
 EMBEDDING_BASE_URL=https://dashscope-intl.aliyuncs.com/compatible-mode/v1
 EMBEDDING_MODEL=text-embedding-v4
 EMBEDDING_DIMENSIONS=1024
+EMBEDDING_BATCH_SIZE=10
 ```
+
+## Tests
+
+Install the development extra and run the focused backend suite:
+
+```bash
+python -m pip install -e .[agents,qdrant,dev]
+python -m pytest
+```
+
+The suite covers provider configuration, embedding batching/retry behavior, Qdrant
+network diagnostics, and incremental-ingest lifecycle behavior without calling live
+model providers.
 
 ## Project highlights
 

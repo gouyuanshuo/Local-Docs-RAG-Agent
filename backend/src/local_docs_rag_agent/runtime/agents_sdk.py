@@ -35,17 +35,17 @@ def answer_with_agents_sdk(config: AppConfig, question: str) -> AgentAnswer:
         )
 
     from agents import Agent, RunContextWrapper, Runner, function_tool, set_default_openai_client
-    from openai import AsyncOpenAI
+    from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 
     globals()["RunContextWrapper"] = RunContextWrapper
 
-    set_default_openai_client(
-        AsyncOpenAI(
-            api_key=config.llm_api_key,
-            base_url=config.llm_base_url,
-        ),
-        use_for_tracing=False,
-    )
+    client_kwargs: dict[str, object] = {
+        "api_key": config.llm_api_key,
+        "base_url": config.llm_base_url,
+    }
+    if not config.external_http_trust_env:
+        client_kwargs["http_client"] = DefaultAsyncHttpxClient(trust_env=False)
+    set_default_openai_client(AsyncOpenAI(**client_kwargs), use_for_tracing=False)
 
     @function_tool
     def list_local_documents(ctx: RunContextWrapper[AgentRuntimeContext]) -> str:
