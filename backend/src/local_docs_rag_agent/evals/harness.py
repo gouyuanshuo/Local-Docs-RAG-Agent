@@ -1,3 +1,18 @@
+"""Loads eval cases and scores one run of the agent against them.
+
+The harness measures five things separately, because they fail for different reasons
+and a single blended score would hide which part broke:
+
+* `retrieval_source_hit_rate` — did retrieval find the right documents at all?
+* `retrieval_span_hit_rate` — did the retrieved text contain the expected evidence?
+* `answer_keyword_hit_rate` — did the answer say what it should?
+* `citation_source_hit_rate` — did the answer cite the right documents?
+* `citation_span_hit_rate` — did the cited spans contain the expected evidence?
+
+An expectation left empty scores 1.0 rather than 0.0, so a case can assert on citation
+quality without being forced to also assert on answer wording.
+"""
+
 from __future__ import annotations
 
 import json
@@ -10,41 +25,9 @@ from local_docs_rag_agent.exceptions import DataFormatError
 from local_docs_rag_agent.models import EvalCase, EvalResult
 
 
-def _normalize_eval_case(payload: dict[str, object]) -> EvalCase:
-    question = payload.get("question")
-    if not isinstance(question, str) or not question.strip():
-        raise DataFormatError("Eval case question must be a non-empty string")
-    answer_keywords = _string_list(
-        payload.get("expected_answer_keywords", payload.get("expected_keywords", [])),
-        "expected_answer_keywords",
-    )
-    source_paths = _string_list(
-        payload.get("expected_source_paths", payload.get("expected_sources", [])),
-        "expected_source_paths",
-    )
-    span_keywords = _string_list(
-        payload.get("expected_span_keywords", []),
-        "expected_span_keywords",
-    )
-    retrieval_keywords = _string_list(
-        payload.get("expected_retrieval_keywords", span_keywords),
-        "expected_retrieval_keywords",
-    )
-    notes = payload.get("notes")
-    if notes is not None and not isinstance(notes, str):
-        raise DataFormatError("Eval case notes must be a string or null")
-
-    return EvalCase(
-        question=question.strip(),
-        expected_answer_keywords=answer_keywords,
-        expected_source_paths=source_paths,
-        expected_span_keywords=span_keywords,
-        expected_retrieval_keywords=retrieval_keywords,
-        notes=notes,
-    )
-
-
 def load_eval_cases(eval_path: Path) -> list[EvalCase]:
+    """Read a JSONL eval file, reporting the line number of the first bad case."""
+
     cases: list[EvalCase] = []
     line_number: int | str = "unknown"
     try:
@@ -68,14 +51,71 @@ def load_eval_cases(eval_path: Path) -> list[EvalCase]:
     return cases
 
 
-def _match_rate(expected_items: list[str], observed_text: str) -> float:
+def run_eval(config: AppConfig) -> list[EvalResult]:
+    """Answer every eval case under `config` and score the results."""
+
+    agent = LocalDocsAgent(config)
+    results: list[EvalResult] = []
+
+    for case in load_eval_cases(config.eval_path):
+        started_at = time.perf_counter()
+        response = agent.answer(case.question)
+        response_time_ms = round((time.perf_counter() - started_at) * 1000, 2)
+
+        answer_text = response.answer.lower()
+        citation_text = " ".join(span.text for span in response.citation_spans).lower()
+        retrieved_text = " ".join(hit.chunk.text for hit in response.retrieved_chunks).lower()
+        retrieved_sources = list(
+            dict.fromkeys(hit.chunk.source_path for hit in response.retrieved_chunks)
+        )
+
+        result = EvalResult(
+            question=case.question,
+            answer=response.answer,
+            citations=response.citations,
+            retrieved_sources=retrieved_sources,
+            answer_keyword_hit_rate=keyword_match_rate(case.expected_answer_keywords, answer_text),
+            retrieval_source_hit_rate=source_match_rate(
+                case.expected_source_paths, retrieved_sources
+            ),
+            retrieval_span_hit_rate=keyword_match_rate(
+                case.expected_retrieval_keywords, retrieved_text
+            ),
+            citation_source_hit_rate=source_match_rate(
+                case.expected_source_paths, response.citations
+            ),
+            citation_span_hit_rate=keyword_match_rate(
+                case.expected_span_keywords, citation_text
+            ),
+            response_time_ms=response_time_ms,
+            diagnostics=response.diagnostics,
+            expected_source_paths=case.expected_source_paths,
+            expected_answer_keywords=case.expected_answer_keywords,
+            expected_span_keywords=case.expected_span_keywords,
+            expected_retrieval_keywords=case.expected_retrieval_keywords,
+        )
+        result.failure_reasons = failure_reasons(result)
+        results.append(result)
+
+    return results
+
+
+def keyword_match_rate(expected_items: list[str], observed_text: str) -> float:
+    """Return the fraction of expected keywords present in `observed_text`.
+
+    An empty expectation is neutral success, so a case may assert on some dimensions
+    without being penalised for the ones it leaves unspecified.
+    """
+
     if not expected_items:
         return 1.0
     hits = sum(1 for item in expected_items if item.lower() in observed_text)
     return hits / len(expected_items)
 
 
-def _source_rate(expected_sources: list[str], observed_sources: list[str]) -> float:
+def source_match_rate(expected_sources: list[str], observed_sources: list[str]) -> float:
+    """Return the fraction of expected source paths present in `observed_sources`."""
+
     if not expected_sources:
         return 1.0
     observed = set(observed_sources)
@@ -83,7 +123,9 @@ def _source_rate(expected_sources: list[str], observed_sources: list[str]) -> fl
     return hits / len(expected_sources)
 
 
-def _failure_reasons(result: EvalResult) -> list[str]:
+def failure_reasons(result: EvalResult) -> list[str]:
+    """Name every dimension the case fell short on, for triage without re-running it."""
+
     reasons: list[str] = []
     if result.retrieval_source_hit_rate < 1.0:
         reasons.append("retrieval_missed_expected_source")
@@ -98,43 +140,41 @@ def _failure_reasons(result: EvalResult) -> list[str]:
     return reasons
 
 
-def run_eval(config: AppConfig) -> list[EvalResult]:
-    agent = LocalDocsAgent(config)
-    cases = load_eval_cases(config.eval_path)
-    results: list[EvalResult] = []
+def _normalize_eval_case(payload: dict[str, object]) -> EvalCase:
+    question = payload.get("question")
+    if not isinstance(question, str) or not question.strip():
+        raise DataFormatError("Eval case question must be a non-empty string")
+    # The shorter key names are the original field names, still accepted for old files.
+    answer_keywords = _string_list(
+        payload.get("expected_answer_keywords", payload.get("expected_keywords", [])),
+        "expected_answer_keywords",
+    )
+    source_paths = _string_list(
+        payload.get("expected_source_paths", payload.get("expected_sources", [])),
+        "expected_source_paths",
+    )
+    span_keywords = _string_list(
+        payload.get("expected_span_keywords", []),
+        "expected_span_keywords",
+    )
+    # Retrieval expectations default to the citation expectations, because evidence that
+    # must appear in a citation must first have been retrieved.
+    retrieval_keywords = _string_list(
+        payload.get("expected_retrieval_keywords", span_keywords),
+        "expected_retrieval_keywords",
+    )
+    notes = payload.get("notes")
+    if notes is not None and not isinstance(notes, str):
+        raise DataFormatError("Eval case notes must be a string or null")
 
-    for case in cases:
-        started_at = time.perf_counter()
-        response = agent.answer(case.question)
-        response_time_ms = round((time.perf_counter() - started_at) * 1000, 2)
-
-        answer_lower = response.answer.lower()
-        citation_text = " ".join(span.text for span in response.citation_spans).lower()
-        retrieved_text = " ".join(hit.chunk.text for hit in response.retrieved_chunks).lower()
-        retrieved_sources = list(
-            dict.fromkeys(hit.chunk.source_path for hit in response.retrieved_chunks)
-        )
-
-        result = EvalResult(
-            question=case.question,
-            answer=response.answer,
-            citations=response.citations,
-            retrieved_sources=retrieved_sources,
-            answer_keyword_hit_rate=_match_rate(case.expected_answer_keywords, answer_lower),
-            retrieval_source_hit_rate=_source_rate(case.expected_source_paths, retrieved_sources),
-            retrieval_span_hit_rate=_match_rate(case.expected_retrieval_keywords, retrieved_text),
-            citation_source_hit_rate=_source_rate(case.expected_source_paths, response.citations),
-            citation_span_hit_rate=_match_rate(case.expected_span_keywords, citation_text),
-            response_time_ms=response_time_ms,
-            expected_source_paths=case.expected_source_paths,
-            expected_answer_keywords=case.expected_answer_keywords,
-            expected_span_keywords=case.expected_span_keywords,
-            expected_retrieval_keywords=case.expected_retrieval_keywords,
-        )
-        result.failure_reasons = _failure_reasons(result)
-        results.append(result)
-
-    return results
+    return EvalCase(
+        question=question.strip(),
+        expected_answer_keywords=answer_keywords,
+        expected_source_paths=source_paths,
+        expected_span_keywords=span_keywords,
+        expected_retrieval_keywords=retrieval_keywords,
+        notes=notes,
+    )
 
 
 def _string_list(value: object, field_name: str) -> list[str]:

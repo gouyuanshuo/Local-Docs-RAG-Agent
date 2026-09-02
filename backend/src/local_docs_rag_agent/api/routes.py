@@ -1,3 +1,10 @@
+"""Maps HTTP requests to application operations.
+
+Handlers stay thin on purpose: they read a fresh `AppConfig`, call one application
+function, and hand the result to a presenter. Retrieval and provider policy live
+behind those calls, so the CLI can reach the same behaviour without going through HTTP.
+"""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -18,13 +25,18 @@ from local_docs_rag_agent.api.schemas import (
     IngestResponse,
 )
 from local_docs_rag_agent.config import AppConfig
-from local_docs_rag_agent.evals.comparison import run_eval_matrix
+from local_docs_rag_agent.evals.comparison import (
+    default_chunk_strategies,
+    default_vector_backends,
+    run_eval_matrix,
+)
 from local_docs_rag_agent.evals.harness import run_eval
 from local_docs_rag_agent.presenters import serialize_answer, serialize_eval_summary
-from local_docs_rag_agent.rag.ingest import ensure_index, ingest_documents
+from local_docs_rag_agent.rag import ensure_index, ingest_documents
 from local_docs_rag_agent.tools import list_documents
 
 router = APIRouter(prefix="/api")
+API_NAME = "Local Docs RAG Agent"
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -41,7 +53,7 @@ def info() -> AppInfoResponse:
     documents = list_documents(config)
     return AppInfoResponse.model_validate(
         {
-            "name": "Local Docs RAG Agent",
+            "name": API_NAME,
             "runtime": config.agent_runtime,
             "vector_backend": config.vector_backend,
             "docs_dir": str(config.docs_dir),
@@ -100,10 +112,8 @@ def compare_eval(payload: EvalCompareRequest) -> EvalCompareResponse:
     comparison = run_eval_matrix(
         config=config,
         runtimes=list(payload.runtimes or [config.agent_runtime]),
-        chunk_strategies=list(payload.chunk_strategies or ["fixed", "paragraph", "markdown"]),
-        vector_backends=list(
-            payload.vector_backends or (["local", "qdrant"] if config.qdrant_url else ["local"])
-        ),
+        chunk_strategies=list(payload.chunk_strategies or default_chunk_strategies()),
+        vector_backends=list(payload.vector_backends or default_vector_backends(config)),
         top_ks=list(payload.top_ks or [config.top_k]),
         chunk_sizes=list(payload.chunk_sizes or [config.chunk_size]),
         chunk_overlaps=list(payload.chunk_overlaps or [config.chunk_overlap]),

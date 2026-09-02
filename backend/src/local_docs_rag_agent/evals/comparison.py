@@ -1,30 +1,63 @@
+"""Runs the eval harness across a matrix of retrieval and runtime configurations.
+
+Each cell re-ingests and re-evaluates under one `AppConfig` variant so the results are
+comparable. A cell that cannot run is reported as `skipped` with a reason, and a cell
+that fails is reported as `error`; neither is silently dropped, because a leaderboard
+that hides its gaps is worse than no leaderboard.
+"""
+
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from itertools import product
 from math import prod
 from pathlib import Path
 
 from local_docs_rag_agent.config import AppConfig
+from local_docs_rag_agent.constants import CHUNK_STRATEGIES, ChunkStrategyName, VectorBackendName
 from local_docs_rag_agent.evals.harness import run_eval
 from local_docs_rag_agent.exceptions import ConfigurationError, VectorStoreError
-from local_docs_rag_agent.presenters import serialize_eval_summary
+from local_docs_rag_agent.presenters import serialize_eval_summary, serialize_retrieval_config
+from local_docs_rag_agent.rag import ingest_documents
 from local_docs_rag_agent.rag.file_io import atomic_write_text
-from local_docs_rag_agent.rag.ingest import ingest_documents
 
+# Guards API and CLI input from expanding into an unbounded Cartesian workload.
 MAX_MATRIX_RUNS = 128
+
+
+def default_chunk_strategies() -> list[ChunkStrategyName]:
+    """Return the chunk strategies compared when a caller does not choose any."""
+
+    return list(CHUNK_STRATEGIES)
+
+
+def default_vector_backends(config: AppConfig) -> list[VectorBackendName]:
+    """Return the vector backends worth comparing for `config`.
+
+    Qdrant is only included when a URL is configured; otherwise every Qdrant cell
+    would report the same `missing_qdrant_url` skip.
+    """
+
+    return ["local", "qdrant"] if config.qdrant_url else ["local"]
 
 
 def run_eval_matrix(
     config: AppConfig,
-    runtimes: list[str],
-    chunk_strategies: list[str],
-    vector_backends: list[str],
-    top_ks: list[int],
-    chunk_sizes: list[int],
-    chunk_overlaps: list[int],
+    runtimes: Sequence[str],
+    chunk_strategies: Sequence[str],
+    vector_backends: Sequence[str],
+    top_ks: Sequence[int],
+    chunk_sizes: Sequence[int],
+    chunk_overlaps: Sequence[int],
     output_path: Path | None = None,
 ) -> dict[str, object]:
+    """Evaluate every combination of the requested axes and rank the results.
+
+    Raises `ConfigurationError` when an axis is empty or when the Cartesian product
+    would exceed `MAX_MATRIX_RUNS`, so a single request cannot start an unbounded run.
+    """
+
     axis_lengths = [
         len(runtimes),
         len(vector_backends),
@@ -64,12 +97,12 @@ def run_eval_matrix(
 
     payload = {
         "num_runs": len(runs),
-        "runtimes": runtimes,
-        "chunk_strategies": chunk_strategies,
-        "vector_backends": vector_backends,
-        "top_ks": top_ks,
-        "chunk_sizes": chunk_sizes,
-        "chunk_overlaps": chunk_overlaps,
+        "runtimes": list(runtimes),
+        "chunk_strategies": list(chunk_strategies),
+        "vector_backends": list(vector_backends),
+        "top_ks": list(top_ks),
+        "chunk_sizes": list(chunk_sizes),
+        "chunk_overlaps": list(chunk_overlaps),
         "leaderboard": _build_leaderboard(runs),
         "runs": runs,
     }
@@ -86,7 +119,7 @@ def _run_matrix_case(config: AppConfig) -> dict[str, object]:
     label = _run_label(config)
     common = {
         "label": label,
-        "retrieval_config": _retrieval_config_snapshot(config),
+        "retrieval_config": serialize_retrieval_config(config),
         "runtime": config.agent_runtime,
     }
     skip_reason = _skip_reason(config)
@@ -111,18 +144,6 @@ def _run_matrix_case(config: AppConfig) -> dict[str, object]:
             "status": "error",
             "error": f"{type(exc).__name__}: {exc}",
         }
-
-
-def _retrieval_config_snapshot(config: AppConfig) -> dict[str, object]:
-    return {
-        "vector_backend": config.vector_backend,
-        "chunk_strategy": config.chunk_strategy,
-        "chunk_size": config.chunk_size,
-        "chunk_overlap": config.chunk_overlap,
-        "top_k": config.top_k,
-        "docs_dir": str(config.docs_dir),
-        "docs_exclude_patterns": list(config.docs_exclude_patterns),
-    }
 
 
 def _run_label(config: AppConfig) -> str:
