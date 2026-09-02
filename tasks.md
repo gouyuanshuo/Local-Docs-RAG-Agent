@@ -28,6 +28,7 @@ Current active phase:
 Current theme:
 
 - make Qdrant indexing lifecycle stable and maintainable
+- keep module boundaries and commit history legible as the surface grows
 
 ## Active tasks
 
@@ -56,7 +57,10 @@ Current theme:
 - [x] Add configurable embedding request batching (`EMBEDDING_BATCH_SIZE`)
 - [x] Normalize proxy-env handling for external providers (`HTTP_PROXY/HTTPS_PROXY/ALL_PROXY`) in dev docs/bootstrap
 - [x] Add focused automated tests for embedding batching/retry and incremental Qdrant lifecycle behavior
-- [ ] Re-run live `qdrant ingest -> ask -> eval` from a network path that can reach the configured cloud endpoint (current direct check resets with `WinError 10054`)
+- [ ] Re-run live `qdrant ingest -> ask -> eval` from a network path that can reach the configured cloud endpoint
+  - 2026-08-30: chat and embedding providers independently verified `live`
+  - 2026-08-30: Qdrant TLS connection still resets with `WinError 10054` using the configured URL, disabled environment proxies, and explicit port `6333`
+  - use `python scripts/verify_live_qdrant.py`; the gate rejects provider/runtime fallback
 
 ### Engineering hardening review (2026-08-29)
 
@@ -71,9 +75,36 @@ Current theme:
 - [x] Remove unused compatibility wrapper modules
 - [x] Add architecture and deep-review documentation
 - [x] Add strict Ruff/mypy development gates and regression tests
-- [ ] Add CI enforcement for Ruff, mypy, pytest, compileall, and frontend build
-- [ ] Split `frontend/src/App.tsx` into API, hooks, and feature components
-- [ ] Add deterministic Agents SDK fake-runner integration tests
+- [x] Add CI enforcement for Ruff, mypy, pytest, compileall, and frontend build
+- [x] Split `frontend/src/App.tsx` into API, hooks, and feature components
+- [x] Add deterministic Agents SDK fake-runner integration tests
+- [x] Preserve runtime/provider diagnostics in per-case eval results
+- [x] Add a strict live Qdrant verification script with stage-specific diagnostics
+
+### Structure and readability pass
+
+- [x] Remove stray root shim scripts and untrack already-ignored build output
+- [x] Rename `scripts/test_*.py` to `check_*` so manual checks are not mistaken for tests
+- [x] Add `constants.py` as the single source of truth for closed option sets
+- [x] Extract typed environment readers and validators into `env.py`
+- [x] Split the `ChunkStore` protocol, the JSONL store, and store construction apart
+- [x] Move document discovery out of the ingest pipeline into `rag/discovery.py`
+- [x] Promote the Qdrant error helpers to public names and drop the re-export shim
+- [x] Add a `rag/__init__.py` facade and route external imports through it
+- [x] Decompose `presenters.py` into composable serializers and remove the duplicate
+      retrieval-config snapshot in `evals/comparison.py`
+- [x] Replace the CLI command if-chain with an argparse handler registry
+- [x] Fix the indented prompt-context blocks that silently disabled the extractive
+      fallback, and cover the format contract with tests
+- [x] Add module docstrings that record intent and invariants, not restated signatures
+- [x] Rewrite the commit history into Conventional Commits
+
+### Follow-ups
+
+- [ ] Consider grouping `AppConfig` into per-concern sub-configs if the field count
+      keeps growing; the flat shape is still readable at its current size
+- [ ] Consider promoting `data/` report writing behind a small reporting module if more
+      report formats appear
 
 ## Review notes
 

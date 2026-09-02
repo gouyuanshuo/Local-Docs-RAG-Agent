@@ -95,35 +95,46 @@ The backend is responsible for:
 .
 |-- .codex/
 |   `-- config.toml
+|-- .github/
+|   `-- workflows/ci.yml
 |-- skills/
 |   |-- backend-api/
 |   `-- review-bugfix/
 |-- backend/
 |   `-- src/
 |       `-- local_docs_rag_agent/
-|           |-- api/
-|           |-- commands/
-|           |-- evals/
-|           |-- providers/
-|           |-- rag/
-|           |-- runtime/
-|           |-- agent.py
-|           |-- cli.py
-|           |-- config.py
-|           |-- models.py
-|           |-- presenters.py
-|           `-- tools.py
+|           |-- api/               HTTP delivery: app factory, routes, schemas
+|           |-- commands/          CLI command handlers
+|           |-- evals/             eval harness and comparison matrix
+|           |-- providers/         chat and embedding providers
+|           |-- rag/               discovery, chunking, stores, ingest
+|           |-- runtime/           answer runtimes and dispatch
+|           |-- agent.py           one-question facade
+|           |-- cli.py             argument parsing and command registry
+|           |-- config.py          immutable validated configuration
+|           |-- constants.py       shared closed option sets
+|           |-- env.py             typed env readers and validators
+|           |-- exceptions.py      expected-failure taxonomy
+|           |-- models.py          framework-free domain records
+|           |-- presenters.py      dataclass to JSON payload conversion
+|           `-- tools.py           capabilities exposed to agent runtimes
 |-- frontend/
 |   |-- src/
+|   |   |-- components/            focused panels and result rendering
+|   |   |-- hooks/                 workspace state and actions
+|   |   |-- lib/                   HTTP client and display formatting
+|   |   `-- types/                 backend-facing contracts
 |   |-- index.html
 |   |-- package.json
 |   `-- vite.config.ts
 |-- docs/
+|   |-- architecture.md
 |   |-- development-roadmap.md
 |   `-- sample/
 |-- data/
 |   `-- evals/
-|-- scripts/
+|-- scripts/                       manual, environment-dependent checks
+|-- tests/
 |-- AGENTS.md
 |-- spec.md
 |-- tasks.md
@@ -132,6 +143,17 @@ The backend is responsible for:
 |-- pnpm-workspace.yaml
 `-- README.md
 ```
+
+Two conventions keep the backend extensible:
+
+- `constants.py` is the single source of truth for every closed option set
+  (runtimes, chunk strategies, vector backends, API styles). Configuration parsing,
+  HTTP request validation, and CLI argument choices all derive from it, so adding an
+  option is one edit plus its implementation.
+- `rag/` is imported through its package facade. Code outside it imports from
+  `local_docs_rag_agent.rag`, not from individual modules, so the internal split
+  between the `ChunkStore` protocol, the two store implementations, and the ingest
+  pipeline stays free to change.
 
 ## Project docs
 
@@ -269,10 +291,25 @@ EXTERNAL_HTTP_TRUST_ENV=false
 ```
 
 Keep the default value `true` when the provider is reachable only through a proxy.
-Use the read-only connectivity check to see the normalized Qdrant diagnostic:
+
+`scripts/` holds manual, environment-dependent checks. They are named `check_*` and
+`verify_*` rather than `test_*` precisely because they are not part of the pytest
+suite: they talk to live services and must never run in CI.
+
+Read-only checks, safe against any deployment:
 
 ```bash
-python scripts/test_qdrant.py
+python scripts/check_chat_api.py
+python scripts/check_embedding_api.py
+python scripts/check_qdrant.py
+```
+
+The write/read/eval live gate writes to the configured collection, so run it only
+against a disposable or explicitly approved one. It fails if the runtime, chat, or
+embeddings silently degrade to fallback:
+
+```bash
+python scripts/verify_live_qdrant.py
 ```
 
 ### Runtime
@@ -327,9 +364,14 @@ python -m compileall -q backend/src
 pnpm run build
 ```
 
-The suite covers provider configuration, embedding batching/retry behavior, Qdrant
-network diagnostics, and incremental-ingest lifecycle behavior without calling live
-model providers.
+The suite covers environment parsing and configuration validation, CLI command
+wiring, provider configuration, embedding batching/retry behavior, Qdrant network
+diagnostics, incremental-ingest lifecycle behavior, prompt-context formatting and the
+extractive fallback, and deterministic Agents SDK tool/runner integration, all without
+calling live model providers.
+
+Pull requests and pushes run the same backend gates plus the strict TypeScript/Vite
+build through `.github/workflows/ci.yml`.
 
 ## Project highlights
 

@@ -62,6 +62,30 @@ The main repo layout is:
 - Keep changes small and composable when possible.
 - Do not treat fallback behavior as success; keep runtime state visible.
 - Prefer updating existing modules over creating new top-level abstractions too early.
+- Declare closed option sets once, in `backend/src/local_docs_rag_agent/constants.py`.
+  Configuration parsing, API request validation, and CLI choices all derive from it;
+  do not re-declare the same literal list in a second module.
+- Import `rag` through its package facade (`local_docs_rag_agent.rag`) from outside the
+  package, so its internal module split stays free to change.
+- See `docs/architecture.md` for the per-layer boundaries and the extension recipes for
+  adding a provider, a vector store, a runtime, a CLI command, or a config setting.
+
+## Commit convention
+
+Commits follow Conventional Commits:
+
+```text
+type(scope): short imperative description
+
+Optional body explaining the reason and motivation for the change.
+
+Optional footer for breaking changes or closed tasks.
+```
+
+Types in use: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`.
+
+The header states what changed; the body states why. Prefer a scope that names the
+affected area, such as `feat(rag):`, `fix(runtime):`, or `refactor(config):`.
 
 ## Task discipline
 

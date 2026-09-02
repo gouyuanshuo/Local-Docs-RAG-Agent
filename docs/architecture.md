@@ -37,11 +37,16 @@ provider policy. Both delegate to the same Python application modules.
 - `api/routes.py`
   - maps HTTP requests to application operations
 - `api/schemas.py`
-  - validates public request and response contracts
-- `cli.py` and `commands/`
-  - map command-line input to the same application operations
+  - validates public request and response contracts, using the option types from
+    `constants.py` rather than re-declaring them
+- `cli.py`
+  - builds the argument parser; each subcommand registers itself and binds a handler
+    with `set_defaults(handler=...)`, so `main` has no per-command branching
+- `commands/`
+  - the handlers themselves, taking an `AppConfig` plus parsed arguments
 - `presenters.py`
-  - converts internal dataclasses into JSON-ready payloads
+  - converts internal dataclasses into JSON-ready payloads through small composable
+    serializers that the API, the CLI, and the eval report all share
 
 The delivery layer may import application modules, but application modules must not
 import FastAPI, Pydantic, argparse, or frontend concerns.
@@ -66,6 +71,16 @@ import FastAPI, Pydantic, argparse, or frontend concerns.
 Runtime modules coordinate interfaces; they do not construct raw HTTP clients or
 implement vector-store protocols themselves.
 
+The prompt-context layout that `runtime/shared.py` produces is a contract, not a style
+choice. Each hit is one block introduced by an `[S1]`, `[S2]` marker, with every label
+starting at column 0 and the multi-line body as the final field. The extractive
+fallback in `providers/chat.py` parses those blocks back out when no live model is
+available, so an indented or reordered block silently disables the fallback: it reports
+that no supporting context was found even though retrieval succeeded and citations
+exist. Build these blocks by joining lines explicitly. Do not use an indented
+`textwrap.dedent` template, because an interpolated chunk body almost always contains a
+line at column 0, which leaves `dedent` with nothing to strip.
+
 ### Provider layer
 
 - `providers/base.py`
@@ -87,14 +102,22 @@ match the live collection.
 
 ### RAG and persistence layer
 
+- `rag/__init__.py`
+  - the package facade; code outside `rag` imports from here, not from the modules below
+- `rag/base.py`
+  - the `ChunkStore` protocol, with no implementation attached
+- `rag/discovery.py`
+  - document discovery and reading, also used to answer "what can this agent see?"
 - `rag/chunker.py`
   - fixed, paragraph, and Markdown-aware chunking with source spans
+- `rag/store_factory.py`
+  - the only place that turns `VECTOR_BACKEND` into a concrete store
 - `rag/ingest.py`
-  - source discovery, change planning, embedding attachment, and store commit
+  - change planning, embedding attachment, store commit, and index fingerprinting
 - `rag/manifest.py`
   - typed checksum/chunk manifest
-- `rag/store.py`
-  - `ChunkStore` protocol and local JSONL implementation
+- `rag/local_store.py`
+  - the JSONL implementation of `ChunkStore`
 - `rag/qdrant_store.py`
   - Qdrant collection lifecycle, pagination, delete/upsert, and error normalization
 - `rag/scoring.py`
@@ -102,9 +125,19 @@ match the live collection.
 - `rag/file_io.py`
   - atomic text-file replacement
 
+The dependency direction inside the package runs one way:
+
+```text
+discovery -> chunker -> ingest -> store_factory -> base / local_store / qdrant_store
+```
+
+`base` and `models` sit at the bottom and import nothing from the layers above them.
+Store construction lives in `store_factory` rather than `ingest`, so retrieval and the
+agent tools can build a store without importing the ingest pipeline.
+
 The ingest order is deliberate:
 
-1. validate and read `DOCS_DIR`
+1. validate and read `DOCS_DIR` before writing anything
 2. load the typed manifest
 3. compare the retrieval/embedding fingerprint and calculate removed/changed sources
 4. chunk only the required sources
@@ -117,21 +150,33 @@ deletes so old points cannot survive.
 
 ### Domain layer
 
+- `constants.py`
+  - the closed option sets shared by every layer: runtimes, chunk strategies, vector
+    backends, and API styles. The runtime tuples are derived from the `Literal` aliases
+    with `typing.get_args`, so the static type and the runtime validation cannot drift
+- `env.py`
+  - typed environment readers and value validators
 - `config.py`
-  - immutable validated runtime configuration
+  - immutable validated runtime configuration; declares *what* is configured, while
+    `env.py` owns *how* each value is read and checked
 - `models.py`
   - chunks, hits, answers, diagnostics, and eval records
 - `exceptions.py`
   - stable expected-failure taxonomy shared by API, CLI, and eval
 
 These modules are dependency-light and contain no framework-specific response types.
+`constants.py` sits at the very bottom and imports nothing from the project at all.
 
 ## Frontend boundary
 
-`frontend/` is a Vite + React + TypeScript client. It consumes only `/api/*` contracts.
-The current `frontend/src/App.tsx` still owns most request, state, and rendering logic;
-splitting API types/client code, feature hooks, and result panels is a documented
-follow-up rather than part of the Python refactor.
+`frontend/` is a Vite + React + TypeScript client. It consumes only `/api/*` contracts:
+
+- `types/api.ts` owns backend-facing TypeScript contracts
+- `lib/api.ts` owns HTTP and structured API errors
+- `lib/presentation.ts` owns display-only formatting
+- `hooks/useRagWorkspace.ts` owns workspace state and actions
+- `components/` owns focused panels and result rendering
+- `App.tsx` only composes the page layout
 
 ## State ownership
 
@@ -161,6 +206,9 @@ accidentally expand into an unbounded Cartesian workload.
 Unexpected programming errors are not converted into fallback success and remain
 visible during development.
 
+Per-case eval results retain the same runtime/provider diagnostics as interactive
+answers, allowing strict live verification to reject degradation anywhere in a run.
+
 ## Extension rules
 
 To add a provider:
@@ -172,18 +220,33 @@ To add a provider:
 
 To add a vector store:
 
-1. implement `ChunkStore`
-2. define replacement/deletion semantics explicitly
-3. normalize operational failures into `VectorStoreError`
-4. wire construction in `rag/ingest.py`
-5. add lifecycle and retrieval tests
+1. add the name to `VectorBackendName` in `constants.py`
+2. implement `ChunkStore` from `rag/base.py` in its own module
+3. define replacement/deletion semantics explicitly
+4. normalize operational failures into `VectorStoreError` with a stable `reason_code`
+5. wire construction in `rag/store_factory.py` and export it from `rag/__init__.py`
+6. add lifecycle and retrieval tests
 
 To add a runtime:
 
-1. return a complete `AgentAnswer`
-2. preserve requested vs actual runtime diagnostics
-3. use `runtime/shared.py` for citation assembly where possible
-4. add dispatch and API/CLI configuration validation
+1. add the name to `RuntimeName` in `constants.py`; configuration, request validation,
+   and CLI choices pick it up from there
+2. return a complete `AgentAnswer`
+3. preserve requested vs actual runtime diagnostics
+4. use `runtime/shared.py` for citation assembly where possible
+5. wire it into `runtime/dispatch.py`
+
+To add a CLI command:
+
+1. write a handler in `commands/`
+2. add a `_register_*` function in `cli.py` that binds it with `set_defaults`
+3. list that function in `COMMAND_REGISTRARS`
+
+To add a configuration setting:
+
+1. add the field to `AppConfig`
+2. read it in `from_env` with the matching helper from `env.py`
+3. validate it in `__post_init__`, which also covers variants built by `with_overrides`
 
 ## Quality gates
 
@@ -199,3 +262,5 @@ pnpm run build
 
 Live Qdrant/provider verification is a separate environment-dependent gate and must
 be reported separately from deterministic offline tests.
+
+GitHub Actions executes the deterministic gates in separate backend and frontend jobs.
