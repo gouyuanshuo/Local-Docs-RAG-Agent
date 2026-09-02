@@ -1,136 +1,205 @@
+"""Command-line entry point for ingest, ask, eval, and eval-compare.
+
+Each subcommand registers its own parser and binds a handler with
+`parser.set_defaults(handler=...)`, so `main` never grows a branch per command: it
+parses, then calls whichever handler the chosen subcommand supplied. Adding a command
+means adding one `_register_*` function and listing it in `COMMAND_REGISTRARS`.
+
+Argument choices come from `constants`, which keeps `--runtime basic` and
+`AGENT_RUNTIME=basic` describing the same set of values.
+"""
+
 from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING
 
 from local_docs_rag_agent.commands.ask import run_ask
 from local_docs_rag_agent.commands.eval import run_eval_command
-from local_docs_rag_agent.commands.eval_compare import run_eval_compare_command
+from local_docs_rag_agent.commands.eval_compare import (
+    DEFAULT_COMPARE_OUTPUT_PATH,
+    run_eval_compare_command,
+)
 from local_docs_rag_agent.commands.ingest import run_ingest
 from local_docs_rag_agent.config import AppConfig
+from local_docs_rag_agent.constants import AGENT_RUNTIMES, CHUNK_STRATEGIES, VECTOR_BACKENDS
 from local_docs_rag_agent.exceptions import LocalDocsError
 
+if TYPE_CHECKING:
+    # argparse does not export a public alias for the object add_subparsers returns.
+    SubParsers = argparse._SubParsersAction[argparse.ArgumentParser]
 
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Local Docs RAG Agent CLI")
+CommandHandler = Callable[[AppConfig, argparse.Namespace], None]
+CommandRegistrar = Callable[["SubParsers"], None]
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Parse `argv`, run the selected command, and return a process exit code."""
+
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    handler: CommandHandler = args.handler
+    try:
+        handler(AppConfig.from_env(), args)
+    except (LocalDocsError, RuntimeError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the top-level parser with every registered subcommand attached."""
+
+    parser = argparse.ArgumentParser(
+        prog="local-docs-rag",
+        description="Local Docs RAG Agent CLI",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
-
-    subparsers.add_parser("ingest", help="Read local docs and build the retrieval index")
-
-    ask_parser = subparsers.add_parser("ask", help="Ask a question against the docs index")
-    ask_parser.add_argument(
-        "--runtime",
-        choices=["basic", "agents_sdk"],
-        default=None,
-        help="Override the answer runtime for this command",
-    )
-    ask_parser.add_argument("question", help="User question")
-
-    eval_parser = subparsers.add_parser("eval", help="Run the sample eval harness")
-    eval_parser.add_argument(
-        "--runtime",
-        choices=["basic", "agents_sdk"],
-        default=None,
-        help="Override the answer runtime for this command",
-    )
-
-    compare_parser = subparsers.add_parser(
-        "eval-compare", help="Run eval across multiple retrieval/runtime configs"
-    )
-    compare_parser.add_argument(
-        "--runtime",
-        dest="runtimes",
-        choices=["basic", "agents_sdk"],
-        action="append",
-        help="One or more runtimes to compare. Repeat the flag to compare multiple runtimes.",
-    )
-    compare_parser.add_argument(
-        "--chunk-strategy",
-        dest="chunk_strategies",
-        choices=["fixed", "paragraph", "markdown"],
-        action="append",
-        help=(
-            "One or more chunk strategies to compare. "
-            "Repeat the flag to compare multiple strategies."
-        ),
-    )
-    compare_parser.add_argument(
-        "--vector-backend",
-        dest="vector_backends",
-        choices=["local", "qdrant"],
-        action="append",
-        help=(
-            "One or more vector backends to compare. Repeat the flag to compare multiple backends."
-        ),
-    )
-    compare_parser.add_argument(
-        "--top-k",
-        dest="top_ks",
-        type=int,
-        action="append",
-        help="One or more top-k values to compare. Repeat the flag to compare multiple values.",
-    )
-    compare_parser.add_argument(
-        "--chunk-size",
-        dest="chunk_sizes",
-        type=int,
-        action="append",
-        help="One or more chunk sizes to compare. Repeat the flag to compare multiple values.",
-    )
-    compare_parser.add_argument(
-        "--chunk-overlap",
-        dest="chunk_overlaps",
-        type=int,
-        action="append",
-        help=(
-            "One or more chunk overlap values to compare. "
-            "Repeat the flag to compare multiple values."
-        ),
-    )
-    compare_parser.add_argument(
-        "--output",
-        default="data/evals/compare_latest.json",
-        help="Path to save the comparison report JSON",
-    )
-
+    for register in COMMAND_REGISTRARS:
+        register(subparsers)
     return parser
 
 
-def main() -> None:
-    parser = _build_parser()
-    args = parser.parse_args()
-    try:
-        config = AppConfig.from_env()
-        if args.command == "ingest":
-            run_ingest(config)
-            return
+def _register_ingest(subparsers: SubParsers) -> None:
+    parser = subparsers.add_parser(
+        "ingest",
+        help="Read local docs and build the retrieval index",
+    )
+    parser.set_defaults(handler=_handle_ingest)
 
-        if args.command == "ask":
-            run_ask(config, question=args.question, runtime=args.runtime)
-            return
 
-        if args.command == "eval":
-            run_eval_command(config, runtime=args.runtime)
-            return
+def _register_ask(subparsers: SubParsers) -> None:
+    parser = subparsers.add_parser("ask", help="Ask a question against the docs index")
+    _add_runtime_option(parser)
+    parser.add_argument("question", help="User question")
+    parser.set_defaults(handler=_handle_ask)
 
-        if args.command == "eval-compare":
-            run_eval_compare_command(
-                config,
-                runtimes=args.runtimes,
-                chunk_strategies=args.chunk_strategies,
-                vector_backends=args.vector_backends,
-                top_ks=args.top_ks,
-                chunk_sizes=args.chunk_sizes,
-                chunk_overlaps=args.chunk_overlaps,
-                output_path=args.output,
-            )
-            return
 
-        parser.error(f"Unsupported command: {args.command}")
-    except (LocalDocsError, RuntimeError) as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        raise SystemExit(1) from exc
+def _register_eval(subparsers: SubParsers) -> None:
+    parser = subparsers.add_parser("eval", help="Run the sample eval harness")
+    _add_runtime_option(parser)
+    parser.set_defaults(handler=_handle_eval)
+
+
+def _register_eval_compare(subparsers: SubParsers) -> None:
+    parser = subparsers.add_parser(
+        "eval-compare",
+        help="Run eval across multiple retrieval/runtime configs",
+    )
+    _add_repeatable_choice_option(
+        parser,
+        "--runtime",
+        dest="runtimes",
+        choices=AGENT_RUNTIMES,
+        noun="runtimes",
+    )
+    _add_repeatable_choice_option(
+        parser,
+        "--chunk-strategy",
+        dest="chunk_strategies",
+        choices=CHUNK_STRATEGIES,
+        noun="chunk strategies",
+    )
+    _add_repeatable_choice_option(
+        parser,
+        "--vector-backend",
+        dest="vector_backends",
+        choices=VECTOR_BACKENDS,
+        noun="vector backends",
+    )
+    _add_repeatable_int_option(parser, "--top-k", dest="top_ks", noun="top-k values")
+    _add_repeatable_int_option(parser, "--chunk-size", dest="chunk_sizes", noun="chunk sizes")
+    _add_repeatable_int_option(
+        parser,
+        "--chunk-overlap",
+        dest="chunk_overlaps",
+        noun="chunk overlap values",
+    )
+    parser.add_argument(
+        "--output",
+        default=str(DEFAULT_COMPARE_OUTPUT_PATH),
+        help="Path to save the comparison report JSON",
+    )
+    parser.set_defaults(handler=_handle_eval_compare)
+
+
+COMMAND_REGISTRARS: tuple[CommandRegistrar, ...] = (
+    _register_ingest,
+    _register_ask,
+    _register_eval,
+    _register_eval_compare,
+)
+
+
+def _handle_ingest(config: AppConfig, args: argparse.Namespace) -> None:
+    del args
+    run_ingest(config)
+
+
+def _handle_ask(config: AppConfig, args: argparse.Namespace) -> None:
+    run_ask(config, question=args.question, runtime=args.runtime)
+
+
+def _handle_eval(config: AppConfig, args: argparse.Namespace) -> None:
+    run_eval_command(config, runtime=args.runtime)
+
+
+def _handle_eval_compare(config: AppConfig, args: argparse.Namespace) -> None:
+    run_eval_compare_command(
+        config,
+        runtimes=args.runtimes,
+        chunk_strategies=args.chunk_strategies,
+        vector_backends=args.vector_backends,
+        top_ks=args.top_ks,
+        chunk_sizes=args.chunk_sizes,
+        chunk_overlaps=args.chunk_overlaps,
+        output_path=args.output,
+    )
+
+
+def _add_runtime_option(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--runtime",
+        choices=list(AGENT_RUNTIMES),
+        default=None,
+        help="Override the answer runtime for this command",
+    )
+
+
+def _add_repeatable_choice_option(
+    parser: argparse.ArgumentParser,
+    flag: str,
+    *,
+    dest: str,
+    choices: tuple[str, ...],
+    noun: str,
+) -> None:
+    parser.add_argument(
+        flag,
+        dest=dest,
+        choices=list(choices),
+        action="append",
+        help=f"One or more {noun} to compare. Repeat the flag to compare several.",
+    )
+
+
+def _add_repeatable_int_option(
+    parser: argparse.ArgumentParser,
+    flag: str,
+    *,
+    dest: str,
+    noun: str,
+) -> None:
+    parser.add_argument(
+        flag,
+        dest=dest,
+        type=int,
+        action="append",
+        help=f"One or more {noun} to compare. Repeat the flag to compare several.",
+    )
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
