@@ -290,6 +290,12 @@ It matters, but measurement and reliability improve project credibility more dir
 - focused automated tests now cover embedding batching/retry and incremental Qdrant lifecycle behavior
 - verified end-to-end `qdrant ingest -> ask -> eval` on live provider after clearing broken local proxy env settings
 - a later read-only connectivity check on 2026-08-29 reached a remote connection reset (`WinError 10054`), so live end-to-end verification should be repeated from a reachable network path
+- the latest verification isolated the failure to Qdrant Cloud:
+  - Qwen chat and 1024-dimensional embeddings both returned live responses
+  - Qdrant reset TLS connections with proxy inheritance both enabled and disabled
+  - explicit REST port `6333` produced the same reset
+- `scripts/verify_live_qdrant.py` now provides a repeatable strict gate for
+  `ingest -> ask -> eval` and rejects runtime/provider fallback
 
 ---
 
@@ -310,6 +316,14 @@ It matters, but measurement and reliability improve project credibility more dir
 ### Why this is not first
 
 Agent behavior becomes harder to improve if eval and reliability foundations are weak.
+
+### Current status
+
+- deterministic fake-runner integration tests now exercise both Responses and Chat
+  Completions model selection
+- tests execute the search tool, citation assembly, provider/runtime diagnostics, and
+  async client cleanup without calling a live model
+- eval results now retain per-case runtime and provider diagnostics
 
 ---
 
@@ -332,6 +346,13 @@ Agent behavior becomes harder to improve if eval and reliability foundations are
 
 The frontend already has a first usable version.
 The next highest-value work is still below the UI layer.
+
+### Current status
+
+- the former monolithic `frontend/src/App.tsx` has been reduced to layout composition
+- API contracts, request/error handling, workspace state/actions, presentation helpers,
+  and feature panels now have separate modules
+- the existing visual structure and backend contract remain unchanged
 
 ---
 
@@ -374,7 +395,8 @@ OpenAI-compatible + Qwen is already enough to validate the current system.
 - regression coverage now includes configuration invariants, chunk offsets, ingest
   consistency, persisted-data corruption, Qdrant pagination, and API error contracts
 - backend architecture and extension rules are documented in `docs/architecture.md`
-- next engineering steps are CI enforcement and frontend module decomposition
+- GitHub Actions now enforces backend Ruff/mypy/pytest/compile gates and the frontend build
+- next engineering steps include deployment packaging and resolving the external Qdrant endpoint
 
 ---
 

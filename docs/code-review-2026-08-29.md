@@ -47,22 +47,21 @@ post-refactor tree on this date.
 - `api/`: typed contracts, thin routes, framework assembly isolated from domain logic
 - `commands/` and `cli.py`: domain errors now produce a controlled exit instead of traceback
 - `tests/`: lifecycle, corruption, validation, pagination, offset, and API failure regressions added
-- `frontend/`: contract checked; structural split deferred because this pass targeted Python
+- `frontend/`: API contracts, HTTP/state logic, helpers, and feature panels split from layout
 
 ## Remaining risks and follow-ups
 
 1. Qdrant source delete followed by upsert is not a cross-operation transaction; a remote
    failure between them can temporarily remove a changed source until the next ingest.
-2. Live `qdrant ingest -> ask -> eval` remains network-dependent and should be repeated
-   from a path that does not reset the remote connection.
-3. Agents SDK tool behavior needs a deterministic integration test with a fake runner.
-4. `frontend/src/App.tsx` is about 500 lines and should be split into API types/client,
-   feature hooks, and presentation components.
-5. The quality gates exist locally but are not yet enforced by CI.
+2. Live `qdrant ingest -> ask -> eval` remains externally blocked: chat and embeddings
+   are live, but the configured Qdrant Cloud host resets TLS connections with
+   `WinError 10054` across direct/no-proxy/explicit-6333 attempts.
+3. The live gate should be rerun with `scripts/verify_live_qdrant.py` after confirming
+   cluster health or using a network path that can complete the TLS handshake.
 
 ## Post-refactor evidence
 
 - Ruff: zero findings
 - mypy strict: zero errors across 40 source files
-- Tests: 40 passing
-- Coverage: 68%
+- Tests: 44 passed, including Agents SDK fake-runner and eval-diagnostics coverage
+- Coverage: 73%
