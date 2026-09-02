@@ -47,6 +47,9 @@ def _qdrant_config(tmp_path: Path, docs_dir: Path, manifest_path: Path) -> AppCo
         docs_exclude_patterns=[],
         index_path=tmp_path / "chunks.jsonl",
         ingest_manifest_path=manifest_path,
+        # Pinned so the index fingerprint records embedding_mode="live" regardless of
+        # whether the machine running the test has embedding credentials configured.
+        embedding_api_key="test-embedding-key",
         vector_backend="qdrant",
         qdrant_url="https://qdrant.example",
         qdrant_collection="test-collection",
