@@ -1,3 +1,12 @@
+"""Qdrant-backed chunk store with normalized operational failures.
+
+`qdrant_client` is imported lazily so the package installs and runs without the
+`qdrant` extra, and every client call is funnelled through `qdrant_operation_error`
+so callers see a `VectorStoreError` with a stable `reason_code` instead of a raw
+transport exception. The eval matrix relies on those codes to tell "Qdrant is not
+reachable here" apart from "this configuration genuinely failed".
+"""
+
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -210,7 +219,7 @@ class QdrantChunkStore:
                 raise
 
     def _operation_error(self, operation: str, exc: Exception) -> VectorStoreError:
-        return _qdrant_operation_error(
+        return qdrant_operation_error(
             operation=operation,
             url=self._url,
             collection_name=self._collection_name,
@@ -274,19 +283,25 @@ def _collection_vector_size(client: Any, collection_name: str) -> int:
     )
 
 
-def _qdrant_operation_error(
+def qdrant_operation_error(
     operation: str,
     url: str,
     collection_name: str,
     exc: Exception,
     trust_env: bool | None = None,
 ) -> VectorStoreError:
+    """Translate a raw client failure into a `VectorStoreError` with a reason code.
+
+    An already-normalized error is passed through unchanged so a specific diagnosis,
+    such as a vector-size mismatch, is not flattened into a generic failure.
+    """
+
     if isinstance(exc, VectorStoreError):
         return exc
 
     context = f"operation={operation} collection={collection_name} url={url}"
     detail = f"{exc.__class__.__name__}: {exc}"
-    if _looks_like_qdrant_unreachable(str(exc)):
+    if looks_like_qdrant_unreachable(str(exc)):
         proxy_hint = (
             "Environment proxies are already disabled for this client."
             if trust_env is False
@@ -306,7 +321,13 @@ def _qdrant_operation_error(
     )
 
 
-def _looks_like_qdrant_unreachable(message: str) -> bool:
+def looks_like_qdrant_unreachable(message: str) -> bool:
+    """Report whether an error message describes a connectivity failure.
+
+    Matching on message text is deliberate: the client wraps transport errors from
+    several libraries, so the exception type alone does not identify them.
+    """
+
     lowered = message.lower()
     return any(
         token in lowered

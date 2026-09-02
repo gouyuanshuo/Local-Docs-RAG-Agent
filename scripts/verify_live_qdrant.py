@@ -18,7 +18,7 @@ from local_docs_rag_agent.evals.harness import load_eval_cases, run_eval
 from local_docs_rag_agent.exceptions import LocalDocsError, ProviderUnavailableError
 from local_docs_rag_agent.models import AgentAnswer, AnswerDiagnostics, EvalResult
 from local_docs_rag_agent.presenters import serialize_eval_summary
-from local_docs_rag_agent.rag.ingest import ingest_documents
+from local_docs_rag_agent.rag import ingest_documents
 
 
 def main() -> int:

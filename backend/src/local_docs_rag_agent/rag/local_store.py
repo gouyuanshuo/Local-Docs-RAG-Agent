@@ -1,35 +1,21 @@
+"""Chunk store backed by a single JSONL file on disk.
+
+The file is human-readable and rewritten atomically on every ingest, which makes local
+development inspectable and keeps a crashed run from leaving a half-written index.
+Retrieval blends dense, lexical, and metadata signals so the store still returns useful
+results when embeddings have degraded to the deterministic hash fallback.
+"""
+
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Protocol
 
 from local_docs_rag_agent.exceptions import DataFormatError, ProviderUnavailableError
 from local_docs_rag_agent.models import DocumentChunk, ProviderStatus, RetrievalHit
 from local_docs_rag_agent.providers.base import EmbeddingProvider
 from local_docs_rag_agent.rag.file_io import atomic_write_text
-from local_docs_rag_agent.rag.qdrant_store import (
-    QdrantChunkStore,
-    _looks_like_qdrant_unreachable,
-    _qdrant_operation_error,
-)
 from local_docs_rag_agent.rag.scoring import build_retrieval_hit, score_local_chunk, tokenize
-
-
-class ChunkStore(Protocol):
-    def save(
-        self,
-        chunks: list[DocumentChunk],
-        removed_source_paths: list[str] | None = None,
-        replaced_source_paths: list[str] | None = None,
-    ) -> None: ...
-
-    def load(self) -> list[DocumentChunk]: ...
-
-    def search(self, query: str, top_k: int) -> list[RetrievalHit]: ...
-
-    @property
-    def embedding_status(self) -> ProviderStatus: ...
 
 
 class LocalJsonlChunkStore:
@@ -45,6 +31,7 @@ class LocalJsonlChunkStore:
         removed_source_paths: list[str] | None = None,
         replaced_source_paths: list[str] | None = None,
     ) -> None:
+        # A full rewrite makes the removal lists redundant for this backend.
         del removed_source_paths, replaced_source_paths
         content = "".join(f"{json.dumps(chunk.to_dict(), ensure_ascii=True)}\n" for chunk in chunks)
         atomic_write_text(self._index_path, content)
@@ -105,12 +92,3 @@ class LocalJsonlChunkStore:
     @property
     def embedding_status(self) -> ProviderStatus:
         return self._embedding_provider.status
-
-
-__all__ = [
-    "ChunkStore",
-    "LocalJsonlChunkStore",
-    "QdrantChunkStore",
-    "_looks_like_qdrant_unreachable",
-    "_qdrant_operation_error",
-]

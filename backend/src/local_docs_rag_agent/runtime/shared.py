@@ -20,7 +20,7 @@ from local_docs_rag_agent.models import (
     ProviderStatus,
     RetrievalHit,
 )
-from local_docs_rag_agent.rag.ingest import build_store
+from local_docs_rag_agent.rag.store_factory import build_store
 
 
 def retrieve_hits(config: AppConfig, question: str) -> tuple[list[RetrievalHit], ProviderStatus]:

@@ -4,7 +4,7 @@ import pytest
 
 from local_docs_rag_agent.exceptions import DataFormatError
 from local_docs_rag_agent.models import DocumentChunk, ProviderStatus
-from local_docs_rag_agent.rag.store import LocalJsonlChunkStore
+from local_docs_rag_agent.rag.local_store import LocalJsonlChunkStore
 
 
 class StubEmbeddingProvider:

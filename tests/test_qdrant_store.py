@@ -8,10 +8,10 @@ import qdrant_client
 
 from local_docs_rag_agent.exceptions import ProviderUnavailableError, VectorStoreError
 from local_docs_rag_agent.models import DocumentChunk, ProviderStatus
-from local_docs_rag_agent.rag.store import (
+from local_docs_rag_agent.rag.qdrant_store import (
     QdrantChunkStore,
-    _looks_like_qdrant_unreachable,
-    _qdrant_operation_error,
+    looks_like_qdrant_unreachable,
+    qdrant_operation_error,
 )
 
 
@@ -55,9 +55,9 @@ def test_qdrant_client_receives_proxy_trust_setting(monkeypatch) -> None:
 def test_winerror_10054_is_normalized_as_unreachable() -> None:
     message = "[WinError 10054] An existing connection was forcibly closed by the remote host"
 
-    assert _looks_like_qdrant_unreachable(message)
+    assert looks_like_qdrant_unreachable(message)
 
-    error = _qdrant_operation_error(
+    error = qdrant_operation_error(
         operation="collection_exists",
         url="https://qdrant.example",
         collection_name="test-collection",
@@ -70,7 +70,7 @@ def test_winerror_10054_is_normalized_as_unreachable() -> None:
 
 
 def test_unreachable_error_knows_when_environment_proxy_is_already_disabled() -> None:
-    error = _qdrant_operation_error(
+    error = qdrant_operation_error(
         operation="collection_exists",
         url="https://qdrant.example",
         collection_name="test-collection",

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from local_docs_rag_agent.config import AppConfig
-from local_docs_rag_agent.rag.ingest import ingest_documents
+from local_docs_rag_agent.rag import ingest_documents
 
 
 def run_ingest(config: AppConfig) -> None:

@@ -84,7 +84,7 @@ def test_missing_collection_reingests_unchanged_manifest(
             {
                 "sources": {
                     source_path.as_posix(): {
-                        "checksum": ingest._checksum(source_text),
+                        "checksum": ingest.source_checksum(source_text),
                         "chunk_ids": ["old-chunk"],
                     }
                 }
@@ -116,13 +116,13 @@ def test_existing_collection_skips_unchanged_document(
     manifest_path.write_text(
         json.dumps(
             {
-                "index_fingerprint": ingest._index_fingerprint(
+                "index_fingerprint": ingest.index_fingerprint(
                     config,
                     embedding_mode="live",
                 ),
                 "sources": {
                     source_path.as_posix(): {
-                        "checksum": ingest._checksum(source_text),
+                        "checksum": ingest.source_checksum(source_text),
                         "chunk_ids": ["existing-chunk"],
                     }
                 },

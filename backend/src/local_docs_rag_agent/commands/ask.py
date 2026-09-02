@@ -5,7 +5,7 @@ import json
 from local_docs_rag_agent.agent import LocalDocsAgent
 from local_docs_rag_agent.config import AppConfig
 from local_docs_rag_agent.presenters import serialize_answer
-from local_docs_rag_agent.rag.ingest import ensure_index
+from local_docs_rag_agent.rag import ensure_index
 
 
 def run_ask(config: AppConfig, question: str, runtime: str | None = None) -> None:

@@ -11,8 +11,7 @@ import sys
 
 from local_docs_rag_agent.config import AppConfig
 from local_docs_rag_agent.exceptions import ConfigurationError, LocalDocsError
-from local_docs_rag_agent.rag.ingest import build_store
-from local_docs_rag_agent.rag.store import QdrantChunkStore
+from local_docs_rag_agent.rag import QdrantChunkStore, build_store
 
 
 def main() -> int:

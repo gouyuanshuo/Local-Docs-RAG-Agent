@@ -5,7 +5,7 @@ import json
 from local_docs_rag_agent.config import AppConfig
 from local_docs_rag_agent.evals.harness import run_eval
 from local_docs_rag_agent.presenters import serialize_eval_summary
-from local_docs_rag_agent.rag.ingest import ensure_index
+from local_docs_rag_agent.rag import ensure_index
 
 
 def run_eval_command(config: AppConfig, runtime: str | None = None) -> None:
