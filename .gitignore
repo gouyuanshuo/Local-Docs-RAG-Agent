@@ -1,18 +1,30 @@
+# Python environments and build output
 .venv/
+__pycache__/
+*.pyc
+backend/src/*.egg-info/
+
+# Tooling caches and coverage output
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Secrets: only the template is tracked
 .env
 .env.*
 !.env.example
+
+# Node and frontend build output
 node_modules/
 frontend/node_modules/
 frontend/dist/
-backend/src/*.egg-info/
-__pycache__/
-*.pyc
-.coverage
-htmlcov/
 *.tsbuildinfo
 frontend/vite.config.js
 frontend/vite.config.d.ts
+
+# Generated runtime data
 data/*.log
 data/*.err.log
 data/ask_output.json
