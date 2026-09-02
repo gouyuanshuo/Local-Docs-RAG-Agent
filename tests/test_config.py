@@ -9,7 +9,7 @@ from local_docs_rag_agent.exceptions import ConfigurationError
 
 @pytest.fixture(autouse=True)
 def disable_project_dotenv(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(config_module, "_load_dotenv", lambda: None)
+    monkeypatch.setattr(config_module, "load_project_dotenv", lambda: None)
 
 
 def test_external_http_trust_env_defaults_to_true(monkeypatch: pytest.MonkeyPatch) -> None:

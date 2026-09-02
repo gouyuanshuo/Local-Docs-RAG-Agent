@@ -1,14 +1,25 @@
+"""Split source documents into retrievable chunks that keep their character spans.
+
+Three strategies share one entry point, :func:`chunk_text`: `fixed` slices by size,
+`paragraph` groups blank-line-separated blocks, and `markdown` additionally refuses to
+merge blocks across a heading so a chunk never mixes two sections. Every chunk records
+the character span it came from, which is what makes the citation spans in an answer
+point back at real source text.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
+from local_docs_rag_agent.constants import (
+    CHUNK_STRATEGIES,
+    DEFAULT_CHUNK_STRATEGY,
+    ChunkStrategyName,
+)
 from local_docs_rag_agent.exceptions import ConfigurationError
 from local_docs_rag_agent.models import DocumentChunk
-
-DEFAULT_CHUNK_STRATEGY = "markdown"
-SUPPORTED_CHUNK_STRATEGIES = {"fixed", "paragraph", "markdown"}
 
 
 @dataclass(slots=True)
@@ -63,13 +74,13 @@ def chunk_text(
     )
 
 
-def _normalize_strategy(chunk_strategy: str | None) -> str:
+def _normalize_strategy(chunk_strategy: str | None) -> ChunkStrategyName:
     if not chunk_strategy:
         return DEFAULT_CHUNK_STRATEGY
     normalized = chunk_strategy.strip().lower()
-    if normalized in SUPPORTED_CHUNK_STRATEGIES:
+    if normalized in CHUNK_STRATEGIES:
         return normalized
-    allowed = ", ".join(sorted(SUPPORTED_CHUNK_STRATEGIES))
+    allowed = ", ".join(CHUNK_STRATEGIES)
     raise ConfigurationError(f"Chunk strategy must be one of {allowed}; got {chunk_strategy!r}")
 
 

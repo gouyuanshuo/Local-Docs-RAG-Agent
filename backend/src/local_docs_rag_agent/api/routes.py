@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import cast
 
 from fastapi import APIRouter
 
@@ -17,7 +16,6 @@ from local_docs_rag_agent.api.schemas import (
     EvalSummaryResponse,
     HealthResponse,
     IngestResponse,
-    RuntimeName,
 )
 from local_docs_rag_agent.config import AppConfig
 from local_docs_rag_agent.evals.comparison import run_eval_matrix
@@ -101,7 +99,7 @@ def compare_eval(payload: EvalCompareRequest) -> EvalCompareResponse:
     config = AppConfig.from_env()
     comparison = run_eval_matrix(
         config=config,
-        runtimes=list(payload.runtimes or [cast(RuntimeName, config.agent_runtime)]),
+        runtimes=list(payload.runtimes or [config.agent_runtime]),
         chunk_strategies=list(payload.chunk_strategies or ["fixed", "paragraph", "markdown"]),
         vector_backends=list(
             payload.vector_backends or (["local", "qdrant"] if config.qdrant_url else ["local"])

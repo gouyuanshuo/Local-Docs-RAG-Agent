@@ -1,18 +1,37 @@
+"""Public request and response contracts for the HTTP API.
+
+These models are the only place the backend promises a wire shape. The option types
+are imported from `constants` rather than re-declared, so a new runtime or chunk
+strategy is accepted by request validation the moment it is supported by the
+configuration layer, and can never drift out of sync with it.
+"""
+
 from __future__ import annotations
 
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, NonNegativeInt, PositiveInt, StringConstraints
 
+from local_docs_rag_agent.constants import (
+    AGENT_RUNTIMES,
+    CHUNK_STRATEGIES,
+    VECTOR_BACKENDS,
+    ChunkStrategyName,
+    RuntimeName,
+    VectorBackendName,
+)
 from local_docs_rag_agent.models import ProviderMode
 
-RuntimeName = Literal["basic", "agents_sdk"]
-ChunkStrategyName = Literal["fixed", "paragraph", "markdown"]
-VectorBackendName = Literal["local", "qdrant"]
 NonEmptyString = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
-RuntimeList = Annotated[list[RuntimeName], Field(min_length=1, max_length=2)]
-ChunkStrategyList = Annotated[list[ChunkStrategyName], Field(min_length=1, max_length=3)]
-VectorBackendList = Annotated[list[VectorBackendName], Field(min_length=1, max_length=2)]
+RuntimeList = Annotated[list[RuntimeName], Field(min_length=1, max_length=len(AGENT_RUNTIMES))]
+ChunkStrategyList = Annotated[
+    list[ChunkStrategyName],
+    Field(min_length=1, max_length=len(CHUNK_STRATEGIES)),
+]
+VectorBackendList = Annotated[
+    list[VectorBackendName],
+    Field(min_length=1, max_length=len(VECTOR_BACKENDS)),
+]
 PositiveIntList = Annotated[list[PositiveInt], Field(min_length=1, max_length=8)]
 NonNegativeIntList = Annotated[list[NonNegativeInt], Field(min_length=1, max_length=8)]
 
@@ -122,6 +141,7 @@ class EvalResultResponse(BaseModel):
     citation_source_hit_rate: float = Field(ge=0, le=1)
     citation_span_hit_rate: float = Field(ge=0, le=1)
     response_time_ms: float = Field(ge=0)
+    diagnostics: AnswerDiagnosticsResponse | None = None
     expected_source_paths: list[str]
     expected_answer_keywords: list[str]
     expected_span_keywords: list[str]

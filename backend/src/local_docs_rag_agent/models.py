@@ -1,8 +1,18 @@
+"""Framework-free domain records shared by retrieval, runtimes, evals, and delivery.
+
+These dataclasses are the vocabulary the whole backend speaks: a chunk and where in
+its source file it came from, a scored retrieval hit, an answer with its citations,
+and the honest provider/runtime diagnostics attached to both. Nothing here knows about
+FastAPI, Pydantic, or argparse, so the same records serialize to an HTTP response, a
+CLI payload, and an eval report without change.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Literal
 
+from local_docs_rag_agent.constants import RuntimeName, VectorBackendName
 from local_docs_rag_agent.exceptions import DataFormatError
 
 ProviderMode = Literal["ready", "live", "fallback", "unknown"]
@@ -94,9 +104,16 @@ class ProviderStatus:
 
 @dataclass(slots=True)
 class AnswerDiagnostics:
-    requested_runtime: str
-    actual_runtime: str
-    vector_backend: str
+    """Truthful record of how an answer was actually produced.
+
+    `requested_runtime` and `actual_runtime` differ whenever a runtime degraded, and
+    the provider statuses stay `fallback` rather than being smoothed into success, so
+    a caller can reject a degraded run instead of trusting it.
+    """
+
+    requested_runtime: RuntimeName
+    actual_runtime: RuntimeName
+    vector_backend: VectorBackendName
     chat_provider: ProviderStatus
     embedding_provider: ProviderStatus
 
@@ -133,6 +150,7 @@ class EvalResult:
     citation_source_hit_rate: float
     citation_span_hit_rate: float
     response_time_ms: float
+    diagnostics: AnswerDiagnostics | None = None
     failure_reasons: list[str] = field(default_factory=list)
     expected_source_paths: list[str] = field(default_factory=list)
     expected_answer_keywords: list[str] = field(default_factory=list)
