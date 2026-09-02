@@ -1,3 +1,10 @@
+"""Atomic text-file replacement for the index and the manifest.
+
+Both files are rewritten in full on every ingest. Writing to a sibling temporary file
+and replacing the target means an interrupted run leaves the previous version intact
+rather than a truncated one that would fail to parse on the next read.
+"""
+
 from __future__ import annotations
 
 import os

@@ -1,3 +1,9 @@
+"""The single construction point for configured providers.
+
+Everything else takes a built provider as an argument. That keeps `AppConfig` reading
+in one place and makes providers straightforward to substitute in tests.
+"""
+
 from __future__ import annotations
 
 from local_docs_rag_agent.config import AppConfig

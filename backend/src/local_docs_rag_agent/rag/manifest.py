@@ -1,3 +1,11 @@
+"""Typed record of what the previous ingest wrote.
+
+The manifest stores a checksum and the chunk ids for every source, plus the fingerprint
+of the retrieval settings the index was built under. Together these are what make an
+incremental ingest possible: unchanged sources are skipped, removed sources have their
+points deleted, and a settings change invalidates the whole index at once.
+"""
+
 from __future__ import annotations
 
 import json

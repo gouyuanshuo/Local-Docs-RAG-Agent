@@ -1,3 +1,11 @@
+"""Tool-capable runtime backed by the OpenAI Agents SDK.
+
+The SDK is imported lazily so the package stays installable without the `agents`
+extra. Any missing dependency, missing key, or run failure degrades to the basic
+runtime with a `runtime_fallback:` reason recorded in the diagnostics rather than
+raising, because a degraded answer is still useful as long as it is labelled as one.
+"""
+
 from __future__ import annotations
 
 import asyncio

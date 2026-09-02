@@ -1,3 +1,14 @@
+"""The expected-failure taxonomy shared by the API, the CLI, and the eval matrix.
+
+Every expected failure carries a stable `code` and an optional `action_hint` naming the
+concrete next step. That pairing is what lets one raise site serve three audiences: the
+API maps the code to a status, the CLI prints the hint, and the eval matrix decides
+whether a cell was skipped or genuinely failed.
+
+Unexpected programming errors deliberately do not derive from `LocalDocsError`; they
+stay visible instead of being converted into a tidy failure response.
+"""
+
 from __future__ import annotations
 
 

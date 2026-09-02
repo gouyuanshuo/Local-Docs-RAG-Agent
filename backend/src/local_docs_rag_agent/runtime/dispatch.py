@@ -1,3 +1,10 @@
+"""Selects the runtime that answers a question.
+
+Runtime selection is the only decision made here; each runtime is responsible for
+returning a complete `AgentAnswer`, including diagnostics that say whether it ran or
+delegated to another runtime.
+"""
+
 from __future__ import annotations
 
 from local_docs_rag_agent.config import AppConfig

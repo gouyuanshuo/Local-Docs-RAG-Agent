@@ -1,3 +1,11 @@
+"""Constructs OpenAI-compatible clients with an explicit proxy policy.
+
+`trust_env` is threaded through deliberately: on a machine with stale `HTTP_PROXY` or
+`HTTPS_PROXY` variables the default client fails with a connection error that looks
+like a provider outage, so `EXTERNAL_HTTP_TRUST_ENV=false` must be able to bypass the
+environment without touching machine-wide settings.
+"""
+
 from __future__ import annotations
 
 from openai import (

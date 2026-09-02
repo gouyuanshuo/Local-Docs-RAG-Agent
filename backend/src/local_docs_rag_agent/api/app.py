@@ -1,3 +1,14 @@
+"""Creates the FastAPI application: middleware, static hosting, and error handling.
+
+The app serves the built frontend from `frontend/dist` when it exists, and falls back
+to a JSON pointer toward the dev server when it does not, so the same entry point works
+for a built deployment and for local development.
+
+Domain errors are translated here rather than in each route: a `LocalDocsError` becomes
+a response carrying its stable code and action hint, which is what lets the frontend
+show an actionable message instead of a generic failure.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path

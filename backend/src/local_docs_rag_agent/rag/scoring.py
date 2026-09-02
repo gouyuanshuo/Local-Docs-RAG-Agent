@@ -1,3 +1,12 @@
+"""Scores a chunk against a query for the local retrieval backend.
+
+Three signals are blended: cosine similarity over embeddings, lexical overlap with the
+chunk text, and overlap with the chunk's title and section metadata. The final score is
+the maximum of the dense score, the lexical score, and their weighted mix, so a query
+that matches strongly on one signal is not dragged down by a weak showing on another —
+which matters most when embeddings have degraded to the hash fallback.
+"""
+
 from __future__ import annotations
 
 import math

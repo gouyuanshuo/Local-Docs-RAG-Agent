@@ -1,3 +1,12 @@
+"""OpenAI-compatible embedding provider with batching, retry, and a hash fallback.
+
+Requests are batched because hosted endpoints cap inputs per call, and transient
+failures are retried with exponential backoff before the provider gives up. On giving
+up it returns deterministic hash embeddings and reports `fallback`: those vectors keep
+local retrieval working offline, but they are not comparable with live vectors, which
+is why Qdrant ingest refuses them.
+"""
+
 from __future__ import annotations
 
 import hashlib

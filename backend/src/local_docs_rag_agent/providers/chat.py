@@ -1,3 +1,11 @@
+"""OpenAI-compatible chat provider with an explicit extractive fallback.
+
+When no key is configured, or a request fails or returns nothing, the provider answers
+by quoting the retrieved context instead of raising. The answer is prefixed with the
+reason and the status is set to `fallback`, so a degraded answer is always labelled as
+one rather than passing for a live model response.
+"""
+
 from __future__ import annotations
 
 import re

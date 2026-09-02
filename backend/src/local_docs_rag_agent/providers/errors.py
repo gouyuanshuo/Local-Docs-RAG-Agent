@@ -1,3 +1,11 @@
+"""Classifies provider failures as transient or permanent.
+
+Transient failures are worth retrying; permanent ones are not, and retrying them only
+delays the report. Classification looks at the exception type, an HTTP status code when
+one is attached, and finally the message text, because OpenAI-compatible endpoints vary
+in which of the three they populate.
+"""
+
 from __future__ import annotations
 
 TRANSIENT_STATUS_CODES = frozenset({408, 409, 429, 500, 502, 503, 504})
