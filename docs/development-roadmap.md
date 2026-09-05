@@ -245,6 +245,17 @@ Retrieval engineering is one of the project’s main sources of portfolio value.
 - stronger `local vs qdrant` comparisons have now been run successfully
 - with current sample eval data, both backends are comparable on quality and differ mainly in latency by configuration
 - Phase C baseline objective is now considered complete
+- retrieval ranking is now a selectable, sweepable strategy rather than one fixed
+  expression inside the local store:
+  - `blended` preserves the original `max(dense, lexical, weighted mix)` ranking and
+    remains the default, so earlier numbers stay reproducible
+  - `lexical` replaces the bare set-intersection overlap with Okapi BM25, which adds
+    the inverse document frequency and term-frequency saturation it lacked
+  - `hybrid_rrf` fuses the dense and BM25 rankings by reciprocal rank, which removes
+    the assumption that a cosine similarity and a term-overlap ratio are comparable
+    numbers that `max()` silently made
+  - `RETRIEVAL_STRATEGY` is a comparison-matrix axis, so the change is measurable
+- remaining Phase C depth: a second-stage reranker, and query rewriting/expansion
 - next primary focus: `Phase D: Qdrant engineering` for incremental ingest and lifecycle management
 
 ---

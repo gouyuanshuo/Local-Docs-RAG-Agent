@@ -15,8 +15,10 @@ from pydantic import BaseModel, Field, NonNegativeInt, PositiveInt, StringConstr
 from local_docs_rag_agent.constants import (
     AGENT_RUNTIMES,
     CHUNK_STRATEGIES,
+    RETRIEVAL_STRATEGIES,
     VECTOR_BACKENDS,
     ChunkStrategyName,
+    RetrievalStrategyName,
     RuntimeName,
     VectorBackendName,
 )
@@ -31,6 +33,10 @@ ChunkStrategyList = Annotated[
 VectorBackendList = Annotated[
     list[VectorBackendName],
     Field(min_length=1, max_length=len(VECTOR_BACKENDS)),
+]
+RetrievalStrategyList = Annotated[
+    list[RetrievalStrategyName],
+    Field(min_length=1, max_length=len(RETRIEVAL_STRATEGIES)),
 ]
 PositiveIntList = Annotated[list[PositiveInt], Field(min_length=1, max_length=8)]
 NonNegativeIntList = Annotated[list[NonNegativeInt], Field(min_length=1, max_length=8)]
@@ -52,6 +58,7 @@ class EvalCompareRequest(BaseModel):
     top_ks: PositiveIntList | None = None
     chunk_sizes: PositiveIntList | None = None
     chunk_overlaps: NonNegativeIntList | None = None
+    retrieval_strategies: RetrievalStrategyList | None = None
 
 
 class IngestResponse(BaseModel):
@@ -76,6 +83,7 @@ class AppInfoResponse(BaseModel):
     embedding_provider: str
     embedding_model: str
     top_k: PositiveInt
+    retrieval_strategy: RetrievalStrategyName
     chunk_strategy: ChunkStrategyName
     chunk_size: PositiveInt
     chunk_overlap: NonNegativeInt
@@ -126,6 +134,9 @@ class RetrievalConfigResponse(BaseModel):
     chunk_size: PositiveInt
     chunk_overlap: NonNegativeInt
     top_k: PositiveInt
+    retrieval_strategy: RetrievalStrategyName
+    retrieval_candidate_k: PositiveInt
+    rrf_k: PositiveInt
     docs_dir: str
     docs_exclude_patterns: list[str]
 
@@ -192,6 +203,7 @@ class EvalCompareResponse(BaseModel):
     top_ks: list[PositiveInt]
     chunk_sizes: list[PositiveInt]
     chunk_overlaps: list[NonNegativeInt]
+    retrieval_strategies: list[RetrievalStrategyName]
     leaderboard: list[EvalLeaderboardRowResponse]
     runs: list[EvalMatrixRunResponse]
 

@@ -27,6 +27,7 @@ from local_docs_rag_agent.api.schemas import (
 from local_docs_rag_agent.config import AppConfig
 from local_docs_rag_agent.evals.comparison import (
     default_chunk_strategies,
+    default_retrieval_strategies,
     default_vector_backends,
     run_eval_matrix,
 )
@@ -64,6 +65,7 @@ def info() -> AppInfoResponse:
             "embedding_provider": config.embedding_provider,
             "embedding_model": config.embedding_model,
             "top_k": config.top_k,
+            "retrieval_strategy": config.retrieval_strategy,
             "chunk_strategy": config.chunk_strategy,
             "chunk_size": config.chunk_size,
             "chunk_overlap": config.chunk_overlap,
@@ -117,5 +119,8 @@ def compare_eval(payload: EvalCompareRequest) -> EvalCompareResponse:
         top_ks=list(payload.top_ks or [config.top_k]),
         chunk_sizes=list(payload.chunk_sizes or [config.chunk_size]),
         chunk_overlaps=list(payload.chunk_overlaps or [config.chunk_overlap]),
+        retrieval_strategies=list(
+            payload.retrieval_strategies or default_retrieval_strategies()
+        ),
     )
     return EvalCompareResponse.model_validate(comparison)

@@ -30,6 +30,12 @@ export function ConfigPanel({ info, bootstrapError }: ConfigPanelProps) {
           <dd>{info?.runtime ?? "loading..."}</dd>
         </div>
         <div>
+          <dt>Retrieval</dt>
+          <dd>
+            {info ? `${info.retrieval_strategy} / top ${info.top_k}` : "loading..."}
+          </dd>
+        </div>
+        <div>
           <dt>Chunking</dt>
           <dd>
             {info

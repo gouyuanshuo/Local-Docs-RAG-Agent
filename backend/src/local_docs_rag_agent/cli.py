@@ -24,7 +24,12 @@ from local_docs_rag_agent.commands.eval_compare import (
 )
 from local_docs_rag_agent.commands.ingest import run_ingest
 from local_docs_rag_agent.config import AppConfig
-from local_docs_rag_agent.constants import AGENT_RUNTIMES, CHUNK_STRATEGIES, VECTOR_BACKENDS
+from local_docs_rag_agent.constants import (
+    AGENT_RUNTIMES,
+    CHUNK_STRATEGIES,
+    RETRIEVAL_STRATEGIES,
+    VECTOR_BACKENDS,
+)
 from local_docs_rag_agent.exceptions import LocalDocsError
 
 if TYPE_CHECKING:
@@ -109,6 +114,13 @@ def _register_eval_compare(subparsers: SubParsers) -> None:
         choices=VECTOR_BACKENDS,
         noun="vector backends",
     )
+    _add_repeatable_choice_option(
+        parser,
+        "--retrieval-strategy",
+        dest="retrieval_strategies",
+        choices=RETRIEVAL_STRATEGIES,
+        noun="retrieval strategies",
+    )
     _add_repeatable_int_option(parser, "--top-k", dest="top_ks", noun="top-k values")
     _add_repeatable_int_option(parser, "--chunk-size", dest="chunk_sizes", noun="chunk sizes")
     _add_repeatable_int_option(
@@ -155,6 +167,7 @@ def _handle_eval_compare(config: AppConfig, args: argparse.Namespace) -> None:
         top_ks=args.top_ks,
         chunk_sizes=args.chunk_sizes,
         chunk_overlaps=args.chunk_overlaps,
+        retrieval_strategies=args.retrieval_strategies,
         output_path=args.output,
     )
 

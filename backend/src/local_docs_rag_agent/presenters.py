@@ -75,6 +75,9 @@ def serialize_retrieval_config(config: AppConfig) -> dict[str, object]:
         "chunk_size": config.chunk_size,
         "chunk_overlap": config.chunk_overlap,
         "top_k": config.top_k,
+        "retrieval_strategy": config.retrieval_strategy,
+        "retrieval_candidate_k": config.retrieval_candidate_k,
+        "rrf_k": config.rrf_k,
         "docs_dir": str(config.docs_dir),
         "docs_exclude_patterns": list(config.docs_exclude_patterns),
     }

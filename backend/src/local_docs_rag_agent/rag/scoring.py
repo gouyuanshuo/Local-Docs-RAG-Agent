@@ -56,8 +56,19 @@ def cosine_similarity(left: list[float], right: list[float]) -> float:
     return dot / (left_norm * right_norm)
 
 
+def tokenize_terms(text: str) -> list[str]:
+    """Return every term in order, keeping duplicates.
+
+    BM25 weights a term by how often it occurs, so it needs the counts that
+    :func:`tokenize` discards. Both shapes come from one regex so the lexical
+    signals can never disagree about what a term is.
+    """
+
+    return [token.lower() for token in TOKEN_RE.findall(text)]
+
+
 def tokenize(text: str) -> set[str]:
-    return {token.lower() for token in TOKEN_RE.findall(text)}
+    return set(tokenize_terms(text))
 
 
 def lexical_overlap_score(left: set[str], right: set[str]) -> float:

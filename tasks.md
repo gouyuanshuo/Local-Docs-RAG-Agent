@@ -106,12 +106,31 @@ Current theme:
 - [x] Declare `files` in `[tool.mypy]` so a bare `mypy` checks source, tests, and scripts
 - [x] Point the CI mypy step at the configured file set rather than `backend/src` alone
 
+### Retrieval layering (Phase C depth)
+
+- [x] Extract ranking out of the local store into `rag/retrieval.py`
+- [x] Replace the bare lexical set-intersection with Okapi BM25 (`rag/bm25.py`)
+- [x] Add reciprocal rank fusion (`rag/fusion.py`) instead of `max()` across scales
+- [x] Make `RETRIEVAL_STRATEGY` a configuration setting and an eval-matrix axis
+- [x] Re-rank Qdrant candidates client-side, since the server returns no vectors
+- [x] Keep `blended` the default so earlier eval numbers stay reproducible
+- [ ] Run a full `eval-compare` sweep over the strategies on a live provider and
+      record which one wins on `retrieval_span_hit_rate`
+- [ ] Add a second-stage reranker behind an interface (LLM rerank first, leaving
+      room for a cross-encoder)
+- [ ] Add query rewriting / multi-query expansion ahead of candidate generation
+
 ### Follow-ups
 
 - [ ] Consider grouping `AppConfig` into per-concern sub-configs if the field count
       keeps growing; the flat shape is still readable at its current size
 - [ ] Consider promoting `data/` report writing behind a small reporting module if more
       report formats appear
+- [ ] `LocalJsonlChunkStore.search` re-reads and re-parses the whole JSONL index on
+      every query, and `retrieve_hits` builds a fresh store per request, so an
+      `eval-compare` sweep pays that cost once per question per cell. A cache keyed on
+      the index path and its mtime would fix it, but chunks are mutable and shared, so
+      it needs a considered ownership rule rather than a quick dictionary.
 
 ## Review notes
 

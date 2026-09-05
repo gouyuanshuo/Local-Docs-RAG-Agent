@@ -18,16 +18,23 @@ RuntimeName = Literal["basic", "agents_sdk"]
 ChunkStrategyName = Literal["fixed", "paragraph", "markdown"]
 VectorBackendName = Literal["local", "qdrant"]
 ApiStyleName = Literal["responses", "chat_completions"]
+RetrievalStrategyName = Literal["blended", "dense", "lexical", "hybrid_rrf"]
 
 AGENT_RUNTIMES: tuple[RuntimeName, ...] = get_args(RuntimeName)
 CHUNK_STRATEGIES: tuple[ChunkStrategyName, ...] = get_args(ChunkStrategyName)
 VECTOR_BACKENDS: tuple[VectorBackendName, ...] = get_args(VectorBackendName)
 API_STYLES: tuple[ApiStyleName, ...] = get_args(ApiStyleName)
+RETRIEVAL_STRATEGIES: tuple[RetrievalStrategyName, ...] = get_args(RetrievalStrategyName)
 
 DEFAULT_AGENT_RUNTIME: RuntimeName = "basic"
 DEFAULT_CHUNK_STRATEGY: ChunkStrategyName = "markdown"
 DEFAULT_VECTOR_BACKEND: VectorBackendName = "local"
 DEFAULT_API_STYLE: ApiStyleName = "responses"
+# `blended` reproduces the ranking the project shipped before retrieval became
+# selectable, so it stays the default and the baseline the others are compared to.
+DEFAULT_RETRIEVAL_STRATEGY: RetrievalStrategyName = "blended"
+DEFAULT_RETRIEVAL_CANDIDATE_K = 20
+DEFAULT_RRF_K = 60
 
 __all__ = [
     "AGENT_RUNTIMES",
@@ -36,10 +43,15 @@ __all__ = [
     "DEFAULT_AGENT_RUNTIME",
     "DEFAULT_API_STYLE",
     "DEFAULT_CHUNK_STRATEGY",
+    "DEFAULT_RETRIEVAL_CANDIDATE_K",
+    "DEFAULT_RETRIEVAL_STRATEGY",
+    "DEFAULT_RRF_K",
     "DEFAULT_VECTOR_BACKEND",
+    "RETRIEVAL_STRATEGIES",
     "VECTOR_BACKENDS",
     "ApiStyleName",
     "ChunkStrategyName",
+    "RetrievalStrategyName",
     "RuntimeName",
     "VectorBackendName",
 ]

@@ -20,10 +20,15 @@ from local_docs_rag_agent.constants import (
     DEFAULT_AGENT_RUNTIME,
     DEFAULT_API_STYLE,
     DEFAULT_CHUNK_STRATEGY,
+    DEFAULT_RETRIEVAL_CANDIDATE_K,
+    DEFAULT_RETRIEVAL_STRATEGY,
+    DEFAULT_RRF_K,
     DEFAULT_VECTOR_BACKEND,
+    RETRIEVAL_STRATEGIES,
     VECTOR_BACKENDS,
     ApiStyleName,
     ChunkStrategyName,
+    RetrievalStrategyName,
     RuntimeName,
     VectorBackendName,
 )
@@ -91,6 +96,9 @@ class AppConfig:
     chunk_strategy: ChunkStrategyName
     chunk_size: int
     chunk_overlap: int
+    retrieval_strategy: RetrievalStrategyName
+    retrieval_candidate_k: int
+    rrf_k: int
 
     def __post_init__(self) -> None:
         # Every instance is re-validated, because `with_overrides` can build a variant
@@ -99,6 +107,9 @@ class AppConfig:
         require_choice("AGENT_RUNTIME", self.agent_runtime, AGENT_RUNTIMES)
         require_choice("VECTOR_BACKEND", self.vector_backend, VECTOR_BACKENDS)
         require_choice("CHUNK_STRATEGY", self.chunk_strategy, CHUNK_STRATEGIES)
+        require_choice(
+            "RETRIEVAL_STRATEGY", self.retrieval_strategy, RETRIEVAL_STRATEGIES
+        )
         require_positive("EMBEDDING_BATCH_SIZE", self.embedding_batch_size)
         require_non_negative("EMBEDDING_MAX_RETRIES", self.embedding_max_retries)
         require_non_negative("EMBEDDING_RETRY_BACKOFF_MS", self.embedding_retry_backoff_ms)
@@ -107,6 +118,8 @@ class AppConfig:
         require_positive("TOP_K", self.top_k)
         require_positive("CHUNK_SIZE", self.chunk_size)
         require_non_negative("CHUNK_OVERLAP", self.chunk_overlap)
+        require_positive("RETRIEVAL_CANDIDATE_K", self.retrieval_candidate_k)
+        require_positive("RRF_K", self.rrf_k)
         require_non_empty("LLM_MODEL", self.llm_model)
         require_non_empty("EMBEDDING_MODEL", self.embedding_model)
         require_non_empty("QDRANT_COLLECTION", self.qdrant_collection)
@@ -162,6 +175,15 @@ class AppConfig:
             chunk_strategy=env_choice("CHUNK_STRATEGY", DEFAULT_CHUNK_STRATEGY, CHUNK_STRATEGIES),
             chunk_size=env_int("CHUNK_SIZE", 800),
             chunk_overlap=env_int("CHUNK_OVERLAP", 120),
+            retrieval_strategy=env_choice(
+                "RETRIEVAL_STRATEGY",
+                DEFAULT_RETRIEVAL_STRATEGY,
+                RETRIEVAL_STRATEGIES,
+            ),
+            retrieval_candidate_k=env_int(
+                "RETRIEVAL_CANDIDATE_K", DEFAULT_RETRIEVAL_CANDIDATE_K
+            ),
+            rrf_k=env_int("RRF_K", DEFAULT_RRF_K),
         )
 
     def with_runtime(self, runtime: str | None) -> AppConfig:

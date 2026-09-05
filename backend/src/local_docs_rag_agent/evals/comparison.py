@@ -15,7 +15,13 @@ from math import prod
 from pathlib import Path
 
 from local_docs_rag_agent.config import AppConfig
-from local_docs_rag_agent.constants import CHUNK_STRATEGIES, ChunkStrategyName, VectorBackendName
+from local_docs_rag_agent.constants import (
+    CHUNK_STRATEGIES,
+    RETRIEVAL_STRATEGIES,
+    ChunkStrategyName,
+    RetrievalStrategyName,
+    VectorBackendName,
+)
 from local_docs_rag_agent.evals.harness import run_eval
 from local_docs_rag_agent.exceptions import ConfigurationError, VectorStoreError
 from local_docs_rag_agent.presenters import serialize_eval_summary, serialize_retrieval_config
@@ -30,6 +36,12 @@ def default_chunk_strategies() -> list[ChunkStrategyName]:
     """Return the chunk strategies compared when a caller does not choose any."""
 
     return list(CHUNK_STRATEGIES)
+
+
+def default_retrieval_strategies() -> list[RetrievalStrategyName]:
+    """Return the retrieval strategies compared when a caller does not choose any."""
+
+    return list(RETRIEVAL_STRATEGIES)
 
 
 def default_vector_backends(config: AppConfig) -> list[VectorBackendName]:
@@ -50,6 +62,7 @@ def run_eval_matrix(
     top_ks: Sequence[int],
     chunk_sizes: Sequence[int],
     chunk_overlaps: Sequence[int],
+    retrieval_strategies: Sequence[str] | None = None,
     output_path: Path | None = None,
 ) -> dict[str, object]:
     """Evaluate every combination of the requested axes and rank the results.
@@ -58,6 +71,9 @@ def run_eval_matrix(
     would exceed `MAX_MATRIX_RUNS`, so a single request cannot start an unbounded run.
     """
 
+    # An omitted axis holds the configured value steady rather than sweeping, so an
+    # existing caller keeps producing the run count it produced before.
+    strategies: Sequence[str] = retrieval_strategies or [config.retrieval_strategy]
     axis_lengths = [
         len(runtimes),
         len(vector_backends),
@@ -65,6 +81,7 @@ def run_eval_matrix(
         len(top_ks),
         len(chunk_sizes),
         len(chunk_overlaps),
+        len(strategies),
     ]
     num_combinations = prod(axis_lengths)
     if 0 in axis_lengths:
@@ -83,8 +100,17 @@ def run_eval_matrix(
         top_ks,
         chunk_sizes,
         chunk_overlaps,
+        strategies,
     )
-    for runtime, vector_backend, chunk_strategy, top_k, chunk_size, chunk_overlap in combinations:
+    for (
+        runtime,
+        vector_backend,
+        chunk_strategy,
+        top_k,
+        chunk_size,
+        chunk_overlap,
+        retrieval_strategy,
+    ) in combinations:
         run_config = config.with_overrides(
             agent_runtime=runtime,
             vector_backend=vector_backend,
@@ -92,6 +118,7 @@ def run_eval_matrix(
             top_k=top_k,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
+            retrieval_strategy=retrieval_strategy,
         )
         runs.append(_run_matrix_case(run_config))
 
@@ -103,6 +130,7 @@ def run_eval_matrix(
         "top_ks": list(top_ks),
         "chunk_sizes": list(chunk_sizes),
         "chunk_overlaps": list(chunk_overlaps),
+        "retrieval_strategies": list(strategies),
         "leaderboard": _build_leaderboard(runs),
         "runs": runs,
     }
@@ -149,6 +177,7 @@ def _run_matrix_case(config: AppConfig) -> dict[str, object]:
 def _run_label(config: AppConfig) -> str:
     return (
         f"{config.agent_runtime}:{config.vector_backend}:{config.chunk_strategy}"
+        f":{config.retrieval_strategy}"
         f":k{config.top_k}:s{config.chunk_size}:o{config.chunk_overlap}"
     )
 

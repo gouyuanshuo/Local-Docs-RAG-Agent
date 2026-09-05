@@ -23,6 +23,8 @@ The goal is not model training. The goal is to build a usable AI application wit
 
 - Ingests local `.md` and `.txt` files into a retrieval index
 - Supports local retrieval and Qdrant-backed retrieval
+- Ranks with a selectable retrieval strategy, comparable side by side in the eval
+  matrix: `blended`, `dense`, `lexical` (BM25), and `hybrid_rrf` (rank fusion)
 - Answers questions with cited source chunks
 - Exposes two runtimes:
   - `basic`
@@ -80,6 +82,8 @@ The backend is responsible for:
 
 - chunking
 - embedding generation
+- selectable ranking strategies (`rag/retrieval.py`), including BM25 (`rag/bm25.py`)
+  and reciprocal rank fusion (`rag/fusion.py`)
 - local hybrid retrieval
 - Qdrant vector retrieval
 - citation span tracking
@@ -269,6 +273,25 @@ The most important settings live in `.env`.
 - `EMBEDDING_BATCH_SIZE`
 - `EMBEDDING_MAX_RETRIES`
 - `EMBEDDING_RETRY_BACKOFF_MS`
+
+### Retrieval ranking
+
+- `RETRIEVAL_STRATEGY=blended` — the original `max(dense, lexical, weighted mix)`
+  ranking. Kept as the default so earlier eval numbers stay reproducible.
+- `RETRIEVAL_STRATEGY=dense` — embedding cosine similarity alone
+- `RETRIEVAL_STRATEGY=lexical` — Okapi BM25 alone
+- `RETRIEVAL_STRATEGY=hybrid_rrf` — dense and BM25 fused by reciprocal rank
+- `RETRIEVAL_CANDIDATE_K` — how deep each signal ranks before fusion (default 20).
+  Widened automatically when `TOP_K` exceeds it.
+- `RRF_K` — fusion damping constant (default 60)
+
+Scores are only comparable *within* a strategy: an RRF score is a sum of reciprocal
+ranks and sits near 0.03, while a cosine similarity sits near 1. Compare strategies
+with `eval-compare`, not by reading scores side by side.
+
+```bash
+python -m local_docs_rag_agent.cli eval-compare \n  --retrieval-strategy blended --retrieval-strategy hybrid_rrf
+```
 
 ### Retrieval backend
 

@@ -16,6 +16,11 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 from local_docs_rag_agent.exceptions import ProviderUnavailableError, VectorStoreError
 from local_docs_rag_agent.models import DocumentChunk, ProviderStatus, RetrievalHit
 from local_docs_rag_agent.providers.base import EmbeddingProvider
+from local_docs_rag_agent.rag.retrieval import (
+    RetrievalSettings,
+    needs_candidate_window,
+    rerank_dense_hits,
+)
 from local_docs_rag_agent.rag.scoring import build_retrieval_hit
 
 
@@ -30,6 +35,7 @@ class QdrantChunkStore:
         timeout_s: int,
         embedding_provider: EmbeddingProvider,
         trust_env: bool = True,
+        settings: RetrievalSettings | None = None,
     ) -> None:
         try:
             from qdrant_client import QdrantClient
@@ -50,6 +56,7 @@ class QdrantChunkStore:
         self._collection_name = collection_name
         self._embedding_provider = embedding_provider
         self._trust_env = trust_env
+        self._settings = settings or RetrievalSettings()
 
     def collection_exists(self) -> bool:
         try:
@@ -159,16 +166,20 @@ class QdrantChunkStore:
                 "Embedding provider did not return one non-empty query vector"
             )
 
+        # The dense-only strategies take exactly what they need from the server; the
+        # fused ones need a wider window to re-rank within.
+        fuses_locally = needs_candidate_window(self._settings.strategy)
+        limit = self._settings.window(top_k) if fuses_locally else top_k
         try:
             response = self._client.query_points(
                 collection_name=self._collection_name,
                 query=query_vectors[0],
-                limit=top_k,
+                limit=limit,
                 with_payload=True,
                 with_vectors=False,
             )
             points: Iterable[Any] = getattr(response, "points", response)
-            return [
+            dense_hits = [
                 build_retrieval_hit(
                     DocumentChunk.from_dict(point.payload),
                     float(point.score),
@@ -178,6 +189,18 @@ class QdrantChunkStore:
             ]
         except Exception as exc:
             raise self._operation_error("search", exc) from exc
+
+        # `blended` needs the chunk vectors to combine signals, and the server does not
+        # return them, so on this backend it means what it has always meant here: the
+        # server's own dense ordering.
+        if not fuses_locally:
+            return dense_hits[:top_k]
+        return rerank_dense_hits(
+            query=query,
+            dense_hits=dense_hits,
+            top_k=top_k,
+            settings=self._settings,
+        )
 
     @property
     def embedding_status(self) -> ProviderStatus:

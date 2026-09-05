@@ -120,8 +120,14 @@ match the live collection.
   - the JSONL implementation of `ChunkStore`
 - `rag/qdrant_store.py`
   - Qdrant collection lifecycle, pagination, delete/upsert, and error normalization
+- `rag/retrieval.py`
+  - the ranking pipeline: selects a strategy, ranks candidates, fuses, truncates
+- `rag/bm25.py`
+  - Okapi BM25 with inverse document frequency and term-frequency saturation
+- `rag/fusion.py`
+  - reciprocal rank fusion, for combining rankings that share no common scale
 - `rag/scoring.py`
-  - local dense/lexical/metadata scoring
+  - the tokenizer, cosine similarity, and the original blended chunk score
 - `rag/file_io.py`
   - atomic text-file replacement
 
@@ -235,6 +241,19 @@ To add a runtime:
 3. preserve requested vs actual runtime diagnostics
 4. use `runtime/shared.py` for citation assembly where possible
 5. wire it into `runtime/dispatch.py`
+
+To add a retrieval strategy:
+
+1. add the name to `RetrievalStrategyName` in `constants.py`; configuration, request
+   validation, CLI choices, and the eval matrix axis pick it up from there
+2. implement the ranking branch in `rag/retrieval.py`, returning hits built by
+   `build_retrieval_hit` so citation spans stay attached
+3. decide what it means on a remote backend that returns no vectors, and either
+   handle it in `rerank_dense_hits` or say in `needs_candidate_window` that it does
+   not need a wider candidate window
+4. add tests that show it ranks *differently* from an existing strategy, not merely
+   that it runs; a strategy nothing can distinguish is not a strategy
+5. sweep it against `blended` with `eval-compare` before claiming it is better
 
 To add a CLI command:
 

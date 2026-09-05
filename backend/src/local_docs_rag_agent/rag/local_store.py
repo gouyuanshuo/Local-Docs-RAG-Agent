@@ -2,8 +2,8 @@
 
 The file is human-readable and rewritten atomically on every ingest, which makes local
 development inspectable and keeps a crashed run from leaving a half-written index.
-Retrieval blends dense, lexical, and metadata signals so the store still returns useful
-results when embeddings have degraded to the deterministic hash fallback.
+Ranking itself lives in `rag.retrieval`, so which signals are combined and how is a
+configured strategy rather than a property of the storage format.
 """
 
 from __future__ import annotations
@@ -15,15 +15,21 @@ from local_docs_rag_agent.exceptions import DataFormatError, ProviderUnavailable
 from local_docs_rag_agent.models import DocumentChunk, ProviderStatus, RetrievalHit
 from local_docs_rag_agent.providers.base import EmbeddingProvider
 from local_docs_rag_agent.rag.file_io import atomic_write_text
-from local_docs_rag_agent.rag.scoring import build_retrieval_hit, score_local_chunk, tokenize
+from local_docs_rag_agent.rag.retrieval import RetrievalSettings, rank_chunks
 
 
 class LocalJsonlChunkStore:
     """Small, inspectable on-disk store for local development and fallback use."""
 
-    def __init__(self, index_path: Path, embedding_provider: EmbeddingProvider) -> None:
+    def __init__(
+        self,
+        index_path: Path,
+        embedding_provider: EmbeddingProvider,
+        settings: RetrievalSettings | None = None,
+    ) -> None:
         self._index_path = index_path
         self._embedding_provider = embedding_provider
+        self._settings = settings or RetrievalSettings()
 
     def save(
         self,
@@ -72,22 +78,16 @@ class LocalJsonlChunkStore:
             raise ProviderUnavailableError(
                 "Embedding provider did not return one non-empty query vector"
             )
-        query_embedding = query_vectors[0]
-        query_terms = tokenize(query)
-        hits = [
-            build_retrieval_hit(
-                chunk,
-                score_local_chunk(
-                    query_embedding=query_embedding,
-                    query_terms=query_terms,
-                    chunk=chunk,
-                ),
-            )
-            for chunk in self.load()
-        ]
-        hits = [hit for hit in hits if hit.score > 0]
-        hits.sort(key=lambda item: item.score, reverse=True)
-        return hits[:top_k]
+        # The whole corpus is available locally, so BM25 gets corpus-wide document
+        # frequencies here rather than the candidate-window approximation a remote
+        # backend has to settle for.
+        return rank_chunks(
+            query=query,
+            query_embedding=query_vectors[0],
+            chunks=self.load(),
+            top_k=top_k,
+            settings=self._settings,
+        )
 
     @property
     def embedding_status(self) -> ProviderStatus:

@@ -47,6 +47,7 @@ export type AppInfo = {
   embedding_provider: string;
   embedding_model: string;
   top_k: number;
+  retrieval_strategy: "blended" | "dense" | "lexical" | "hybrid_rrf";
   chunk_strategy: "fixed" | "paragraph" | "markdown";
   chunk_size: number;
   chunk_overlap: number;

@@ -15,6 +15,7 @@ from local_docs_rag_agent.providers.factory import build_embedding_provider
 from local_docs_rag_agent.rag.base import ChunkStore
 from local_docs_rag_agent.rag.local_store import LocalJsonlChunkStore
 from local_docs_rag_agent.rag.qdrant_store import QdrantChunkStore
+from local_docs_rag_agent.rag.retrieval import RetrievalSettings
 
 
 def build_store(
@@ -29,6 +30,7 @@ def build_store(
     """
 
     provider = embedding_provider or build_embedding_provider(config)
+    settings = retrieval_settings(config)
     if config.vector_backend == "qdrant":
         if not config.qdrant_url:
             raise ConfigurationError("QDRANT_URL must be set when VECTOR_BACKEND=qdrant")
@@ -39,5 +41,20 @@ def build_store(
             timeout_s=config.qdrant_timeout_s,
             embedding_provider=provider,
             trust_env=config.external_http_trust_env,
+            settings=settings,
         )
-    return LocalJsonlChunkStore(config.index_path, embedding_provider=provider)
+    return LocalJsonlChunkStore(
+        config.index_path,
+        embedding_provider=provider,
+        settings=settings,
+    )
+
+
+def retrieval_settings(config: AppConfig) -> RetrievalSettings:
+    """Project the ranking knobs out of `config` for the stores to consume."""
+
+    return RetrievalSettings(
+        strategy=config.retrieval_strategy,
+        candidate_k=config.retrieval_candidate_k,
+        rrf_k=config.rrf_k,
+    )
