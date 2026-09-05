@@ -103,6 +103,21 @@ class ProviderStatus:
 
 
 @dataclass(slots=True)
+class RetrievalOutcome:
+    """What one retrieval produced, and the health of every stage that produced it.
+
+    Retrieval runs in two stages that can degrade independently — embeddings and the
+    reranker — so the hits alone are not a complete answer to "what happened here".
+    Returning them together is what lets a runtime attach both statuses to its
+    diagnostics without knowing how retrieval is assembled.
+    """
+
+    hits: list[RetrievalHit]
+    embedding_status: ProviderStatus
+    reranker_status: ProviderStatus
+
+
+@dataclass(slots=True)
 class AnswerDiagnostics:
     """Truthful record of how an answer was actually produced.
 
@@ -116,6 +131,7 @@ class AnswerDiagnostics:
     vector_backend: VectorBackendName
     chat_provider: ProviderStatus
     embedding_provider: ProviderStatus
+    reranker: ProviderStatus
 
 
 @dataclass(slots=True)

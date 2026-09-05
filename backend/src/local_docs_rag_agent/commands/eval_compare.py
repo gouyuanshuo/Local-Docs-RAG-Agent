@@ -8,6 +8,7 @@ from pathlib import Path
 from local_docs_rag_agent.config import AppConfig
 from local_docs_rag_agent.evals.comparison import (
     default_chunk_strategies,
+    default_rerankers,
     default_retrieval_strategies,
     default_vector_backends,
     run_eval_matrix,
@@ -25,6 +26,7 @@ def run_eval_compare_command(
     chunk_sizes: list[int] | None = None,
     chunk_overlaps: list[int] | None = None,
     retrieval_strategies: list[str] | None = None,
+    rerankers: list[str] | None = None,
     output_path: str | None = None,
 ) -> None:
     """Compare eval results across the requested axes and print the report as JSON.
@@ -42,6 +44,7 @@ def run_eval_compare_command(
         chunk_sizes=chunk_sizes or [config.chunk_size],
         chunk_overlaps=chunk_overlaps or [config.chunk_overlap],
         retrieval_strategies=retrieval_strategies or default_retrieval_strategies(),
+        rerankers=rerankers or default_rerankers(config),
         output_path=Path(output_path) if output_path else DEFAULT_COMPARE_OUTPUT_PATH,
     )
     print(json.dumps(payload, ensure_ascii=True, indent=2))

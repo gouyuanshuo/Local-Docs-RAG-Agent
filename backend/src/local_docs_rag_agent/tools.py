@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 
 from local_docs_rag_agent.config import AppConfig
 from local_docs_rag_agent.rag.discovery import collect_document_paths
-from local_docs_rag_agent.rag.store_factory import build_store
+from local_docs_rag_agent.rag.pipeline import retrieve
 
 
 def list_documents(config: AppConfig) -> list[str]:
@@ -26,10 +26,13 @@ def list_documents(config: AppConfig) -> list[str]:
 def search_documents(
     config: AppConfig, query: str, top_k: int | None = None
 ) -> list[dict[str, str | float]]:
-    """Search the index and return hits as plain data, with their source spans."""
+    """Search the index and return hits as plain data, with their source spans.
 
-    store = build_store(config)
-    hits = store.search(query=query, top_k=top_k or config.top_k)
+    This goes through the full retrieval pipeline, reranking included, so the tool
+    cannot report a different ordering from the one an answer would have been built on.
+    """
+
+    hits = retrieve(config, query, top_k or config.top_k).hits
     return [
         {
             "source_path": hit.chunk.source_path,

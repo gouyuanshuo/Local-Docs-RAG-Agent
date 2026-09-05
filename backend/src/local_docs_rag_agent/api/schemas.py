@@ -15,9 +15,11 @@ from pydantic import BaseModel, Field, NonNegativeInt, PositiveInt, StringConstr
 from local_docs_rag_agent.constants import (
     AGENT_RUNTIMES,
     CHUNK_STRATEGIES,
+    RERANKERS,
     RETRIEVAL_STRATEGIES,
     VECTOR_BACKENDS,
     ChunkStrategyName,
+    RerankerName,
     RetrievalStrategyName,
     RuntimeName,
     VectorBackendName,
@@ -38,6 +40,7 @@ RetrievalStrategyList = Annotated[
     list[RetrievalStrategyName],
     Field(min_length=1, max_length=len(RETRIEVAL_STRATEGIES)),
 ]
+RerankerList = Annotated[list[RerankerName], Field(min_length=1, max_length=len(RERANKERS))]
 PositiveIntList = Annotated[list[PositiveInt], Field(min_length=1, max_length=8)]
 NonNegativeIntList = Annotated[list[NonNegativeInt], Field(min_length=1, max_length=8)]
 
@@ -59,6 +62,7 @@ class EvalCompareRequest(BaseModel):
     chunk_sizes: PositiveIntList | None = None
     chunk_overlaps: NonNegativeIntList | None = None
     retrieval_strategies: RetrievalStrategyList | None = None
+    rerankers: RerankerList | None = None
 
 
 class IngestResponse(BaseModel):
@@ -84,6 +88,7 @@ class AppInfoResponse(BaseModel):
     embedding_model: str
     top_k: PositiveInt
     retrieval_strategy: RetrievalStrategyName
+    reranker: RerankerName
     chunk_strategy: ChunkStrategyName
     chunk_size: PositiveInt
     chunk_overlap: NonNegativeInt
@@ -117,6 +122,7 @@ class AnswerDiagnosticsResponse(BaseModel):
     vector_backend: VectorBackendName
     chat_provider: ProviderStatusResponse
     embedding_provider: ProviderStatusResponse
+    reranker: ProviderStatusResponse
 
 
 class AskResponse(BaseModel):
@@ -137,6 +143,8 @@ class RetrievalConfigResponse(BaseModel):
     retrieval_strategy: RetrievalStrategyName
     retrieval_candidate_k: PositiveInt
     rrf_k: PositiveInt
+    reranker: RerankerName
+    rerank_candidate_k: PositiveInt
     docs_dir: str
     docs_exclude_patterns: list[str]
 
@@ -204,6 +212,7 @@ class EvalCompareResponse(BaseModel):
     chunk_sizes: list[PositiveInt]
     chunk_overlaps: list[NonNegativeInt]
     retrieval_strategies: list[RetrievalStrategyName]
+    rerankers: list[RerankerName]
     leaderboard: list[EvalLeaderboardRowResponse]
     runs: list[EvalMatrixRunResponse]
 

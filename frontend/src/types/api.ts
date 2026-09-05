@@ -24,6 +24,7 @@ export type AnswerDiagnostics = {
   vector_backend: "local" | "qdrant";
   chat_provider: ProviderStatus;
   embedding_provider: ProviderStatus;
+  reranker: ProviderStatus;
 };
 
 export type AskResponse = {
@@ -48,6 +49,7 @@ export type AppInfo = {
   embedding_model: string;
   top_k: number;
   retrieval_strategy: "blended" | "dense" | "lexical" | "hybrid_rrf";
+  reranker: "none" | "llm";
   chunk_strategy: "fixed" | "paragraph" | "markdown";
   chunk_size: number;
   chunk_overlap: number;

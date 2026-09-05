@@ -18,12 +18,12 @@ from openai import AsyncOpenAI
 from local_docs_rag_agent.config import AppConfig
 from local_docs_rag_agent.models import AgentAnswer, AnswerDiagnostics, ProviderStatus, RetrievalHit
 from local_docs_rag_agent.providers.openai_client import build_async_openai_client
+from local_docs_rag_agent.rag.pipeline import retrieve
 from local_docs_rag_agent.runtime.basic import answer_with_basic_runtime
 from local_docs_rag_agent.runtime.shared import (
     build_agent_answer,
     format_tool_search_results,
     merge_hits,
-    retrieve_hits,
 )
 from local_docs_rag_agent.tools import get_system_time, list_documents
 
@@ -32,9 +32,16 @@ from local_docs_rag_agent.tools import get_system_time, list_documents
 class AgentRuntimeContext:
     config: AppConfig
     retrieved_hits: list[RetrievalHit] = field(default_factory=list)
+    # The agent decides whether to search at all, so both retrieval statuses start
+    # `unknown` and are only replaced if the search tool actually runs.
     embedding_status: ProviderStatus = field(
         default_factory=lambda: ProviderStatus(
             provider="embedding", mode="unknown", reason="search_not_run"
+        )
+    )
+    reranker_status: ProviderStatus = field(
+        default_factory=lambda: ProviderStatus(
+            provider="reranker", mode="unknown", reason="search_not_run"
         )
     )
 
@@ -94,6 +101,7 @@ def answer_with_agents_sdk(config: AppConfig, question: str) -> AgentAnswer:
         vector_backend=config.vector_backend,
         chat_provider=ProviderStatus(provider=config.llm_provider, mode="live"),
         embedding_provider=run_context.embedding_status,
+        reranker=run_context.reranker_status,
     )
     return build_agent_answer(
         question=question,
@@ -124,12 +132,13 @@ def _build_sdk_agent(config: AppConfig, openai_client: AsyncOpenAI) -> Any:
         top_k: int | None = None,
     ) -> str:
         """Search local documents for evidence before answering a docs question."""
-        hits, embedding_status = retrieve_hits(ctx.context.config, query)
-        ctx.context.embedding_status = embedding_status
-        if top_k is not None:
-            hits = hits[:top_k]
-        merge_hits(ctx.context.retrieved_hits, hits)
-        return format_tool_search_results(hits)
+        # The tool's own `top_k` is applied by retrieval rather than by truncating
+        # afterwards, so the reranker reorders the window the agent actually asked for.
+        outcome = retrieve(ctx.context.config, query, top_k)
+        ctx.context.embedding_status = outcome.embedding_status
+        ctx.context.reranker_status = outcome.reranker_status
+        merge_hits(ctx.context.retrieved_hits, outcome.hits)
+        return format_tool_search_results(outcome.hits)
 
     @function_tool
     def get_current_time() -> str:

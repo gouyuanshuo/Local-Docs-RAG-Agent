@@ -52,6 +52,7 @@ def test_eval_result_preserves_runtime_and_provider_diagnostics(
         vector_backend="local",
         chat_provider=ProviderStatus(provider="fake-chat", mode="live"),
         embedding_provider=ProviderStatus(provider="fake-embedding", mode="live"),
+        reranker=ProviderStatus(provider="none", mode="ready", reason="reranker_disabled"),
     )
 
     class FakeAgent:
@@ -94,5 +95,10 @@ def test_eval_result_preserves_runtime_and_provider_diagnostics(
             "provider": "fake-embedding",
             "mode": "live",
             "reason": None,
+        },
+        "reranker": {
+            "provider": "none",
+            "mode": "ready",
+            "reason": "reranker_disabled",
         },
     }

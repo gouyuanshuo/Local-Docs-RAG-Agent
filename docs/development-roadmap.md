@@ -197,6 +197,7 @@ If fallback behavior is invisible, eval results and optimization decisions becom
   - actual runtime
   - chat provider mode/reason
   - embedding provider mode/reason
+  - reranker mode/reason
 - next step: thread this more clearly into eval reports and status dashboards
 
 ---
@@ -255,7 +256,20 @@ Retrieval engineering is one of the project’s main sources of portfolio value.
     the assumption that a cosine similarity and a term-overlap ratio are comparable
     numbers that `max()` silently made
   - `RETRIEVAL_STRATEGY` is a comparison-matrix axis, so the change is measurable
-- remaining Phase C depth: a second-stage reranker, and query rewriting/expansion
+- retrieval is now a two-stage pipeline rather than a single lookup:
+  - `rag/pipeline.py` is the one entry point, and it composes the store search with an
+    optional reranker so the second stage cannot be skipped by accident
+  - `RERANKER=llm` reads a wider candidate window and reorders it with one chat call,
+    which is the first ranking signal in the project that reads the question as a
+    question rather than as a bag of terms
+  - `RERANKER=none` stays the default: reranking costs a model call per question, and
+    the disabled path issues exactly the query the project issued before it existed
+  - a reranker that cannot reach its model returns the first-stage candidates and
+    reports `fallback`, so a degraded run is still visible in answer diagnostics
+  - `RERANKER` is a comparison-matrix axis, but the only one that does not sweep by
+    default, because each `llm` cell spends a model call per eval case
+- remaining Phase C depth: a cross-encoder reranker behind the same protocol, and
+  query rewriting/expansion
 - next primary focus: `Phase D: Qdrant engineering` for incremental ingest and lifecycle management
 
 ---

@@ -27,6 +27,7 @@ from local_docs_rag_agent.config import AppConfig
 from local_docs_rag_agent.constants import (
     AGENT_RUNTIMES,
     CHUNK_STRATEGIES,
+    RERANKERS,
     RETRIEVAL_STRATEGIES,
     VECTOR_BACKENDS,
 )
@@ -121,6 +122,13 @@ def _register_eval_compare(subparsers: SubParsers) -> None:
         choices=RETRIEVAL_STRATEGIES,
         noun="retrieval strategies",
     )
+    _add_repeatable_choice_option(
+        parser,
+        "--reranker",
+        dest="rerankers",
+        choices=RERANKERS,
+        noun="rerankers",
+    )
     _add_repeatable_int_option(parser, "--top-k", dest="top_ks", noun="top-k values")
     _add_repeatable_int_option(parser, "--chunk-size", dest="chunk_sizes", noun="chunk sizes")
     _add_repeatable_int_option(
@@ -168,6 +176,7 @@ def _handle_eval_compare(config: AppConfig, args: argparse.Namespace) -> None:
         chunk_sizes=args.chunk_sizes,
         chunk_overlaps=args.chunk_overlaps,
         retrieval_strategies=args.retrieval_strategies,
+        rerankers=args.rerankers,
         output_path=args.output,
     )
 

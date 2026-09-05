@@ -19,6 +19,7 @@ from local_docs_rag_agent.constants import (
     CHUNK_STRATEGIES,
     RETRIEVAL_STRATEGIES,
     ChunkStrategyName,
+    RerankerName,
     RetrievalStrategyName,
     VectorBackendName,
 )
@@ -44,6 +45,18 @@ def default_retrieval_strategies() -> list[RetrievalStrategyName]:
     return list(RETRIEVAL_STRATEGIES)
 
 
+def default_rerankers(config: AppConfig) -> list[RerankerName]:
+    """Return the rerankers compared when a caller does not choose any.
+
+    Unlike every other axis this one does not sweep, it holds the configured value.
+    Each `llm` cell spends one model call per eval case, so sweeping by default would
+    turn a routine comparison into an unrequested bill; opting in with `--reranker llm`
+    keeps that a decision.
+    """
+
+    return [config.reranker]
+
+
 def default_vector_backends(config: AppConfig) -> list[VectorBackendName]:
     """Return the vector backends worth comparing for `config`.
 
@@ -63,6 +76,7 @@ def run_eval_matrix(
     chunk_sizes: Sequence[int],
     chunk_overlaps: Sequence[int],
     retrieval_strategies: Sequence[str] | None = None,
+    rerankers: Sequence[str] | None = None,
     output_path: Path | None = None,
 ) -> dict[str, object]:
     """Evaluate every combination of the requested axes and rank the results.
@@ -74,6 +88,7 @@ def run_eval_matrix(
     # An omitted axis holds the configured value steady rather than sweeping, so an
     # existing caller keeps producing the run count it produced before.
     strategies: Sequence[str] = retrieval_strategies or [config.retrieval_strategy]
+    reranker_names: Sequence[str] = rerankers or [config.reranker]
     axis_lengths = [
         len(runtimes),
         len(vector_backends),
@@ -82,6 +97,7 @@ def run_eval_matrix(
         len(chunk_sizes),
         len(chunk_overlaps),
         len(strategies),
+        len(reranker_names),
     ]
     num_combinations = prod(axis_lengths)
     if 0 in axis_lengths:
@@ -101,6 +117,7 @@ def run_eval_matrix(
         chunk_sizes,
         chunk_overlaps,
         strategies,
+        reranker_names,
     )
     for (
         runtime,
@@ -110,6 +127,7 @@ def run_eval_matrix(
         chunk_size,
         chunk_overlap,
         retrieval_strategy,
+        reranker,
     ) in combinations:
         run_config = config.with_overrides(
             agent_runtime=runtime,
@@ -119,6 +137,7 @@ def run_eval_matrix(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
             retrieval_strategy=retrieval_strategy,
+            reranker=reranker,
         )
         runs.append(_run_matrix_case(run_config))
 
@@ -131,6 +150,7 @@ def run_eval_matrix(
         "chunk_sizes": list(chunk_sizes),
         "chunk_overlaps": list(chunk_overlaps),
         "retrieval_strategies": list(strategies),
+        "rerankers": list(reranker_names),
         "leaderboard": _build_leaderboard(runs),
         "runs": runs,
     }
@@ -177,7 +197,7 @@ def _run_matrix_case(config: AppConfig) -> dict[str, object]:
 def _run_label(config: AppConfig) -> str:
     return (
         f"{config.agent_runtime}:{config.vector_backend}:{config.chunk_strategy}"
-        f":{config.retrieval_strategy}"
+        f":{config.retrieval_strategy}:rr-{config.reranker}"
         f":k{config.top_k}:s{config.chunk_size}:o{config.chunk_overlap}"
     )
 

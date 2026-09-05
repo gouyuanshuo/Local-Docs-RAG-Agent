@@ -1,7 +1,10 @@
-"""Retrieval, prompt-context formatting, and citation assembly shared by runtimes.
+"""Prompt-context formatting and citation assembly shared by runtimes.
 
 Keeping these here is what lets two runtimes produce answers with identical citation
-semantics, so an eval can compare them on answer quality alone.
+semantics, so an eval can compare them on answer quality alone. Retrieval itself lives
+in `rag.pipeline`, which both runtimes call directly: it is a retrieval concern, not a
+runtime one, and putting it here would have made the reranking stage look like
+something a runtime could choose to skip.
 
 Both formatters render one labelled block per hit, `[S1]`, `[S2]`, and so on, with the
 multi-line body last. That layout is a contract, not a style choice: the extractive
@@ -12,23 +15,12 @@ the final field in its block.
 
 from __future__ import annotations
 
-from local_docs_rag_agent.config import AppConfig
 from local_docs_rag_agent.models import (
     AgentAnswer,
     AnswerDiagnostics,
     CitationSpan,
-    ProviderStatus,
     RetrievalHit,
 )
-from local_docs_rag_agent.rag.store_factory import build_store
-
-
-def retrieve_hits(config: AppConfig, question: str) -> tuple[list[RetrievalHit], ProviderStatus]:
-    """Search the configured store and report the embedding provider's health with it."""
-
-    store = build_store(config)
-    hits = store.search(query=question, top_k=config.top_k)
-    return hits, store.embedding_status
 
 
 def build_answer_context(hits: list[RetrievalHit]) -> str:

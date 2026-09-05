@@ -7,7 +7,7 @@ from typing import Any, ClassVar
 import pytest
 
 from local_docs_rag_agent.config import AppConfig
-from local_docs_rag_agent.models import DocumentChunk, ProviderStatus, RetrievalHit
+from local_docs_rag_agent.models import DocumentChunk, ProviderStatus, RetrievalOutcome
 from local_docs_rag_agent.rag.scoring import build_retrieval_hit
 from local_docs_rag_agent.runtime import agents_sdk
 
@@ -107,7 +107,7 @@ def _config(api_style: str) -> AppConfig:
     )
 
 
-def _retrieval_result() -> tuple[list[RetrievalHit], ProviderStatus]:
+def _retrieval_outcome() -> RetrievalOutcome:
     chunk = DocumentChunk(
         chunk_id="attention::0",
         source_path="docs/attention.md",
@@ -118,9 +118,12 @@ def _retrieval_result() -> tuple[list[RetrievalHit], ProviderStatus]:
         end_char=41,
         embedding=[1.0],
     )
-    return [build_retrieval_hit(chunk, 0.95)], ProviderStatus(
-        provider="fake-embedding",
-        mode="live",
+    return RetrievalOutcome(
+        hits=[build_retrieval_hit(chunk, 0.95)],
+        embedding_status=ProviderStatus(provider="fake-embedding", mode="live"),
+        reranker_status=ProviderStatus(
+            provider="none", mode="ready", reason="reranker_disabled"
+        ),
     )
 
 
@@ -140,7 +143,11 @@ def test_agents_runtime_uses_fake_runner_and_preserves_diagnostics(
     client = FakeAsyncOpenAI()
     monkeypatch.setattr(agents_sdk, "_supports_agents_sdk", lambda: True)
     monkeypatch.setattr(agents_sdk, "build_async_openai_client", lambda **kwargs: client)
-    monkeypatch.setattr(agents_sdk, "retrieve_hits", lambda config, query: _retrieval_result())
+    monkeypatch.setattr(
+        agents_sdk,
+        "retrieve",
+        lambda config, query, top_k: _retrieval_outcome(),
+    )
 
     config = _config(api_style)
     answer = agents_sdk.answer_with_agents_sdk(config, "Explain attention")
@@ -153,6 +160,7 @@ def test_agents_runtime_uses_fake_runner_and_preserves_diagnostics(
     assert answer.diagnostics.actual_runtime == "agents_sdk"
     assert answer.diagnostics.chat_provider.mode == "live"
     assert answer.diagnostics.embedding_provider.mode == "live"
+    assert answer.diagnostics.reranker.reason == "reranker_disabled"
     assert client.closed is True
     assert len(FakeRunner.calls) == 1
     assert FakeRunner.calls[0]["max_turns"] == config.agents_max_turns

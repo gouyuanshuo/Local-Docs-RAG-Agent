@@ -25,6 +25,7 @@ The goal is not model training. The goal is to build a usable AI application wit
 - Supports local retrieval and Qdrant-backed retrieval
 - Ranks with a selectable retrieval strategy, comparable side by side in the eval
   matrix: `blended`, `dense`, `lexical` (BM25), and `hybrid_rrf` (rank fusion)
+- Optionally reranks a wider candidate window with a second stage before answering
 - Answers questions with cited source chunks
 - Exposes two runtimes:
   - `basic`
@@ -84,6 +85,8 @@ The backend is responsible for:
 - embedding generation
 - selectable ranking strategies (`rag/retrieval.py`), including BM25 (`rag/bm25.py`)
   and reciprocal rank fusion (`rag/fusion.py`)
+- an optional second-stage reranker (`rag/rerank.py`, `rag/llm_rerank.py`) composed
+  with the first stage in `rag/pipeline.py`
 - local hybrid retrieval
 - Qdrant vector retrieval
 - citation span tracking
@@ -290,7 +293,38 @@ ranks and sits near 0.03, while a cosine similarity sits near 1. Compare strateg
 with `eval-compare`, not by reading scores side by side.
 
 ```bash
-python -m local_docs_rag_agent.cli eval-compare \n  --retrieval-strategy blended --retrieval-strategy hybrid_rrf
+python -m local_docs_rag_agent.cli eval-compare \
+  --retrieval-strategy blended --retrieval-strategy hybrid_rrf
+```
+
+### Second-stage reranking
+
+First-stage ranking judges a chunk without reading the question as a question, so
+the right passage often lands third rather than first. Widening `TOP_K` to
+compensate pushes more marginal context into the prompt, which is what degrades the
+answer. A reranker is the other trade: retrieve a wide candidate window, reorder it,
+and answer from a short list.
+
+- `RERANKER=none` — the default. No extra call, and the store is asked for exactly
+  `TOP_K` candidates, so a disabled reranker costs nothing.
+- `RERANKER=llm` — one chat call per question orders the candidates. It reuses the
+  chat credentials, endpoint, and API style.
+- `RERANK_CANDIDATE_K` — how many candidates the reranker reads (default 20).
+  Widened automatically when `TOP_K` exceeds it.
+- `RERANK_MODEL` — rank with a smaller, cheaper model than the one that answers.
+  Defaults to `LLM_MODEL`.
+
+The reranker never raises and never invents a passage: an unreachable provider or an
+unusable reply returns the first-stage candidates unchanged and reports `fallback` in
+the answer's diagnostics, so a degraded run stays visibly degraded. After a
+successful rerank a hit's score is a rank score (`1 / position`), not a similarity.
+
+Reranking is the one `eval-compare` axis that does not sweep by default, because
+every `llm` cell costs a model call per eval case. Ask for it explicitly:
+
+```bash
+python -m local_docs_rag_agent.cli eval-compare \
+  --reranker none --reranker llm
 ```
 
 ### Retrieval backend

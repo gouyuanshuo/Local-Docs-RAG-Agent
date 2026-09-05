@@ -62,7 +62,7 @@ import FastAPI, Pydantic, argparse, or frontend concerns.
 - `runtime/agents_sdk.py`
   - tool-capable agent orchestration with a request-owned async OpenAI client
 - `runtime/shared.py`
-  - retrieval, context formatting, citation assembly, and hit merging
+  - context formatting, citation assembly, and hit merging
 - `evals/harness.py`
   - loads eval cases and calculates per-case metrics
 - `evals/comparison.py`
@@ -112,6 +112,9 @@ match the live collection.
   - fixed, paragraph, and Markdown-aware chunking with source spans
 - `rag/store_factory.py`
   - the only place that turns `VECTOR_BACKEND` into a concrete store
+- `rag/pipeline.py`
+  - composes the retrieval stages: search the store, rerank the candidates, report
+    the health of both. Every caller that retrieves for an answer goes through here
 - `rag/ingest.py`
   - change planning, embedding attachment, store commit, and index fingerprinting
 - `rag/manifest.py`
@@ -126,6 +129,10 @@ match the live collection.
   - Okapi BM25 with inverse document frequency and term-frequency saturation
 - `rag/fusion.py`
   - reciprocal rank fusion, for combining rankings that share no common scale
+- `rag/rerank.py`
+  - the `Reranker` protocol and the `none` reranker that keeps first-stage order
+- `rag/llm_rerank.py`
+  - reorders a candidate window with one chat call, degrading to first-stage order
 - `rag/scoring.py`
   - the tokenizer, cosine similarity, and the original blended chunk score
 - `rag/file_io.py`
@@ -134,12 +141,21 @@ match the live collection.
 The dependency direction inside the package runs one way:
 
 ```text
-discovery -> chunker -> ingest -> store_factory -> base / local_store / qdrant_store
+discovery -> chunker -> ingest -> pipeline -> store_factory -> base / local_store
+                                                            -> qdrant_store
+                                                            -> retrieval -> bm25
+                                                                         -> fusion
+                                           -> rerank -> llm_rerank
 ```
 
 `base` and `models` sit at the bottom and import nothing from the layers above them.
 Store construction lives in `store_factory` rather than `ingest`, so retrieval and the
 agent tools can build a store without importing the ingest pipeline.
+
+`pipeline` sits at the top and is the only module that knows retrieval has two stages.
+That is what keeps a store unaware that reranking exists and a reranker unaware of which
+backend produced its candidates, and it is why the second stage cannot be skipped by
+accident: there is one retrieval entry point, and it returns both stage statuses.
 
 The ingest order is deliberate:
 
@@ -158,7 +174,8 @@ deletes so old points cannot survive.
 
 - `constants.py`
   - the closed option sets shared by every layer: runtimes, chunk strategies, vector
-    backends, and API styles. The runtime tuples are derived from the `Literal` aliases
+    backends, API styles, retrieval strategies, and rerankers. The runtime tuples are
+    derived from the `Literal` aliases
     with `typing.get_args`, so the static type and the runtime validation cannot drift
 - `env.py`
   - typed environment readers and value validators
@@ -241,6 +258,22 @@ To add a runtime:
 3. preserve requested vs actual runtime diagnostics
 4. use `runtime/shared.py` for citation assembly where possible
 5. wire it into `runtime/dispatch.py`
+
+To add a reranker:
+
+1. add the name to `RerankerName` in `constants.py`; configuration, request validation,
+   CLI choices, and the eval matrix axis pick it up from there
+2. implement the `Reranker` protocol from `rag/rerank.py` in its own module. Take no
+   dependency on which store produced the candidates
+3. report a `fallback` `ProviderStatus` and return the candidates unchanged on every
+   failure. A reranker must not raise: a recoverable provider fault would otherwise
+   turn into a failed answer, and a silent retreat to first-stage order would let a
+   degraded run pass for a reranked one
+4. say in `candidate_depth` how wide a window it is willing to read, and never return
+   less than `top_k`
+5. wire construction in `rag/pipeline.py`
+6. add tests that show it reorders, that a bad reply degrades rather than raises, and
+   that its status reaches the answer diagnostics
 
 To add a retrieval strategy:
 

@@ -19,12 +19,14 @@ ChunkStrategyName = Literal["fixed", "paragraph", "markdown"]
 VectorBackendName = Literal["local", "qdrant"]
 ApiStyleName = Literal["responses", "chat_completions"]
 RetrievalStrategyName = Literal["blended", "dense", "lexical", "hybrid_rrf"]
+RerankerName = Literal["none", "llm"]
 
 AGENT_RUNTIMES: tuple[RuntimeName, ...] = get_args(RuntimeName)
 CHUNK_STRATEGIES: tuple[ChunkStrategyName, ...] = get_args(ChunkStrategyName)
 VECTOR_BACKENDS: tuple[VectorBackendName, ...] = get_args(VectorBackendName)
 API_STYLES: tuple[ApiStyleName, ...] = get_args(ApiStyleName)
 RETRIEVAL_STRATEGIES: tuple[RetrievalStrategyName, ...] = get_args(RetrievalStrategyName)
+RERANKERS: tuple[RerankerName, ...] = get_args(RerankerName)
 
 DEFAULT_AGENT_RUNTIME: RuntimeName = "basic"
 DEFAULT_CHUNK_STRATEGY: ChunkStrategyName = "markdown"
@@ -35,6 +37,10 @@ DEFAULT_API_STYLE: ApiStyleName = "responses"
 DEFAULT_RETRIEVAL_STRATEGY: RetrievalStrategyName = "blended"
 DEFAULT_RETRIEVAL_CANDIDATE_K = 20
 DEFAULT_RRF_K = 60
+# Reranking is off by default: it costs a model call per question, and every result
+# recorded before it existed was produced without it.
+DEFAULT_RERANKER: RerankerName = "none"
+DEFAULT_RERANK_CANDIDATE_K = 20
 
 __all__ = [
     "AGENT_RUNTIMES",
@@ -43,14 +49,18 @@ __all__ = [
     "DEFAULT_AGENT_RUNTIME",
     "DEFAULT_API_STYLE",
     "DEFAULT_CHUNK_STRATEGY",
+    "DEFAULT_RERANKER",
+    "DEFAULT_RERANK_CANDIDATE_K",
     "DEFAULT_RETRIEVAL_CANDIDATE_K",
     "DEFAULT_RETRIEVAL_STRATEGY",
     "DEFAULT_RRF_K",
     "DEFAULT_VECTOR_BACKEND",
+    "RERANKERS",
     "RETRIEVAL_STRATEGIES",
     "VECTOR_BACKENDS",
     "ApiStyleName",
     "ChunkStrategyName",
+    "RerankerName",
     "RetrievalStrategyName",
     "RuntimeName",
     "VectorBackendName",

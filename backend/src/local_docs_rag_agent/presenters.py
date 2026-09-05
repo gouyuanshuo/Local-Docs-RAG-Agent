@@ -46,6 +46,7 @@ def serialize_diagnostics(diagnostics: AnswerDiagnostics) -> dict[str, object]:
         "vector_backend": diagnostics.vector_backend,
         "chat_provider": serialize_provider_status(diagnostics.chat_provider),
         "embedding_provider": serialize_provider_status(diagnostics.embedding_provider),
+        "reranker": serialize_provider_status(diagnostics.reranker),
     }
 
 
@@ -78,6 +79,8 @@ def serialize_retrieval_config(config: AppConfig) -> dict[str, object]:
         "retrieval_strategy": config.retrieval_strategy,
         "retrieval_candidate_k": config.retrieval_candidate_k,
         "rrf_k": config.rrf_k,
+        "reranker": config.reranker,
+        "rerank_candidate_k": config.rerank_candidate_k,
         "docs_dir": str(config.docs_dir),
         "docs_exclude_patterns": list(config.docs_exclude_patterns),
     }

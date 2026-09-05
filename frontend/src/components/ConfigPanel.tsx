@@ -32,7 +32,9 @@ export function ConfigPanel({ info, bootstrapError }: ConfigPanelProps) {
         <div>
           <dt>Retrieval</dt>
           <dd>
-            {info ? `${info.retrieval_strategy} / top ${info.top_k}` : "loading..."}
+            {info
+              ? `${info.retrieval_strategy} / top ${info.top_k} / rerank ${info.reranker}`
+              : "loading..."}
           </dd>
         </div>
         <div>

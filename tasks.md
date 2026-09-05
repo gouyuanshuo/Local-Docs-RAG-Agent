@@ -116,8 +116,16 @@ Current theme:
 - [x] Keep `blended` the default so earlier eval numbers stay reproducible
 - [ ] Run a full `eval-compare` sweep over the strategies on a live provider and
       record which one wins on `retrieval_span_hit_rate`
-- [ ] Add a second-stage reranker behind an interface (LLM rerank first, leaving
+- [x] Add a second-stage reranker behind an interface (LLM rerank first, leaving
       room for a cross-encoder)
+- [x] Compose the two retrieval stages in one place (`rag/pipeline.py`) so a store
+      stays unaware of reranking and the second stage cannot be skipped by accident
+- [x] Carry the reranker's provider status into `AnswerDiagnostics`, so a degraded
+      rerank is as visible as a degraded chat or embedding provider
+- [ ] Add a cross-encoder reranker behind the same `Reranker` protocol, and compare it
+      against `llm` on cost as well as on `retrieval_span_hit_rate`
+- [ ] Measure how much of the rerank window is worth paying for: sweep
+      `RERANK_CANDIDATE_K` once a real corpus sweep exists to compare against
 - [ ] Add query rewriting / multi-query expansion ahead of candidate generation
 
 ### Follow-ups
@@ -127,7 +135,7 @@ Current theme:
 - [ ] Consider promoting `data/` report writing behind a small reporting module if more
       report formats appear
 - [ ] `LocalJsonlChunkStore.search` re-reads and re-parses the whole JSONL index on
-      every query, and `retrieve_hits` builds a fresh store per request, so an
+      every query, and `rag/pipeline.retrieve` builds a fresh store per request, so an
       `eval-compare` sweep pays that cost once per question per cell. A cache keyed on
       the index path and its mtime would fix it, but chunks are mutable and shared, so
       it needs a considered ownership rule rather than a quick dictionary.

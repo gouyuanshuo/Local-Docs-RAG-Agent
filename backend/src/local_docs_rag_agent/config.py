@@ -20,14 +20,18 @@ from local_docs_rag_agent.constants import (
     DEFAULT_AGENT_RUNTIME,
     DEFAULT_API_STYLE,
     DEFAULT_CHUNK_STRATEGY,
+    DEFAULT_RERANK_CANDIDATE_K,
+    DEFAULT_RERANKER,
     DEFAULT_RETRIEVAL_CANDIDATE_K,
     DEFAULT_RETRIEVAL_STRATEGY,
     DEFAULT_RRF_K,
     DEFAULT_VECTOR_BACKEND,
+    RERANKERS,
     RETRIEVAL_STRATEGIES,
     VECTOR_BACKENDS,
     ApiStyleName,
     ChunkStrategyName,
+    RerankerName,
     RetrievalStrategyName,
     RuntimeName,
     VectorBackendName,
@@ -99,6 +103,9 @@ class AppConfig:
     retrieval_strategy: RetrievalStrategyName
     retrieval_candidate_k: int
     rrf_k: int
+    reranker: RerankerName
+    rerank_candidate_k: int
+    rerank_model: str | None
 
     def __post_init__(self) -> None:
         # Every instance is re-validated, because `with_overrides` can build a variant
@@ -110,6 +117,7 @@ class AppConfig:
         require_choice(
             "RETRIEVAL_STRATEGY", self.retrieval_strategy, RETRIEVAL_STRATEGIES
         )
+        require_choice("RERANKER", self.reranker, RERANKERS)
         require_positive("EMBEDDING_BATCH_SIZE", self.embedding_batch_size)
         require_non_negative("EMBEDDING_MAX_RETRIES", self.embedding_max_retries)
         require_non_negative("EMBEDDING_RETRY_BACKOFF_MS", self.embedding_retry_backoff_ms)
@@ -120,6 +128,7 @@ class AppConfig:
         require_non_negative("CHUNK_OVERLAP", self.chunk_overlap)
         require_positive("RETRIEVAL_CANDIDATE_K", self.retrieval_candidate_k)
         require_positive("RRF_K", self.rrf_k)
+        require_positive("RERANK_CANDIDATE_K", self.rerank_candidate_k)
         require_non_empty("LLM_MODEL", self.llm_model)
         require_non_empty("EMBEDDING_MODEL", self.embedding_model)
         require_non_empty("QDRANT_COLLECTION", self.qdrant_collection)
@@ -184,6 +193,11 @@ class AppConfig:
                 "RETRIEVAL_CANDIDATE_K", DEFAULT_RETRIEVAL_CANDIDATE_K
             ),
             rrf_k=env_int("RRF_K", DEFAULT_RRF_K),
+            reranker=env_choice("RERANKER", DEFAULT_RERANKER, RERANKERS),
+            rerank_candidate_k=env_int(
+                "RERANK_CANDIDATE_K", DEFAULT_RERANK_CANDIDATE_K
+            ),
+            rerank_model=env_optional_text("RERANK_MODEL"),
         )
 
     def with_runtime(self, runtime: str | None) -> AppConfig:

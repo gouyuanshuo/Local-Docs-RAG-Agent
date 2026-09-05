@@ -11,10 +11,10 @@ from local_docs_rag_agent.config import AppConfig
 from local_docs_rag_agent.constants import RuntimeName
 from local_docs_rag_agent.models import AgentAnswer, AnswerDiagnostics, ProviderStatus
 from local_docs_rag_agent.providers.factory import build_chat_provider
+from local_docs_rag_agent.rag.pipeline import retrieve
 from local_docs_rag_agent.runtime.shared import (
     build_agent_answer,
     build_answer_context,
-    retrieve_hits,
 )
 
 
@@ -25,7 +25,8 @@ def answer_with_basic_runtime(
     runtime_reason: str | None = None,
 ) -> AgentAnswer:
     provider = build_chat_provider(config)
-    hits, embedding_status = retrieve_hits(config, question)
+    outcome = retrieve(config, question)
+    hits = outcome.hits
     context = build_answer_context(hits)
     answer = provider.answer(question=question, context=context)
     chat_status = provider.status
@@ -43,6 +44,7 @@ def answer_with_basic_runtime(
         actual_runtime="basic",
         vector_backend=config.vector_backend,
         chat_provider=chat_status,
-        embedding_provider=embedding_status,
+        embedding_provider=outcome.embedding_status,
+        reranker=outcome.reranker_status,
     )
     return build_agent_answer(question=question, answer=answer, hits=hits, diagnostics=diagnostics)

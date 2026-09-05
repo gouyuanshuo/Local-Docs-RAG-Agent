@@ -39,9 +39,24 @@ export function AnswerResult({ result }: AnswerResultProps) {
         >
           embedding {providerLabel(diagnostics.embedding_provider)}
         </span>
+        {/* A disabled reranker is neither a success nor a degradation, so only a
+            fallback is flagged and only a rerank that ran is marked live. */}
+        <span
+          className={`status-chip ${
+            diagnostics.reranker.mode === "fallback"
+              ? "warn"
+              : diagnostics.reranker.mode === "live"
+                ? "ok"
+                : ""
+          }`}
+        >
+          rerank {providerLabel(diagnostics.reranker)}
+        </span>
       </div>
 
-      {diagnostics.chat_provider.reason || diagnostics.embedding_provider.reason ? (
+      {diagnostics.chat_provider.reason ||
+      diagnostics.embedding_provider.reason ||
+      diagnostics.reranker.mode === "fallback" ? (
         <div className="reason-list">
           {diagnostics.chat_provider.reason ? (
             <p>
@@ -51,6 +66,11 @@ export function AnswerResult({ result }: AnswerResultProps) {
           {diagnostics.embedding_provider.reason ? (
             <p>
               <strong>Embedding status:</strong> {diagnostics.embedding_provider.reason}
+            </p>
+          ) : null}
+          {diagnostics.reranker.mode === "fallback" ? (
+            <p>
+              <strong>Rerank status:</strong> {diagnostics.reranker.reason}
             </p>
           ) : null}
         </div>
