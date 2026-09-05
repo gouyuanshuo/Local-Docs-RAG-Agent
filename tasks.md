@@ -99,6 +99,13 @@ Current theme:
 - [x] Add module docstrings that record intent and invariants, not restated signatures
 - [x] Rewrite the commit history into Conventional Commits
 
+### Type-gate coverage
+
+- [x] Annotate test fixtures and stubs so `mypy --strict` passes over `tests/`
+- [x] Make test embedding stubs implement `EmbeddingProvider` instead of duck-typing it
+- [x] Declare `files` in `[tool.mypy]` so a bare `mypy` checks source, tests, and scripts
+- [x] Point the CI mypy step at the configured file set rather than `backend/src` alone
+
 ### Follow-ups
 
 - [ ] Consider grouping `AppConfig` into per-concern sub-configs if the field count

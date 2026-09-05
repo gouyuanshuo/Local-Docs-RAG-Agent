@@ -24,7 +24,7 @@ def test_empty_expectations_are_neutral_success() -> None:
     assert source_match_rate([], []) == 1.0
 
 
-def test_eval_loader_reports_malformed_line(tmp_path) -> None:
+def test_eval_loader_reports_malformed_line(tmp_path: Path) -> None:
     eval_path = tmp_path / "eval.jsonl"
     eval_path.write_text(
         "\n".join(
@@ -78,7 +78,10 @@ def test_eval_result_preserves_runtime_and_provider_diagnostics(
     summary = serialize_eval_summary(results, runtime="basic", config=config)
 
     assert results[0].diagnostics == diagnostics
-    assert summary["results"][0]["diagnostics"] == {
+    # `serialize_eval_summary` returns an untyped payload, so narrow before indexing.
+    results_payload = summary["results"]
+    assert isinstance(results_payload, list)
+    assert results_payload[0]["diagnostics"] == {
         "requested_runtime": "basic",
         "actual_runtime": "basic",
         "vector_backend": "local",

@@ -34,7 +34,7 @@ jobs:
         run: python -m ruff check backend/src tests scripts
 
       - name: Mypy
-        run: python -m mypy backend/src
+        run: python -m mypy
 
       - name: Pytest
         run: python -m pytest

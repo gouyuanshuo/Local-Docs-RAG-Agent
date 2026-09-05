@@ -80,12 +80,16 @@ class FakeRunner:
 
 def _install_fake_agents(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     fake_module = ModuleType("agents")
-    fake_module.Agent = FakeAgent
-    fake_module.RunContextWrapper = FakeRunContextWrapper
-    fake_module.function_tool = lambda function: function
-    fake_module.OpenAIResponsesModel = FakeResponsesModel
-    fake_module.OpenAIChatCompletionsModel = FakeChatCompletionsModel
-    fake_module.Runner = FakeRunner
+    # Populated through the module namespace rather than by attribute assignment: a
+    # synthetic module has no declared attributes for a type checker to accept.
+    fake_module.__dict__.update(
+        Agent=FakeAgent,
+        RunContextWrapper=FakeRunContextWrapper,
+        function_tool=lambda function: function,
+        OpenAIResponsesModel=FakeResponsesModel,
+        OpenAIChatCompletionsModel=FakeChatCompletionsModel,
+        Runner=FakeRunner,
+    )
     monkeypatch.setitem(sys.modules, "agents", fake_module)
     FakeAgent.created.clear()
     FakeRunner.calls.clear()
@@ -167,7 +171,7 @@ def test_agents_runtime_closes_client_and_exposes_runner_fallback(
             del args, kwargs
             raise RuntimeError("fake runner failed")
 
-    fake_module.Runner = FailingRunner
+    fake_module.__dict__["Runner"] = FailingRunner
     client = FakeAsyncOpenAI()
     fallback_answer = object()
     fallback_call: dict[str, object] = {}

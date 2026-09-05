@@ -58,3 +58,6 @@ known-first-party = ["local_docs_rag_agent"]
 python_version = "3.11"
 strict = true
 ignore_missing_imports = true
+# The test and script trees are checked too: they exercise the same interfaces, and an
+# unchecked stub is exactly where a test quietly stops matching what it claims to test.
+files = ["backend/src", "tests", "scripts"]

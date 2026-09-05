@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any, cast
+
+from openai import OpenAI
 
 from local_docs_rag_agent.providers.embedding import OpenAICompatibleEmbeddingProvider
 
@@ -9,7 +12,7 @@ class FakeEmbeddingsEndpoint:
     def __init__(self) -> None:
         self.calls: list[list[str]] = []
 
-    def create(self, **request: object) -> SimpleNamespace:
+    def create(self, **request: Any) -> SimpleNamespace:
         batch = list(request["input"])
         self.calls.append(batch)
         return SimpleNamespace(
@@ -22,7 +25,7 @@ class RetryOnceEmbeddingsEndpoint(FakeEmbeddingsEndpoint):
         super().__init__()
         self.attempts = 0
 
-    def create(self, **request: object) -> SimpleNamespace:
+    def create(self, **request: Any) -> SimpleNamespace:
         self.attempts += 1
         if self.attempts == 1:
             error_type = type("APITimeoutError", (Exception,), {})
@@ -31,8 +34,22 @@ class RetryOnceEmbeddingsEndpoint(FakeEmbeddingsEndpoint):
 
 
 class ShortEmbeddingsEndpoint:
-    def create(self, **request: object) -> SimpleNamespace:
+    def create(self, **request: Any) -> SimpleNamespace:
         return SimpleNamespace(data=[SimpleNamespace(embedding=[1.0])])
+
+
+def _install_fake_endpoint(
+    provider: OpenAICompatibleEmbeddingProvider,
+    endpoint: object,
+) -> None:
+    """Point the provider at a duck-typed stub instead of a real OpenAI client.
+
+    The provider only ever reaches for `client.embeddings.create`, so a namespace
+    carrying that one attribute is enough; the cast records that the substitution is
+    deliberate rather than a typing accident.
+    """
+
+    provider._client = cast(OpenAI, SimpleNamespace(embeddings=endpoint))
 
 
 def _provider(batch_size: int, max_retries: int = 0) -> OpenAICompatibleEmbeddingProvider:
@@ -51,7 +68,7 @@ def _provider(batch_size: int, max_retries: int = 0) -> OpenAICompatibleEmbeddin
 def test_embed_texts_batches_requests_and_preserves_order() -> None:
     provider = _provider(batch_size=2)
     endpoint = FakeEmbeddingsEndpoint()
-    provider._client = SimpleNamespace(embeddings=endpoint)
+    _install_fake_endpoint(provider, endpoint)
 
     result = provider.embed_texts(["a", "bb", "ccc", "dddd", "eeeee"])
 
@@ -64,7 +81,7 @@ def test_embed_texts_batches_requests_and_preserves_order() -> None:
 def test_embed_texts_reports_recovery_after_retry() -> None:
     provider = _provider(batch_size=2, max_retries=1)
     endpoint = RetryOnceEmbeddingsEndpoint()
-    provider._client = SimpleNamespace(embeddings=endpoint)
+    _install_fake_endpoint(provider, endpoint)
 
     result = provider.embed_texts(["a", "bb"])
 
@@ -76,7 +93,7 @@ def test_embed_texts_reports_recovery_after_retry() -> None:
 
 def test_embed_texts_falls_back_when_provider_returns_wrong_count() -> None:
     provider = _provider(batch_size=2)
-    provider._client = SimpleNamespace(embeddings=ShortEmbeddingsEndpoint())
+    _install_fake_endpoint(provider, ShortEmbeddingsEndpoint())
 
     result = provider.embed_texts(["first", "second"])
 

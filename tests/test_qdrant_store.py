@@ -8,6 +8,7 @@ import qdrant_client
 
 from local_docs_rag_agent.exceptions import ProviderUnavailableError, VectorStoreError
 from local_docs_rag_agent.models import DocumentChunk, ProviderStatus
+from local_docs_rag_agent.providers.base import EmbeddingProvider
 from local_docs_rag_agent.rag.qdrant_store import (
     QdrantChunkStore,
     looks_like_qdrant_unreachable,
@@ -15,7 +16,7 @@ from local_docs_rag_agent.rag.qdrant_store import (
 )
 
 
-class StubEmbeddingProvider:
+class StubEmbeddingProvider(EmbeddingProvider):
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         return [[1.0] for _ in texts]
 
@@ -30,7 +31,7 @@ class FallbackEmbeddingProvider(StubEmbeddingProvider):
         return ProviderStatus(provider="stub", mode="fallback", reason="offline")
 
 
-def test_qdrant_client_receives_proxy_trust_setting(monkeypatch) -> None:
+def test_qdrant_client_receives_proxy_trust_setting(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
 
     class FakeQdrantClient:
@@ -81,7 +82,7 @@ def test_unreachable_error_knows_when_environment_proxy_is_already_disabled() ->
     assert "already disabled" in str(error)
 
 
-def test_qdrant_search_rejects_fallback_embedding_vector(monkeypatch) -> None:
+def test_qdrant_search_rejects_fallback_embedding_vector(monkeypatch: pytest.MonkeyPatch) -> None:
     class FakeQdrantClient:
         def __init__(self, **kwargs: Any) -> None:
             self.query_called = False
@@ -104,7 +105,7 @@ def test_qdrant_search_rejects_fallback_embedding_vector(monkeypatch) -> None:
     assert store._client.query_called is False
 
 
-def test_qdrant_save_rejects_chunk_without_embedding(monkeypatch) -> None:
+def test_qdrant_save_rejects_chunk_without_embedding(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(qdrant_client, "QdrantClient", lambda **kwargs: object())
     store = QdrantChunkStore(
         url="https://qdrant.example",
@@ -129,7 +130,7 @@ def test_qdrant_save_rejects_chunk_without_embedding(monkeypatch) -> None:
     assert error.value.reason_code == "invalid_vectors"
 
 
-def test_qdrant_load_paginates_until_offset_is_exhausted(monkeypatch) -> None:
+def test_qdrant_load_paginates_until_offset_is_exhausted(monkeypatch: pytest.MonkeyPatch) -> None:
     payloads = [
         {
             "chunk_id": chunk_id,
