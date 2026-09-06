@@ -7,7 +7,9 @@ command means adding one `_register_*` function and listing it in
 `COMMAND_REGISTRARS`.
 
 Argument choices come from `constants`, which keeps `--runtime basic` and
-`AGENT_RUNTIME=basic` describing the same set of values.
+`AGENT_RUNTIME=basic` describing the same set of values. The `eval-compare`
+flags go one step further and are generated from `comparison.AXES`, so a new
+comparison axis cannot reach the API while missing from the CLI.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ from local_docs_rag_agent import config as app_config
 from local_docs_rag_agent import constants, exceptions
 from local_docs_rag_agent.commands import ask, eval_compare, ingest
 from local_docs_rag_agent.commands import eval as eval_command
+from local_docs_rag_agent.evals import comparison
 
 if TYPE_CHECKING:
     # argparse does not export a public alias for the object add_subparsers
@@ -97,53 +100,19 @@ def _register_eval_compare(subparsers: SubParsers) -> None:
         "eval-compare",
         help="Run eval across multiple retrieval/runtime configs",
     )
-    _add_repeatable_choice_option(
-        parser,
-        "--runtime",
-        dest="runtimes",
-        choices=constants.AGENT_RUNTIMES,
-        noun="runtimes",
-    )
-    _add_repeatable_choice_option(
-        parser,
-        "--chunk-strategy",
-        dest="chunk_strategies",
-        choices=constants.CHUNK_STRATEGIES,
-        noun="chunk strategies",
-    )
-    _add_repeatable_choice_option(
-        parser,
-        "--vector-backend",
-        dest="vector_backends",
-        choices=constants.VECTOR_BACKENDS,
-        noun="vector backends",
-    )
-    _add_repeatable_choice_option(
-        parser,
-        "--retrieval-strategy",
-        dest="retrieval_strategies",
-        choices=constants.RETRIEVAL_STRATEGIES,
-        noun="retrieval strategies",
-    )
-    _add_repeatable_choice_option(
-        parser,
-        "--reranker",
-        dest="rerankers",
-        choices=constants.RERANKERS,
-        noun="rerankers",
-    )
-    _add_repeatable_int_option(
-        parser, "--top-k", dest="top_ks", noun="top-k values"
-    )
-    _add_repeatable_int_option(
-        parser, "--chunk-size", dest="chunk_sizes", noun="chunk sizes"
-    )
-    _add_repeatable_int_option(
-        parser,
-        "--chunk-overlap",
-        dest="chunk_overlaps",
-        noun="chunk overlap values",
-    )
+    for axis in comparison.AXES:
+        if axis.choices is None:
+            _add_repeatable_int_option(
+                parser, axis.flag, dest=axis.name, noun=axis.noun
+            )
+        else:
+            _add_repeatable_choice_option(
+                parser,
+                axis.flag,
+                dest=axis.name,
+                choices=axis.choices,
+                noun=axis.noun,
+            )
     parser.add_argument(
         "--output",
         default=str(eval_compare.DEFAULT_COMPARE_OUTPUT_PATH),
@@ -182,14 +151,9 @@ def _handle_eval_compare(
 ) -> None:
     eval_compare.run_eval_compare_command(
         config,
-        runtimes=args.runtimes,
-        chunk_strategies=args.chunk_strategies,
-        vector_backends=args.vector_backends,
-        top_ks=args.top_ks,
-        chunk_sizes=args.chunk_sizes,
-        chunk_overlaps=args.chunk_overlaps,
-        retrieval_strategies=args.retrieval_strategies,
-        rerankers=args.rerankers,
+        requested={
+            axis.name: getattr(args, axis.name) for axis in comparison.AXES
+        },
         output_path=args.output,
     )
 

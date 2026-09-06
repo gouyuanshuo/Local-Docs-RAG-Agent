@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+from collections.abc import Mapping, Sequence
 
 from local_docs_rag_agent import config as app_config
 from local_docs_rag_agent.evals import comparison
@@ -13,34 +14,21 @@ DEFAULT_COMPARE_OUTPUT_PATH = pathlib.Path("data/evals/compare_latest.json")
 
 def run_eval_compare_command(
     config: app_config.AppConfig,
-    runtimes: list[str] | None = None,
-    chunk_strategies: list[str] | None = None,
-    vector_backends: list[str] | None = None,
-    top_ks: list[int] | None = None,
-    chunk_sizes: list[int] | None = None,
-    chunk_overlaps: list[int] | None = None,
-    retrieval_strategies: list[str] | None = None,
-    rerankers: list[str] | None = None,
+    requested: Mapping[str, Sequence[object] | None] | None = None,
     output_path: str | None = None,
 ) -> None:
     """Compare eval results across the requested axes, printing JSON.
 
-    An omitted axis falls back to the configured value, so the default
-    invocation compares chunk strategies while holding everything else steady.
+    Args:
+      config: The baseline settings each cell varies from.
+      requested: Values to sweep, keyed by axis name. An omitted axis takes
+        its default, so the bare command compares chunk and retrieval
+        strategies while holding everything else steady.
+      output_path: Where to write the report, or None for the default path.
     """
     payload = comparison.run_eval_matrix(
         config=config,
-        runtimes=runtimes or [config.agent_runtime],
-        chunk_strategies=chunk_strategies
-        or comparison.default_chunk_strategies(),
-        vector_backends=vector_backends
-        or comparison.default_vector_backends(config),
-        top_ks=top_ks or [config.top_k],
-        chunk_sizes=chunk_sizes or [config.chunk_size],
-        chunk_overlaps=chunk_overlaps or [config.chunk_overlap],
-        retrieval_strategies=retrieval_strategies
-        or comparison.default_retrieval_strategies(),
-        rerankers=rerankers or comparison.default_rerankers(config),
+        requested=requested or {},
         output_path=pathlib.Path(output_path)
         if output_path
         else DEFAULT_COMPARE_OUTPUT_PATH,

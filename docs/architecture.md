@@ -292,6 +292,25 @@ Every recipe below assumes the code style in `AGENTS.md`: module-only imports,
 80 columns, and a Google docstring on anything public. `ruff check` and
 `ruff format --check` enforce all three, and CI runs both.
 
+To add a comparison axis:
+
+1. add the setting to `constants.py` and `config.py` as usual
+2. add one `MatrixAxis` entry to `AXES` in `evals/comparison.py`, naming the
+   request key, the `AppConfig` field it overrides, its CLI flag, its label
+   prefix, and how it defaults
+3. add the matching field to `EvalCompareRequest` and `EvalCompareResponse` in
+   `api/schemas.py`, under the same name
+
+Nothing else. The Cartesian product, the per-cell overrides, the run label, the
+report keys, and the CLI flag are all derived from the entry, and
+`tests/test_eval_comparison.py` fails if the schema, the CLI, or the label
+falls out of step with it.
+
+That derivation is the point. The axes were once a parameter list, a length
+list, a `product()` call, and an unpacking tuple that had to agree by
+position — and because every axis is a sequence, binding one axis's values to
+another's field type-checked, ran, and produced quietly wrong numbers.
+
 To add a CLI command:
 
 1. write a handler in `commands/`

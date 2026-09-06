@@ -146,6 +146,20 @@ Current theme:
 - [ ] Reconsider `DOC501`/`DOC502` if ruff learns to see an exception raised by
       a helper or converted in place; until then `Raises:` is hand-maintained
 
+### Structural follow-through (2026-09-07 review)
+
+- [x] Drop the redundant `env_` prefix now that the module name supplies it
+- [x] Replace the eval matrix's four position-coupled lists with one `AXES`
+      table, and derive the product, overrides, label, report keys, and CLI
+      flags from it
+- [x] Cover the new coupling with tests: the request schema, the response
+      schema, the CLI flags, and the run label must each name every axis
+- [ ] Untangle `_chunk_paragraphs` in `rag/chunker.py`: 51 statements and
+      complexity 11, with five parallel mutable variables and three break
+      conditions across two nested loops
+- [ ] Consider splitting `rag/qdrant_store.py` (472 lines) along collection
+      lifecycle, CRUD, search, and error normalization
+
 ### Follow-ups
 
 - [ ] Consider grouping `AppConfig` into per-concern sub-configs if the field count

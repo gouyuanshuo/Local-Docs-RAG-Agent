@@ -145,25 +145,9 @@ def compare_eval(
       Every cell that ran, plus the leaderboard built from them.
     """
     config = app_config.AppConfig.from_env()
+    # The request model's field names are the axis names, which
+    # `test_request_schema_covers_every_matrix_axis` holds to.
     report = comparison.run_eval_matrix(
-        config=config,
-        runtimes=list(payload.runtimes or [config.agent_runtime]),
-        chunk_strategies=list(
-            payload.chunk_strategies or comparison.default_chunk_strategies()
-        ),
-        vector_backends=list(
-            payload.vector_backends
-            or comparison.default_vector_backends(config)
-        ),
-        top_ks=list(payload.top_ks or [config.top_k]),
-        chunk_sizes=list(payload.chunk_sizes or [config.chunk_size]),
-        chunk_overlaps=list(payload.chunk_overlaps or [config.chunk_overlap]),
-        retrieval_strategies=list(
-            payload.retrieval_strategies
-            or comparison.default_retrieval_strategies()
-        ),
-        rerankers=list(
-            payload.rerankers or comparison.default_rerankers(config)
-        ),
+        config=config, requested=payload.model_dump()
     )
     return schemas.EvalCompareResponse.model_validate(report)
