@@ -140,89 +140,81 @@ class AppConfig:
             or outside its allowed set.
         """
         env.load_project_dotenv()
-        llm_provider = env.env_token("LLM_PROVIDER", "openai")
-        embedding_provider = env.env_token("EMBEDDING_PROVIDER", llm_provider)
+        llm_provider = env.token("LLM_PROVIDER", "openai")
+        embedding_provider = env.token("EMBEDDING_PROVIDER", llm_provider)
         return cls(
             llm_provider=llm_provider,
-            llm_api_key=env.env_first_optional(LLM_API_KEY_VARIABLES),
-            llm_base_url=env.env_optional_text("LLM_BASE_URL"),
-            llm_model=env.env_first_text(
-                LLM_MODEL_VARIABLES, DEFAULT_LLM_MODEL
-            ),
-            llm_api_style=env.env_choice(
+            llm_api_key=env.first_optional(LLM_API_KEY_VARIABLES),
+            llm_base_url=env.optional_text("LLM_BASE_URL"),
+            llm_model=env.first_text(LLM_MODEL_VARIABLES, DEFAULT_LLM_MODEL),
+            llm_api_style=env.choice(
                 "LLM_API_STYLE",
                 constants.DEFAULT_API_STYLE,
                 constants.API_STYLES,
             ),
             embedding_provider=embedding_provider,
-            embedding_api_key=env.env_first_optional(
-                EMBEDDING_API_KEY_VARIABLES
-            ),
-            embedding_base_url=env.env_first_optional(
-                EMBEDDING_BASE_URL_VARIABLES
-            ),
-            embedding_model=env.env_text(
+            embedding_api_key=env.first_optional(EMBEDDING_API_KEY_VARIABLES),
+            embedding_base_url=env.first_optional(EMBEDDING_BASE_URL_VARIABLES),
+            embedding_model=env.text(
                 "EMBEDDING_MODEL",
                 default_embedding_model(embedding_provider),
             ),
-            embedding_dimensions=env.env_optional_int("EMBEDDING_DIMENSIONS"),
-            embedding_batch_size=env.env_int("EMBEDDING_BATCH_SIZE", 10),
-            embedding_max_retries=env.env_int("EMBEDDING_MAX_RETRIES", 2),
-            embedding_retry_backoff_ms=env.env_int(
+            embedding_dimensions=env.optional_integer("EMBEDDING_DIMENSIONS"),
+            embedding_batch_size=env.integer("EMBEDDING_BATCH_SIZE", 10),
+            embedding_max_retries=env.integer("EMBEDDING_MAX_RETRIES", 2),
+            embedding_retry_backoff_ms=env.integer(
                 "EMBEDDING_RETRY_BACKOFF_MS", 800
             ),
-            docs_dir=env.env_path("DOCS_DIR", "docs"),
-            docs_exclude_patterns=env.env_list("DOCS_EXCLUDE_PATTERNS"),
-            index_path=env.env_path("INDEX_PATH", "data/index/chunks.jsonl"),
-            ingest_manifest_path=env.env_path(
+            docs_dir=env.path("DOCS_DIR", "docs"),
+            docs_exclude_patterns=env.string_list("DOCS_EXCLUDE_PATTERNS"),
+            index_path=env.path("INDEX_PATH", "data/index/chunks.jsonl"),
+            ingest_manifest_path=env.path(
                 "INGEST_MANIFEST_PATH",
                 "data/index/ingest_manifest.json",
             ),
-            eval_path=env.env_path("EVAL_PATH", "data/evals/sample_eval.jsonl"),
-            agent_runtime=env.env_choice(
+            eval_path=env.path("EVAL_PATH", "data/evals/sample_eval.jsonl"),
+            agent_runtime=env.choice(
                 "AGENT_RUNTIME",
                 constants.DEFAULT_AGENT_RUNTIME,
                 constants.AGENT_RUNTIMES,
             ),
-            agents_max_turns=env.env_int("AGENTS_MAX_TURNS", 6),
-            vector_backend=env.env_choice(
+            agents_max_turns=env.integer("AGENTS_MAX_TURNS", 6),
+            vector_backend=env.choice(
                 "VECTOR_BACKEND",
                 constants.DEFAULT_VECTOR_BACKEND,
                 constants.VECTOR_BACKENDS,
             ),
-            qdrant_url=env.env_optional_text("QDRANT_URL"),
-            qdrant_api_key=env.env_optional_text("QDRANT_API_KEY"),
-            qdrant_collection=env.env_text(
-                "QDRANT_COLLECTION", "local-docs-rag"
-            ),
-            qdrant_timeout_s=env.env_int("QDRANT_TIMEOUT_S", 30),
-            external_http_trust_env=env.env_bool(
+            qdrant_url=env.optional_text("QDRANT_URL"),
+            qdrant_api_key=env.optional_text("QDRANT_API_KEY"),
+            qdrant_collection=env.text("QDRANT_COLLECTION", "local-docs-rag"),
+            qdrant_timeout_s=env.integer("QDRANT_TIMEOUT_S", 30),
+            external_http_trust_env=env.boolean(
                 "EXTERNAL_HTTP_TRUST_ENV", True
             ),
-            top_k=env.env_int("TOP_K", 4),
-            chunk_strategy=env.env_choice(
+            top_k=env.integer("TOP_K", 4),
+            chunk_strategy=env.choice(
                 "CHUNK_STRATEGY",
                 constants.DEFAULT_CHUNK_STRATEGY,
                 constants.CHUNK_STRATEGIES,
             ),
-            chunk_size=env.env_int("CHUNK_SIZE", 800),
-            chunk_overlap=env.env_int("CHUNK_OVERLAP", 120),
-            retrieval_strategy=env.env_choice(
+            chunk_size=env.integer("CHUNK_SIZE", 800),
+            chunk_overlap=env.integer("CHUNK_OVERLAP", 120),
+            retrieval_strategy=env.choice(
                 "RETRIEVAL_STRATEGY",
                 constants.DEFAULT_RETRIEVAL_STRATEGY,
                 constants.RETRIEVAL_STRATEGIES,
             ),
-            retrieval_candidate_k=env.env_int(
+            retrieval_candidate_k=env.integer(
                 "RETRIEVAL_CANDIDATE_K", constants.DEFAULT_RETRIEVAL_CANDIDATE_K
             ),
-            rrf_k=env.env_int("RRF_K", constants.DEFAULT_RRF_K),
-            reranker=env.env_choice(
+            rrf_k=env.integer("RRF_K", constants.DEFAULT_RRF_K),
+            reranker=env.choice(
                 "RERANKER", constants.DEFAULT_RERANKER, constants.RERANKERS
             ),
-            rerank_candidate_k=env.env_int(
+            rerank_candidate_k=env.integer(
                 "RERANK_CANDIDATE_K", constants.DEFAULT_RERANK_CANDIDATE_K
             ),
-            rerank_model=env.env_optional_text("RERANK_MODEL"),
+            rerank_model=env.optional_text("RERANK_MODEL"),
         )
 
     def with_runtime(self, runtime: str | None) -> AppConfig:
