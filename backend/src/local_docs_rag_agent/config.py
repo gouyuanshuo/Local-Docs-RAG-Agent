@@ -73,6 +73,13 @@ class AppConfig:
     def __post_init__(self) -> None:
         # Every instance is re-validated, because `with_overrides` can build a
         # variant from values that never passed through the environment readers.
+        """Validate every field, including on a variant built by `replace`.
+
+        Raises:
+          ConfigurationError: If any value is outside its allowed set or
+            range, or if the chunk overlap is not smaller than the chunk
+            size.
+        """
         env.require_choice(
             "LLM_API_STYLE", self.llm_api_style, constants.API_STYLES
         )
@@ -123,8 +130,15 @@ class AppConfig:
 
     @classmethod
     def from_env(cls) -> AppConfig:
-        """Build a configuration from the process environment and project `.env`."""
+        """Build a configuration from the environment and project `.env`.
 
+        Returns:
+          The validated configuration.
+
+        Raises:
+          ConfigurationError: If any setting is missing, malformed,
+            or outside its allowed set.
+        """
         env.load_project_dotenv()
         llm_provider = env.env_token("LLM_PROVIDER", "openai")
         embedding_provider = env.env_token("EMBEDDING_PROVIDER", llm_provider)
@@ -212,8 +226,7 @@ class AppConfig:
         )
 
     def with_runtime(self, runtime: str | None) -> AppConfig:
-        """Return a variant that answers with `runtime`, or `self` when it is unset."""
-
+        """Return a variant answering with `runtime`, or `self` if unset."""
         if runtime is None:
             return self
         # `__post_init__` rejects an unsupported name, so the cast cannot
@@ -223,8 +236,19 @@ class AppConfig:
         )
 
     def with_overrides(self, **overrides: Any) -> AppConfig:
-        """Return a re-validated variant with the named fields replaced."""
+        """Return a re-validated variant with the named fields replaced.
 
+        Args:
+          **overrides: Fields to replace.
+
+        Returns:
+          A new configuration. The original is untouched, so an eval
+          cell cannot disturb a configuration another caller holds.
+
+        Raises:
+          ConfigurationError: If a name is not a field, or the
+            resulting combination is invalid.
+        """
         known_fields = {field.name for field in dataclasses.fields(self)}
         unknown_fields = sorted(set(overrides) - known_fields)
         if unknown_fields:
@@ -235,8 +259,7 @@ class AppConfig:
 
 
 def default_embedding_model(provider: str) -> str:
-    """Return the embedding model to use when `EMBEDDING_MODEL` is not configured."""
-
+    """Return the default embedding model for `provider`."""
     if provider == "qwen":
         return DEFAULT_QWEN_EMBEDDING_MODEL
     return DEFAULT_OPENAI_EMBEDDING_MODEL

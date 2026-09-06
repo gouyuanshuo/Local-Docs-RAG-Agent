@@ -14,6 +14,13 @@ from local_docs_rag_agent import exceptions, rag
 
 
 def main() -> int:
+    """Report whether the configured Qdrant collection is reachable.
+
+    Returns:
+      0 when the check passes, 1 when it does not. The failure is
+      printed rather than raised, so this reads as a check result
+      rather than a crash.
+    """
     try:
         config = app_config.AppConfig.from_env()
         store = rag.build_store(config)

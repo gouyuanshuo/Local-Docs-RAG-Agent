@@ -19,6 +19,13 @@ from local_docs_rag_agent.evals import harness
 
 
 def main() -> int:
+    """Verify a full live ingest, ask, and eval against Qdrant.
+
+    Returns:
+      0 when the check passes, 1 when it does not. The failure is
+      printed rather than raised, so this reads as a check result
+      rather than a crash.
+    """
     stage = "configuration"
     try:
         config = app_config.AppConfig.from_env()

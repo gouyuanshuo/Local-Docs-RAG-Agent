@@ -23,12 +23,11 @@ def run_eval_compare_command(
     rerankers: list[str] | None = None,
     output_path: str | None = None,
 ) -> None:
-    """Compare eval results across the requested axes and print the report as JSON.
+    """Compare eval results across the requested axes, printing JSON.
 
     An omitted axis falls back to the configured value, so the default
     invocation compares chunk strategies while holding everything else steady.
     """
-
     payload = comparison.run_eval_matrix(
         config=config,
         runtimes=runtimes or [config.agent_runtime],

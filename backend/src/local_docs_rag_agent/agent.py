@@ -15,9 +15,14 @@ class LocalDocsAgent:
     """Answers questions about the local documents under one configuration."""
 
     def __init__(self, config: app_config.AppConfig) -> None:
+        """Bind the agent to one configuration snapshot.
+
+        Args:
+          config: The settings every answer from this agent is produced
+            under.
+        """
         self._config = config
 
     def answer(self, question: str) -> models.AgentAnswer:
-        """Answer `question` with citations and diagnostics for how it was produced."""
-
+        """Return the answer to `question`, with citations and diagnostics."""
         return runtime.answer_question(self._config, question)

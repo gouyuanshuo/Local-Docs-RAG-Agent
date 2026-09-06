@@ -23,11 +23,21 @@ def build_store(
 ) -> rag_base.ChunkStore:
     """Return the chunk store selected by `config`.
 
-    Callers that already hold an embedding provider should pass it, so a single
-    ingest run reports one coherent provider status instead of building a second
-    client whose health is tracked separately.
-    """
+    Args:
+      config: The settings that select the backend.
+      embedding_provider: An already-built provider to reuse. A single
+        ingest run should pass the one it holds, so it reports one
+        coherent provider status instead of building a second client
+        whose health is tracked separately.
 
+    Returns:
+      The configured store.
+
+    Raises:
+      ConfigurationError: If the Qdrant backend is selected without a
+        URL.
+      VectorStoreError: If the Qdrant client is not installed.
+    """
     provider = embedding_provider or provider_factory.build_embedding_provider(
         config
     )
@@ -56,8 +66,7 @@ def build_store(
 def retrieval_settings(
     config: app_config.AppConfig,
 ) -> retrieval.RetrievalSettings:
-    """Project the ranking knobs out of `config` for the stores to consume."""
-
+    """Return the ranking knobs `config` holds, without the rest of it."""
     return retrieval.RetrievalSettings(
         strategy=config.retrieval_strategy,
         candidate_k=config.retrieval_candidate_k,

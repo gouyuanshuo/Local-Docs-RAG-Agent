@@ -66,7 +66,7 @@ APPLICATION_ENVIRONMENT_VARIABLES = (
 
 @pytest.fixture(autouse=True)
 def isolated_application_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Run every test against configuration defaults, not the developer's machine."""
+    """Run every test against defaults, not the developer's machine."""
 
     monkeypatch.setattr(env, "load_project_dotenv", lambda: None)
     for name in APPLICATION_ENVIRONMENT_VARIABLES:

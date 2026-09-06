@@ -1,5 +1,4 @@
-"""Framework-free domain records shared by retrieval, runtimes, evals, and
-delivery.
+"""Framework-free domain records shared by every layer of the backend.
 
 These dataclasses are the vocabulary the whole backend speaks: a chunk and where
 in its source file it came from, a scored retrieval hit, an answer with its
@@ -20,6 +19,8 @@ ProviderMode = Literal["ready", "live", "fallback", "unknown"]
 
 @dataclasses.dataclass(slots=True)
 class DocumentChunk:
+    """One chunk of a source document, with the span it came from."""
+
     chunk_id: str
     source_path: str
     title: str
@@ -31,6 +32,7 @@ class DocumentChunk:
     metadata: dict[str, object] = dataclasses.field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
+        """Return the chunk as a JSON-serializable mapping."""
         return {
             "chunk_id": self.chunk_id,
             "source_path": self.source_path,
@@ -45,6 +47,18 @@ class DocumentChunk:
 
     @classmethod
     def from_dict(cls, payload: dict[str, object]) -> DocumentChunk:
+        """Rebuild a chunk from a stored mapping.
+
+        Args:
+          payload: A mapping previously produced by `to_dict`.
+
+        Returns:
+          The reconstructed chunk.
+
+        Raises:
+          DataFormatError: If a field is missing, has the wrong type, or
+            the character span is inconsistent with the chunk index.
+        """
         try:
             chunk_id = _required_string(payload, "chunk_id")
             source_path = _required_string(payload, "source_path")
@@ -85,6 +99,8 @@ class DocumentChunk:
 
 @dataclasses.dataclass(slots=True)
 class CitationSpan:
+    """The exact source offsets backing one citation."""
+
     source_path: str
     chunk_id: str
     chunk_index: int
@@ -95,6 +111,13 @@ class CitationSpan:
 
 @dataclasses.dataclass(slots=True)
 class RetrievalHit:
+    """One retrieved chunk, its score, and the span that cites it.
+
+    Scores are comparable only within the strategy that produced them: an
+    RRF score is a sum of reciprocal ranks, a dense score is a cosine
+    similarity, and a reranked score is `1 / position`.
+    """
+
     chunk: DocumentChunk
     score: float
     citation_span: CitationSpan
@@ -102,6 +125,8 @@ class RetrievalHit:
 
 @dataclasses.dataclass(slots=True)
 class ProviderStatus:
+    """Whether a provider ran, was skipped, or degraded, and why."""
+
     provider: str
     mode: ProviderMode
     reason: str | None = None
@@ -109,7 +134,7 @@ class ProviderStatus:
 
 @dataclasses.dataclass(slots=True)
 class RetrievalOutcome:
-    """What one retrieval produced, and the health of every stage that produced it.
+    """What one retrieval produced, and the health of each stage.
 
     Retrieval runs in two stages that can degrade independently — embeddings and
     the reranker — so the hits alone are not a complete answer to "what happened
@@ -141,6 +166,8 @@ class AnswerDiagnostics:
 
 @dataclasses.dataclass(slots=True)
 class AgentAnswer:
+    """A complete answer: the text, its citations, and its diagnostics."""
+
     question: str
     answer: str
     citations: list[str]
@@ -151,6 +178,8 @@ class AgentAnswer:
 
 @dataclasses.dataclass(slots=True)
 class EvalCase:
+    """One eval question and everything a correct answer must contain."""
+
     question: str
     expected_answer_keywords: list[str]
     expected_source_paths: list[str]
@@ -163,6 +192,8 @@ class EvalCase:
 
 @dataclasses.dataclass(slots=True)
 class EvalResult:
+    """One eval case's measured outcome and the expectations behind it."""
+
     question: str
     answer: str
     citations: list[str]

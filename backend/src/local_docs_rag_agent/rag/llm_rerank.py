@@ -50,7 +50,7 @@ JSON_ARRAY_RE = re.compile(r"\[[^\[\]]*\]")
 
 
 class LlmReranker:
-    """Reorders a candidate window with one chat completion, degrading to identity."""
+    """Reorders a candidate window with one chat call, degrading safely."""
 
     def __init__(
         self,
@@ -61,6 +61,20 @@ class LlmReranker:
         api_style: str = "responses",
         trust_env: bool = True,
     ) -> None:
+        """Build a reranker over an OpenAI-compatible endpoint.
+
+        A missing key is not an error: the reranker reports `fallback` and
+        returns candidates untouched, which is what keeps reranking
+        optional rather than a hard dependency.
+
+        Args:
+          api_key: Credential, or None to disable the model call.
+          model: Model that performs the ranking.
+          candidate_k: How many first-stage candidates to read.
+          base_url: Endpoint override, or None for the OpenAI default.
+          api_style: `responses` or `chat_completions`.
+          trust_env: Whether to honour environment proxy variables.
+        """
         self._model = model
         self._candidate_k = candidate_k
         self._api_style = api_style
@@ -86,12 +100,23 @@ class LlmReranker:
         would discard results the caller asked for before the reranker ever saw
         them.
         """
-
         return max(self._candidate_k, top_k)
 
     def rerank(
         self, *, query: str, hits: list[models.RetrievalHit], top_k: int
     ) -> list[models.RetrievalHit]:
+        """Reorder `hits` by asking the model to rank them.
+
+        Args:
+          query: The question the candidates were retrieved for.
+          hits: First-stage candidates, best first.
+          top_k: Maximum hits to return.
+
+        Returns:
+          At most `top_k` hits, best first, scored `1 / position`. On any
+          failure the first-stage candidates are returned untouched and
+          `status` reports `fallback`. Never raises.
+        """
         if top_k <= 0 or not hits:
             return []
         if self._client is None:
@@ -131,6 +156,7 @@ class LlmReranker:
 
     @property
     def status(self) -> models.ProviderStatus:
+        """Report whether this reranker ran, was skipped, or degraded."""
         return self._status
 
     def _request_ranking(self, prompt: str) -> str:
@@ -194,7 +220,6 @@ def _parse_ranking(text: str, num_candidates: int) -> list[int]:
     candidate number is dropped; an empty result means the reply was unusable,
     which the caller reports as a fallback rather than as an ordering.
     """
-
     match = JSON_ARRAY_RE.search(text)
     if match is None:
         return []

@@ -52,8 +52,22 @@ class IngestPlan:
 def ingest_documents(
     config: app_config.AppConfig,
 ) -> list[models.DocumentChunk]:
-    """Bring the configured index up to date and return the chunks written."""
+    """Bring the index up to date and return the chunks written.
 
+    Args:
+      config: The settings to ingest under.
+
+    Returns:
+      Every chunk written by this run, which for an incremental
+      backend is only the chunks of the documents that changed.
+
+    Raises:
+      ConfigurationError: If the documents cannot be read.
+      ProviderUnavailableError: If the embedding provider degraded.
+        Fallback vectors are refused rather than stored, because an
+        index built from them answers plausibly and wrongly.
+      VectorStoreError: If the store rejects the write.
+    """
     source_texts = discovery.read_source_texts(
         config.docs_dir, config.docs_exclude_patterns
     )
@@ -120,8 +134,7 @@ def ingest_documents(
 
 
 def ensure_index(config: app_config.AppConfig) -> None:
-    """Ingest only if the index is missing or was built under different settings."""
-
+    """Ingest only if the index is missing or built under other settings."""
     stored = manifest.IngestManifest.load(config.ingest_manifest_path)
     configuration_changed = stored.index_fingerprint != index_fingerprint(
         config,
@@ -137,15 +150,13 @@ def ensure_index(config: app_config.AppConfig) -> None:
 
 def source_checksum(text: str) -> str:
     """Return the content hash used to detect a changed source document."""
-
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def index_fingerprint(
     config: app_config.AppConfig, *, embedding_mode: str
 ) -> str:
-    """Return a hash of every setting that changes what a stored vector means."""
-
+    """Return a hash of every setting that changes a stored vector."""
     payload = {
         "vector_backend": config.vector_backend,
         "embedding_provider": config.embedding_provider,

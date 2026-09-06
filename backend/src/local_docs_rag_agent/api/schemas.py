@@ -48,15 +48,26 @@ NonNegativeIntList = Annotated[
 
 
 class AskRequest(pydantic.BaseModel):
+    """One question to answer, optionally overriding the runtime."""
+
     question: NonEmptyString
     runtime: constants.RuntimeName | None = None
 
 
 class EvalRequest(pydantic.BaseModel):
+    """A request to run the eval harness, optionally overriding the runtime."""
+
     runtime: constants.RuntimeName | None = None
 
 
 class EvalCompareRequest(pydantic.BaseModel):
+    """The axes to sweep in a comparison run.
+
+    An omitted axis holds the configured value steady rather than
+    sweeping it, so a request cannot accidentally expand into the full
+    Cartesian product.
+    """
+
     runtimes: RuntimeList | None = None
     chunk_strategies: ChunkStrategyList | None = None
     vector_backends: VectorBackendList | None = None
@@ -68,16 +79,26 @@ class EvalCompareRequest(pydantic.BaseModel):
 
 
 class IngestResponse(pydantic.BaseModel):
+    """How many chunks an ingest produced, and where they were stored."""
+
     num_chunks: pydantic.NonNegativeInt
     vector_backend: constants.VectorBackendName
 
 
 class HealthResponse(pydantic.BaseModel):
+    """A liveness answer with the backend's clock, for drift diagnosis."""
+
     status: Literal["ok"]
     backend_time_utc: str
 
 
 class AppInfoResponse(pydantic.BaseModel):
+    """The configuration the server is actually running under.
+
+    This is what the frontend's config panel reads, so it reports the
+    resolved values rather than the requested ones.
+    """
+
     name: str
     runtime: constants.RuntimeName
     vector_backend: constants.VectorBackendName
@@ -99,17 +120,27 @@ class AppInfoResponse(pydantic.BaseModel):
 
 
 class DocumentsResponse(pydantic.BaseModel):
+    """Every document the agent can currently read."""
+
     count: pydantic.NonNegativeInt
     documents: list[str]
 
 
 class ProviderStatusResponse(pydantic.BaseModel):
+    """One provider's health, including why it degraded.
+
+    `mode` stays `fallback` rather than being smoothed into success, so a
+    client can reject a degraded answer instead of trusting it.
+    """
+
     provider: str
     mode: models.ProviderMode
     reason: str | None = None
 
 
 class CitationSpanResponse(pydantic.BaseModel):
+    """The exact source offsets a citation points at."""
+
     source_path: str
     chunk_id: str
     chunk_index: pydantic.NonNegativeInt
@@ -119,6 +150,13 @@ class CitationSpanResponse(pydantic.BaseModel):
 
 
 class AnswerDiagnosticsResponse(pydantic.BaseModel):
+    """How an answer was actually produced, stage by stage.
+
+    `requested_runtime` and `actual_runtime` differ whenever a runtime
+    degraded, and each of the three provider statuses can degrade
+    independently of the others.
+    """
+
     requested_runtime: constants.RuntimeName
     actual_runtime: constants.RuntimeName
     vector_backend: constants.VectorBackendName
@@ -128,6 +166,8 @@ class AnswerDiagnosticsResponse(pydantic.BaseModel):
 
 
 class AskResponse(pydantic.BaseModel):
+    """An answer with its citations and the diagnostics behind it."""
+
     question: str
     answer: str
     citations: list[str]
@@ -137,6 +177,13 @@ class AskResponse(pydantic.BaseModel):
 
 
 class RetrievalConfigResponse(pydantic.BaseModel):
+    """The retrieval settings a result was produced under.
+
+    Attaching this to eval output is what makes two runs comparable after
+    the fact, instead of leaving the reader to guess which settings
+    produced which numbers.
+    """
+
     vector_backend: constants.VectorBackendName
     chunk_strategy: constants.ChunkStrategyName
     chunk_size: pydantic.PositiveInt
@@ -152,6 +199,8 @@ class RetrievalConfigResponse(pydantic.BaseModel):
 
 
 class EvalResultResponse(pydantic.BaseModel):
+    """One eval case: its metrics, its expectations, and why it failed."""
+
     question: str
     answer: str
     citations: list[str]
@@ -171,6 +220,8 @@ class EvalResultResponse(pydantic.BaseModel):
 
 
 class EvalSummaryResponse(pydantic.BaseModel):
+    """Per-case eval results aggregated into one reportable summary."""
+
     num_cases: pydantic.NonNegativeInt
     runtime: constants.RuntimeName
     retrieval_config: RetrievalConfigResponse | None
@@ -187,6 +238,8 @@ class EvalSummaryResponse(pydantic.BaseModel):
 
 
 class EvalLeaderboardRowResponse(pydantic.BaseModel):
+    """One comparison cell's headline metrics, for ranking cells."""
+
     label: str
     answer_keyword_hit_rate: float
     retrieval_source_hit_rate: float
@@ -196,6 +249,13 @@ class EvalLeaderboardRowResponse(pydantic.BaseModel):
 
 
 class EvalMatrixRunResponse(pydantic.BaseModel):
+    """One cell of a comparison matrix.
+
+    A cell that could not run is reported as `skipped` with a reason and a
+    cell that failed as `error`; neither is dropped, because a leaderboard
+    that hides its gaps is worse than no leaderboard.
+    """
+
     label: str
     status: Literal["ok", "skipped", "error"]
     reason: str | None = None
@@ -206,6 +266,8 @@ class EvalMatrixRunResponse(pydantic.BaseModel):
 
 
 class EvalCompareResponse(pydantic.BaseModel):
+    """Every comparison cell that ran, plus the leaderboard built from them."""
+
     num_runs: pydantic.NonNegativeInt
     runtimes: list[constants.RuntimeName]
     chunk_strategies: list[constants.ChunkStrategyName]
@@ -220,6 +282,8 @@ class EvalCompareResponse(pydantic.BaseModel):
 
 
 class ErrorResponse(pydantic.BaseModel):
+    """A failure with a stable code and, where one exists, a way to fix it."""
+
     code: str
     detail: str
     action_hint: str | None = None

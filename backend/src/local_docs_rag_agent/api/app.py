@@ -1,4 +1,4 @@
-"""Creates the FastAPI application: middleware, static hosting, and error handling.
+"""Creates the FastAPI app: middleware, static hosting, error handling.
 
 The app serves the built frontend from `frontend/dist` when it exists, and falls
 back to a JSON pointer toward the dev server when it does not, so the same entry
@@ -37,6 +37,12 @@ FRONTEND_INDEX_PATH = FRONTEND_DIST_DIR / "index.html"
 
 
 def create_app() -> fastapi.FastAPI:
+    """Build the FastAPI application.
+
+    Returns:
+      An app with CORS, error handlers, and API routes registered, and
+      the built frontend mounted when `frontend/dist` exists.
+    """
     app = fastapi.FastAPI(title="Local Docs RAG Agent", version="0.1.0")
     _configure_cors(app)
     _register_error_handlers(app)
@@ -118,6 +124,7 @@ app = create_app()
 
 
 def run() -> None:
+    """Serve the application on localhost:8000, for the console script."""
     uvicorn.run(
         "local_docs_rag_agent.api.app:app",
         host="127.0.0.1",

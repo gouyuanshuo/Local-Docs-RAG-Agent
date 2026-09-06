@@ -1,4 +1,4 @@
-"""OpenAI-compatible embedding provider with batching, retry, and a hash fallback.
+"""OpenAI-compatible embeddings with batching, retry, and a fallback.
 
 Requests are batched because hosted endpoints cap inputs per call, and transient
 failures are retried with exponential backoff before the provider gives up. On
@@ -21,6 +21,8 @@ from local_docs_rag_agent.providers import errors, openai_client
 
 
 class OpenAICompatibleEmbeddingProvider(provider_base.EmbeddingProvider):
+    """Embeds over an OpenAI-compatible endpoint, with a hash fallback."""
+
     def __init__(
         self,
         api_key: str | None,
@@ -33,6 +35,19 @@ class OpenAICompatibleEmbeddingProvider(provider_base.EmbeddingProvider):
         provider_label: str = "embedding",
         trust_env: bool = True,
     ) -> None:
+        """Build an embedding provider over an OpenAI-compatible endpoint.
+
+        Args:
+          api_key: Credential, or None to use the hash fallback.
+          base_url: Endpoint override, or None for the OpenAI default.
+          model: Model that embeds.
+          dimensions: Requested vector width, or None for the model's own.
+          batch_size: Texts per request, since hosted endpoints cap it.
+          max_retries: Extra attempts for a transient failure.
+          retry_backoff_ms: Delay between those attempts.
+          provider_label: Name reported in diagnostics.
+          trust_env: Whether to honour environment proxy variables.
+        """
         self._provider_label = provider_label.lower()
         self._trust_env = trust_env
         self._status = models.ProviderStatus(
@@ -58,6 +73,17 @@ class OpenAICompatibleEmbeddingProvider(provider_base.EmbeddingProvider):
             )
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        """Embed every text, batching and retrying as configured.
+
+        Args:
+          texts: The texts to embed.
+
+        Returns:
+          One vector per input, in input order. If the endpoint cannot be
+          reached, deterministic hash vectors are returned and `status`
+          reports `fallback`; ingest refuses to store those, so a degraded
+          run cannot quietly poison the index. Never raises.
+        """
         if not texts:
             return []
         if not self._client:
@@ -126,6 +152,7 @@ class OpenAICompatibleEmbeddingProvider(provider_base.EmbeddingProvider):
 
     @property
     def status(self) -> models.ProviderStatus:
+        """Report whether the last batch was live or degraded."""
         return self._status
 
 

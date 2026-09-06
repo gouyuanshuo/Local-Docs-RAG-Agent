@@ -32,6 +32,21 @@ class QdrantChunkStore:
         trust_env: bool = True,
         settings: retrieval.RetrievalSettings | None = None,
     ) -> None:
+        """Connect to a Qdrant collection.
+
+        Args:
+          url: Base URL of the Qdrant service.
+          api_key: Credential, or None for an unsecured instance.
+          collection_name: Collection holding this project's points.
+          timeout_s: Per-request timeout.
+          embedding_provider: Used to embed the query at search time.
+          trust_env: Whether to honour environment proxy variables.
+          settings: Ranking knobs. Defaults to the project defaults.
+
+        Raises:
+          VectorStoreError: With `dependency_missing` when the optional
+            `qdrant-client` package is not installed.
+        """
         try:
             import qdrant_client
         except ImportError as exc:
@@ -57,6 +72,15 @@ class QdrantChunkStore:
         self._settings = settings or retrieval.RetrievalSettings()
 
     def collection_exists(self) -> bool:
+        """Report whether the configured collection exists.
+
+        Returns:
+          True if the collection is present.
+
+        Raises:
+          VectorStoreError: If the service cannot be reached or refuses
+            the request.
+        """
         try:
             return bool(self._client.collection_exists(self._collection_name))
         except Exception as exc:
@@ -68,6 +92,20 @@ class QdrantChunkStore:
         removed_source_paths: list[str] | None = None,
         replaced_source_paths: list[str] | None = None,
     ) -> None:
+        """Create the collection if needed, then apply this ingest's changes.
+
+        Args:
+          chunks: Chunks to upsert. Every one must carry an embedding.
+          removed_source_paths: Documents deleted since the last ingest,
+            whose points must go with them.
+          replaced_source_paths: Documents re-chunked by this run, whose
+            old points are deleted before the new ones are written.
+
+        Raises:
+          VectorStoreError: If a chunk lacks an embedding, the embedding
+            dimensions disagree with the collection, or the service call
+            fails.
+        """
         vector_size = _validate_chunk_embeddings(chunks)
         try:
             from qdrant_client import models
@@ -133,6 +171,15 @@ class QdrantChunkStore:
             raise self._operation_error("save", exc) from exc
 
     def load(self) -> list[models.DocumentChunk]:
+        """Read every stored chunk, paging through the collection.
+
+        Returns:
+          The stored chunks, without their vectors: Qdrant returns
+          payloads only.
+
+        Raises:
+          VectorStoreError: If the service call fails.
+        """
         chunks: list[models.DocumentChunk] = []
         next_offset: Any = None
         try:
@@ -155,6 +202,23 @@ class QdrantChunkStore:
             raise self._operation_error("load", exc) from exc
 
     def search(self, query: str, top_k: int) -> list[models.RetrievalHit]:
+        """Rank the collection against `query`.
+
+        Args:
+          query: The question to rank against.
+          top_k: Maximum hits to return.
+
+        Returns:
+          At most `top_k` hits, best first. A fused strategy asks the
+          server for a wider window and re-ranks it locally, because the
+          server returns no vectors to fuse with.
+
+        Raises:
+          ProviderUnavailableError: If the embedding provider is not live.
+            A fallback vector would query the collection with coordinates
+            that mean nothing in it.
+          VectorStoreError: If the service call fails.
+        """
         if top_k <= 0:
             return []
         query_vectors = self._embedding_provider.embed_texts([query])
@@ -213,6 +277,7 @@ class QdrantChunkStore:
 
     @property
     def embedding_status(self) -> models.ProviderStatus:
+        """Report the health of the embedding provider backing this store."""
         return self._embedding_provider.status
 
     def _delete_by_source_paths(self, source_paths: list[str]) -> None:
@@ -330,13 +395,21 @@ def qdrant_operation_error(
     exc: Exception,
     trust_env: bool | None = None,
 ) -> exceptions.VectorStoreError:
-    """Translate a raw client failure into a `VectorStoreError` with a reason code.
+    """Translate a client failure into a `VectorStoreError` with a code.
 
-    An already-normalized error is passed through unchanged so a specific
-    diagnosis, such as a vector-size mismatch, is not flattened into a generic
-    failure.
+    Args:
+      operation: The client call that failed, named in the message.
+      url: The service the call was made against.
+      collection_name: The collection the call addressed.
+      exc: The raw failure.
+      trust_env: Whether the client honoured environment proxies,
+        which decides which proxy hint is worth giving.
+
+    Returns:
+      The normalized error. An already-normalized one is passed
+      through unchanged, so a specific diagnosis such as a
+      vector-size mismatch is not flattened into a generic failure.
     """
-
     if isinstance(exc, exceptions.VectorStoreError):
         return exc
 
@@ -367,10 +440,17 @@ def qdrant_operation_error(
 def looks_like_qdrant_unreachable(message: str) -> bool:
     """Report whether an error message describes a connectivity failure.
 
-    Matching on message text is deliberate: the client wraps transport errors
-    from several libraries, so the exception type alone does not identify them.
-    """
+    Matching on message text is deliberate: the client wraps transport
+    errors from several libraries, so the exception type alone does not
+    identify them.
 
+    Args:
+      message: The failure text to classify.
+
+    Returns:
+      True if the message describes a connectivity failure, which the
+      eval matrix reports as a skip rather than as a bad result.
+    """
     lowered = message.lower()
     return any(
         token in lowered

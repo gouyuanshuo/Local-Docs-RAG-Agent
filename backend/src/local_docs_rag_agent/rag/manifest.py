@@ -19,11 +19,27 @@ from local_docs_rag_agent.rag import file_io
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class ManifestEntry:
+    """One source document's checksum and the chunk ids it produced."""
+
     checksum: str
     chunk_ids: tuple[str, ...] = ()
 
     @classmethod
     def from_payload(cls, source_path: str, payload: object) -> ManifestEntry:
+        """Rebuild an entry from its stored mapping.
+
+        Args:
+          source_path: The document this entry describes, used only to
+            name the file in an error message.
+          payload: The stored mapping.
+
+        Returns:
+          The reconstructed entry.
+
+        Raises:
+          DataFormatError: If the payload is not an object, or its
+            checksum or chunk ids have the wrong type.
+        """
         if not isinstance(payload, dict):
             raise exceptions.DataFormatError(
                 f"Manifest entry for {source_path!r} must be an object"
@@ -43,16 +59,36 @@ class ManifestEntry:
         return cls(checksum=checksum, chunk_ids=tuple(chunk_ids))
 
     def to_payload(self) -> dict[str, object]:
+        """Return the entry as a JSON-serializable mapping."""
         return {"checksum": self.checksum, "chunk_ids": list(self.chunk_ids)}
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class IngestManifest:
+    """What the last ingest wrote, and under which settings.
+
+    The fingerprint is what makes an incremental ingest safe: it
+    changes whenever a setting changes what a stored vector means, so a
+    reconfigured index is rebuilt rather than silently mixed.
+    """
+
     sources: dict[str, ManifestEntry] = dataclasses.field(default_factory=dict)
     index_fingerprint: str | None = None
 
     @classmethod
     def load(cls, path: pathlib.Path) -> IngestManifest:
+        """Read a manifest, treating a missing file as an empty one.
+
+        Args:
+          path: Where the manifest is stored.
+
+        Returns:
+          The stored manifest, or an empty one when no file exists yet.
+
+        Raises:
+          DataFormatError: If the file exists but cannot be read or does
+            not hold a valid manifest.
+        """
         if not path.exists():
             return cls()
         try:
@@ -93,6 +129,19 @@ class IngestManifest:
         chunks: list[models.DocumentChunk],
         index_fingerprint: str,
     ) -> IngestManifest:
+        """Return the manifest that describes the ingest just performed.
+
+        Args:
+          source_checksums: Current checksum of every discovered document.
+          indexed_sources: The documents this run actually re-chunked.
+          chunks: Every chunk this run produced.
+          index_fingerprint: Fingerprint of the settings it ran under.
+
+        Returns:
+          A new manifest. A document that was not re-chunked keeps the
+          chunk ids it already had, so an incremental run does not forget
+          what it left in place.
+        """
         chunk_ids_by_source: dict[str, list[str]] = {}
         for chunk in chunks:
             chunk_ids_by_source.setdefault(chunk.source_path, []).append(
@@ -116,6 +165,7 @@ class IngestManifest:
         )
 
     def save(self, path: pathlib.Path) -> None:
+        """Write the manifest to `path`, atomically and with sorted keys."""
         payload = {
             "index_fingerprint": self.index_fingerprint,
             "sources": {

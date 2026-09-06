@@ -16,6 +16,16 @@ from local_docs_rag_agent.runtime import basic as basic_runtime
 def answer_question(
     config: app_config.AppConfig, question: str
 ) -> models.AgentAnswer:
+    """Answer `question` with the runtime `config` selects.
+
+    Args:
+      config: The settings that name the runtime.
+      question: The question to answer.
+
+    Returns:
+      A complete answer. Which runtime actually served it, and whether
+      it delegated, is recorded in the answer's diagnostics.
+    """
     if config.agent_runtime == "agents_sdk":
         return agents_sdk.answer_with_agents_sdk(config, question)
     return basic_runtime.answer_with_basic_runtime(config, question)

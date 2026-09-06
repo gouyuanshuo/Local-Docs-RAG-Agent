@@ -15,7 +15,6 @@ import tempfile
 
 def atomic_write_text(path: pathlib.Path, content: str) -> None:
     """Write text through a sibling temporary file, then atomically replace."""
-
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path: pathlib.Path | None = None
     try:

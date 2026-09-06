@@ -29,12 +29,19 @@ def reciprocal_rank_fusion(
 ) -> list[tuple[str, float]]:
     """Fuse ranked key lists into one ranking, best first.
 
-    Each ranking contributes `1 / (rrf_k + position)` to every key it contains,
-    so a key absent from a ranking is simply not scored by it rather than being
-    penalised with a zero — which matters because the branches rank different
-    candidate sets.
-    """
+    Args:
+      rankings: Ranked key lists, each best first.
+      rrf_k: Damping constant. A larger value flattens the advantage
+        of the very top positions.
 
+    Returns:
+      `(key, score)` pairs, best first, with ties broken on the key so
+      a fused ranking is reproducible across runs. Each ranking
+      contributes `1 / (rrf_k + position)` to every key it contains,
+      so a key absent from a ranking is simply not scored by it rather
+      than penalised with a zero, which matters because the branches
+      rank different candidate sets.
+    """
     fused: dict[str, float] = {}
     for ranking in rankings:
         for position, key in enumerate(ranking, start=1):

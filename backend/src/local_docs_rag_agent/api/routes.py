@@ -23,6 +23,11 @@ API_NAME = "Local Docs RAG Agent"
 
 @router.get("/health", response_model=schemas.HealthResponse)
 def health() -> schemas.HealthResponse:
+    """Report liveness and the backend clock.
+
+    Returns:
+      The health payload.
+    """
     return schemas.HealthResponse(
         status="ok",
         backend_time_utc=datetime.datetime.now(datetime.UTC).isoformat(),
@@ -31,6 +36,11 @@ def health() -> schemas.HealthResponse:
 
 @router.get("/info", response_model=schemas.AppInfoResponse)
 def info() -> schemas.AppInfoResponse:
+    """Report the configuration the server is running under.
+
+    Returns:
+      The resolved settings, plus how many documents are visible.
+    """
     config = app_config.AppConfig.from_env()
     documents = tools.list_documents(config)
     return schemas.AppInfoResponse.model_validate(
@@ -59,12 +69,22 @@ def info() -> schemas.AppInfoResponse:
 
 @router.get("/documents", response_model=schemas.DocumentsResponse)
 def documents() -> schemas.DocumentsResponse:
+    """List the documents the agent can currently read.
+
+    Returns:
+      Every discovered document path, with a count.
+    """
     docs = tools.list_documents(app_config.AppConfig.from_env())
     return schemas.DocumentsResponse(count=len(docs), documents=docs)
 
 
 @router.post("/ingest", response_model=schemas.IngestResponse)
 def ingest() -> schemas.IngestResponse:
+    """Rebuild the retrieval index from the documents on disk.
+
+    Returns:
+      How many chunks were written, and to which backend.
+    """
     config = app_config.AppConfig.from_env()
     chunks = rag.ingest_documents(config)
     return schemas.IngestResponse.model_validate(
@@ -74,6 +94,15 @@ def ingest() -> schemas.IngestResponse:
 
 @router.post("/ask", response_model=schemas.AskResponse)
 def ask(payload: schemas.AskRequest) -> schemas.AskResponse:
+    """Answer one question against the indexed documents.
+
+    Args:
+      payload: The question, and an optional runtime override.
+
+    Returns:
+      The answer with its citations and diagnostics. The index is
+      built first if it is missing or was built under other settings.
+    """
     config = app_config.AppConfig.from_env().with_runtime(payload.runtime)
     rag.ensure_index(config)
     answer = agent.LocalDocsAgent(config).answer(payload.question)
@@ -84,6 +113,14 @@ def ask(payload: schemas.AskRequest) -> schemas.AskResponse:
 
 @router.post("/eval", response_model=schemas.EvalSummaryResponse)
 def evaluate(payload: schemas.EvalRequest) -> schemas.EvalSummaryResponse:
+    """Run the eval harness over the configured eval file.
+
+    Args:
+      payload: An optional runtime override.
+
+    Returns:
+      Per-case results and their aggregate summary.
+    """
     config = app_config.AppConfig.from_env().with_runtime(payload.runtime)
     rag.ensure_index(config)
     results = harness.run_eval(config)
@@ -98,6 +135,15 @@ def evaluate(payload: schemas.EvalRequest) -> schemas.EvalSummaryResponse:
 def compare_eval(
     payload: schemas.EvalCompareRequest,
 ) -> schemas.EvalCompareResponse:
+    """Evaluate a matrix of configurations and rank the results.
+
+    Args:
+      payload: The axes to sweep. An omitted axis holds the configured
+        value steady rather than sweeping it.
+
+    Returns:
+      Every cell that ran, plus the leaderboard built from them.
+    """
     config = app_config.AppConfig.from_env()
     report = comparison.run_eval_matrix(
         config=config,

@@ -1,4 +1,4 @@
-"""The second retrieval stage: reordering a candidate window before it is answered.
+"""The second retrieval stage: reordering a window before it is used.
 
 First-stage retrieval optimises for recall. BM25 and cosine similarity both
 judge a chunk without ever reading the question as a question — they match terms
@@ -38,7 +38,7 @@ class Reranker(Protocol):
     """Reorders first-stage candidates and reports whether it actually ran."""
 
     def candidate_depth(self, top_k: int) -> int:
-        """Return how many first-stage candidates to retrieve for a `top_k` answer."""
+        """Return how many candidates to retrieve for a `top_k` answer."""
         ...
 
     def rerank(
@@ -54,7 +54,7 @@ class Reranker(Protocol):
 
 
 class IdentityReranker:
-    """The `none` reranker: keeps the first-stage order and asks for nothing extra.
+    """The `none` reranker: keeps first-stage order, asks for nothing.
 
     This is the default, and it is a real object rather than a `None` check at
     the call site so that the retrieval pipeline has one shape regardless of
@@ -62,11 +62,22 @@ class IdentityReranker:
     """
 
     def candidate_depth(self, top_k: int) -> int:
+        """Return `top_k`: a disabled reranker asks for nothing extra."""
         return top_k
 
     def rerank(
         self, *, query: str, hits: list[models.RetrievalHit], top_k: int
     ) -> list[models.RetrievalHit]:
+        """Return the first `top_k` hits, in the order retrieval produced.
+
+        Args:
+          query: Ignored. Nothing is re-read.
+          hits: First-stage candidates, best first.
+          top_k: Maximum hits to return.
+
+        Returns:
+          At most `top_k` hits, unchanged.
+        """
         del query
         return hits[:top_k]
 
@@ -74,6 +85,7 @@ class IdentityReranker:
     def status(self) -> models.ProviderStatus:
         # `ready` rather than `live`: nothing was reordered, and nothing
         # degraded either.
+        """Report `ready`: nothing ran, and nothing degraded."""
         return models.ProviderStatus(
             provider="none", mode="ready", reason="reranker_disabled"
         )

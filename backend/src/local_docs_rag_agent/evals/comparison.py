@@ -1,4 +1,4 @@
-"""Runs the eval harness across a matrix of retrieval and runtime configurations.
+"""Runs the eval harness across a matrix of retrieval configurations.
 
 Each cell re-ingests and re-evaluates under one `AppConfig` variant so the
 results are comparable. A cell that cannot run is reported as `skipped` with a
@@ -24,14 +24,12 @@ MAX_MATRIX_RUNS = 128
 
 
 def default_chunk_strategies() -> list[constants.ChunkStrategyName]:
-    """Return the chunk strategies compared when a caller does not choose any."""
-
+    """Return the chunk strategies compared when none are chosen."""
     return list(constants.CHUNK_STRATEGIES)
 
 
 def default_retrieval_strategies() -> list[constants.RetrievalStrategyName]:
-    """Return the retrieval strategies compared when a caller does not choose any."""
-
+    """Return the retrieval strategies compared when none are chosen."""
     return list(constants.RETRIEVAL_STRATEGIES)
 
 
@@ -45,7 +43,6 @@ def default_rerankers(
     default would turn a routine comparison into an unrequested bill; opting in
     with `--reranker llm` keeps that a decision.
     """
-
     return [config.reranker]
 
 
@@ -57,7 +54,6 @@ def default_vector_backends(
     Qdrant is only included when a URL is configured; otherwise every Qdrant
     cell would report the same `missing_qdrant_url` skip.
     """
-
     return ["local", "qdrant"] if config.qdrant_url else ["local"]
 
 
@@ -75,11 +71,30 @@ def run_eval_matrix(
 ) -> dict[str, object]:
     """Evaluate every combination of the requested axes and rank the results.
 
-    Raises `ConfigurationError` when an axis is empty or when the Cartesian
-    product would exceed `MAX_MATRIX_RUNS`, so a single request cannot start an
-    unbounded run.
-    """
+    Args:
+      config: The baseline settings each cell varies from.
+      runtimes: Runtimes to sweep.
+      chunk_strategies: Chunk strategies to sweep.
+      vector_backends: Vector backends to sweep.
+      top_ks: Result-window sizes to sweep.
+      chunk_sizes: Chunk sizes to sweep.
+      chunk_overlaps: Chunk overlaps to sweep.
+      retrieval_strategies: Ranking strategies to sweep, or None to
+        hold the configured one steady.
+      rerankers: Rerankers to sweep, or None to hold the configured
+        one steady.
+      output_path: Where to write the report, or None to skip
+        writing it.
 
+    Returns:
+      The report: every cell that ran, and the leaderboard built from
+      the ones that succeeded.
+
+    Raises:
+      ConfigurationError: If an axis is empty, or the Cartesian
+        product would exceed `MAX_MATRIX_RUNS`, so one request cannot
+        start an unbounded run.
+    """
     # An omitted axis holds the configured value steady rather than sweeping, so
     # an existing caller keeps producing the run count it produced before.
     strategies: Sequence[str] = retrieval_strategies or [

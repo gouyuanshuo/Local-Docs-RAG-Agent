@@ -1,4 +1,4 @@
-"""Split source documents into retrievable chunks that keep their character spans.
+"""Split documents into retrievable chunks that keep their spans.
 
 Three strategies share one entry point, :func:`chunk_text`: `fixed` slices by
 size, `paragraph` groups blank-line-separated blocks, and `markdown`
@@ -18,6 +18,8 @@ from local_docs_rag_agent import constants, exceptions, models
 
 @dataclasses.dataclass(slots=True)
 class Section:
+    """One heading-delimited region of a document, with its offsets."""
+
     title: str
     heading_level: int | None
     start_char: int
@@ -27,6 +29,8 @@ class Section:
 
 @dataclasses.dataclass(slots=True)
 class ParagraphBlock:
+    """One paragraph, with its offsets and the heading it sits under."""
+
     text: str
     start_char: int
     end_char: int
@@ -41,6 +45,25 @@ def chunk_text(
     chunk_overlap: int,
     chunk_strategy: str = constants.DEFAULT_CHUNK_STRATEGY,
 ) -> list[models.DocumentChunk]:
+    """Split one document into chunks under the named strategy.
+
+    Args:
+      source_path: Path of the document, used for chunk ids and title.
+      text: The document's full text.
+      chunk_size: Maximum characters per chunk.
+      chunk_overlap: Characters each chunk repeats from the previous
+        one, so a fact spanning a boundary is still retrievable.
+      chunk_strategy: `fixed`, `paragraph`, or `markdown`.
+
+    Returns:
+      The chunks, each carrying the character span it came from so a
+      citation can point back at the source exactly. Empty when the
+      document holds no non-whitespace text.
+
+    Raises:
+      ConfigurationError: If the chunk size or overlap is invalid, or
+        the strategy is not one of the three supported names.
+    """
     _validate_chunk_parameters(chunk_size, chunk_overlap)
     if not text.strip():
         return []

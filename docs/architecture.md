@@ -288,6 +288,10 @@ To add a retrieval strategy:
    that it runs; a strategy nothing can distinguish is not a strategy
 5. sweep it against `blended` with `eval-compare` before claiming it is better
 
+Every recipe below assumes the code style in `AGENTS.md`: module-only imports,
+80 columns, and a Google docstring on anything public. `ruff check` and
+`ruff format --check` enforce all three, and CI runs both.
+
 To add a CLI command:
 
 1. write a handler in `commands/`

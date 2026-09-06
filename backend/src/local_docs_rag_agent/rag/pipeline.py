@@ -1,4 +1,4 @@
-"""Composes the retrieval stages into the one call the rest of the backend makes.
+"""Composes the retrieval stages into the one call the backend makes.
 
 Retrieval is no longer a single lookup. A store ranks the corpus with the
 configured strategy, and a reranker may then reorder a wider candidate window
@@ -35,7 +35,6 @@ def build_reranker(config: app_config.AppConfig) -> rerank.Reranker:
     which is what makes a small, cheap ranking model usable alongside a larger
     answering one.
     """
-
     if config.reranker == "llm":
         return llm_rerank.LlmReranker(
             api_key=config.llm_api_key,
@@ -51,8 +50,18 @@ def build_reranker(config: app_config.AppConfig) -> rerank.Reranker:
 def retrieve(
     config: app_config.AppConfig, query: str, top_k: int | None = None
 ) -> models.RetrievalOutcome:
-    """Search the configured store, rerank the candidates, and report both stages."""
+    """Search the store, rerank the candidates, and report both stages.
 
+    Args:
+      config: The settings that select the store and the reranker.
+      query: The question to retrieve for.
+      top_k: How many hits to return, or None for `config.top_k`.
+
+    Returns:
+      The hits and the health of both retrieval stages. The store is
+      asked for the reranker's candidate depth rather than `top_k`,
+      which with reranking off is the same number.
+    """
     limit = config.top_k if top_k is None else top_k
     store = store_factory.build_store(config)
     reranker = build_reranker(config)

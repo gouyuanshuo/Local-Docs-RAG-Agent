@@ -1,5 +1,4 @@
-"""Retrieval-augmented generation: document discovery, chunking, storage, and
-ingest.
+"""Retrieval-augmented generation: discovery, chunking, storage, ingest.
 
 This module is the package facade. Code outside `rag` should import from here
 rather than reaching into individual modules, so the internal split between the
@@ -8,12 +7,10 @@ change.
 
 The dependency direction inside the package runs one way:
 
-    discovery -> chunker -> ingest -> pipeline -> store_factory -> base/local_store
-                                                                -> qdrant_store
-                                                                -> retrieval
-                                                                     -> bm25/fusion
-                                                                     -> scoring
-                                              -> rerank -> llm_rerank
+    discovery -> chunker -> ingest -> pipeline
+    pipeline -> store_factory -> base / local_store / qdrant_store
+    store_factory -> retrieval -> bm25 / fusion / scoring
+    pipeline -> rerank -> llm_rerank
 
 `base` and `models` sit at the bottom and import nothing from the layers above
 them. `pipeline` sits at the top: it is the only module that knows both

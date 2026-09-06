@@ -128,6 +128,24 @@ Current theme:
       `RERANK_CANDIDATE_K` once a real corpus sweep exists to compare against
 - [ ] Add query rewriting / multi-query expansion ahead of candidate generation
 
+### Google Python Style Guide conformance
+
+- [x] Rewrite every symbol import as a module import (2.2), qualifying names at
+      the use site
+- [x] Rename the locals that shadowed a module after the import rewrite, which
+      would have raised `UnboundLocalError` and which mypy does not report
+- [x] Move test fakes from re-exported names to definition sites, which is what
+      module-only imports leave to patch
+- [x] Adopt the 80-column limit (3.2), holding code to it with `ruff format`
+      and prose to it by hand
+- [x] Document every public module, class, and function in Google style (3.8),
+      with `Args:`, `Returns:`, and `Raises:` sections
+- [x] Enforce it: `D` with the google convention in `pyproject.toml`, plus
+      `ruff format --check` and a `DOC201` step in CI
+- [x] Record the deliberate deviations and their reasons in `AGENTS.md`
+- [ ] Reconsider `DOC501`/`DOC502` if ruff learns to see an exception raised by
+      a helper or converted in place; until then `Raises:` is hand-maintained
+
 ### Follow-ups
 
 - [ ] Consider grouping `AppConfig` into per-concern sub-configs if the field count

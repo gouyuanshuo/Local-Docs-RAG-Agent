@@ -26,6 +26,13 @@ from local_docs_rag_agent.runtime import shared as runtime_shared
 
 @dataclasses.dataclass(slots=True)
 class AgentRuntimeContext:
+    """What the agent's tools read and write during one run.
+
+    The agent decides whether to search at all, so both retrieval
+    statuses start `unknown` and are replaced only if the search tool
+    actually runs.
+    """
+
     config: app_config.AppConfig
     retrieved_hits: list[models.RetrievalHit] = dataclasses.field(
         default_factory=list
@@ -47,6 +54,18 @@ class AgentRuntimeContext:
 def answer_with_agents_sdk(
     config: app_config.AppConfig, question: str
 ) -> models.AgentAnswer:
+    """Answer `question` with the tool-calling Agents SDK runtime.
+
+    Args:
+      config: The settings to answer under.
+      question: The question to answer.
+
+    Returns:
+      The answer. A missing SDK, a missing key, a run failure, or an
+      empty result delegates to the basic runtime with a
+      `runtime_fallback:` reason in the diagnostics rather than
+      raising.
+    """
     agents_sdk_available = _supports_agents_sdk()
     if not agents_sdk_available or not config.llm_api_key:
         fallback_reason = (
@@ -130,7 +149,12 @@ def _build_sdk_agent(
     def list_local_documents(
         ctx: agents.RunContextWrapper[AgentRuntimeContext],
     ) -> str:
-        """List the local documents that are available for question answering."""
+        """List the local documents available for question answering.
+
+        Returns:
+          One document path per line, or a message saying none were
+          found.
+        """
         documents = tools.list_documents(ctx.context.config)
         if not documents:
             return "No local documents were found."
@@ -142,7 +166,19 @@ def _build_sdk_agent(
         query: str,
         top_k: int | None = None,
     ) -> str:
-        """Search local documents for evidence before answering a docs question."""
+        """Search local documents for evidence before answering.
+
+        Args:
+          ctx: The run context holding the configuration and the hits
+            accumulated so far.
+          query: What to search for.
+          top_k: How many results to return, or None for the configured
+            default.
+
+        Returns:
+          One labelled block per hit, with its source path, offsets,
+          score, and text.
+        """
         # The tool's own `top_k` is applied by retrieval rather than by
         # truncating afterwards, so the reranker reorders the window the agent
         # actually asked for.

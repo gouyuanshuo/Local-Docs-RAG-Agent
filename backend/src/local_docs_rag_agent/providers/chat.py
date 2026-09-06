@@ -29,6 +29,8 @@ CONTEXT_CONTENT_PATTERN = re.compile(
 
 
 class OpenAICompatibleChatProvider(provider_base.ChatProvider):
+    """Answers over an OpenAI-compatible endpoint, or extractively."""
+
     def __init__(
         self,
         api_key: str | None,
@@ -38,6 +40,20 @@ class OpenAICompatibleChatProvider(provider_base.ChatProvider):
         provider_label: str = "LLM",
         trust_env: bool = True,
     ) -> None:
+        """Build a chat provider over an OpenAI-compatible endpoint.
+
+        A missing key is not an error: the provider answers extractively
+        from the retrieved context and reports `fallback`, so a run
+        without credentials still produces something inspectable.
+
+        Args:
+          api_key: Credential, or None to answer extractively.
+          model: Model that answers.
+          base_url: Endpoint override, or None for the OpenAI default.
+          api_style: `responses` or `chat_completions`.
+          provider_label: Name reported in diagnostics.
+          trust_env: Whether to honour environment proxy variables.
+        """
         self._model = model
         self._api_style = api_style
         self._provider_label = provider_label.lower()
@@ -60,6 +76,18 @@ class OpenAICompatibleChatProvider(provider_base.ChatProvider):
             )
 
     def answer(self, question: str, context: str) -> str:
+        """Answer `question` from `context`.
+
+        Args:
+          question: The user's question.
+          context: Retrieved evidence, rendered as `[S1]` blocks.
+
+        Returns:
+          The model's answer, or an extractive one quoting the context
+          when no live model is reachable. A degraded answer is prefixed
+          with its reason and `status` reports `fallback`, so it can never
+          pass for a live response. Never raises.
+        """
         if not self._client:
             return self._fallback_answer(question=question, context=context)
 
@@ -104,6 +132,7 @@ class OpenAICompatibleChatProvider(provider_base.ChatProvider):
 
     @property
     def status(self) -> models.ProviderStatus:
+        """Report whether the last answer was live or degraded."""
         return self._status
 
     def _request_answer(self, prompt: str) -> str:

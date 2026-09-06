@@ -25,7 +25,6 @@ def collect_document_paths(
     Sorting keeps chunk ids stable across runs on different filesystems, which
     is what lets the ingest manifest recognise an unchanged document.
     """
-
     require_docs_directory(docs_dir)
     patterns = exclude_patterns or []
     return sorted(
@@ -43,10 +42,21 @@ def read_source_texts(
 ) -> dict[str, str]:
     """Read every discovered document, keyed by its POSIX path.
 
-    All reads happen before any write, so an unreadable file aborts the run
-    while the existing index and manifest are still intact.
-    """
+    All reads happen before any write, so an unreadable file aborts the
+    run while the existing index and manifest are still intact.
 
+    Args:
+      docs_dir: Directory to read documents from.
+      exclude_patterns: Glob patterns to skip, relative to
+        `docs_dir`.
+
+    Returns:
+      Each document's text, keyed by its POSIX path.
+
+    Raises:
+      ConfigurationError: If the directory is missing, or a document
+        cannot be read or decoded.
+    """
     source_texts: dict[str, str] = {}
     for path in collect_document_paths(docs_dir, exclude_patterns):
         try:
@@ -59,8 +69,12 @@ def read_source_texts(
 
 
 def require_docs_directory(docs_dir: pathlib.Path) -> None:
-    """Raise unless `docs_dir` exists and is a directory."""
+    """Raise unless `docs_dir` exists and is a directory.
 
+    Raises:
+      ConfigurationError: If the path is missing or is not a
+        directory.
+    """
     if not docs_dir.exists():
         raise exceptions.ConfigurationError(
             f"DOCS_DIR does not exist: {docs_dir}",

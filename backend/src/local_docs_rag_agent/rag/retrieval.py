@@ -59,7 +59,6 @@ class RetrievalSettings:
         fit is the only sensible reading of that: a window narrower than the
         result set would silently truncate the sweep it was meant to measure.
         """
-
         return max(self.candidate_k, top_k)
 
 
@@ -71,10 +70,7 @@ def rank_chunks(
     top_k: int,
     settings: RetrievalSettings,
 ) -> list[models.RetrievalHit]:
-    """Return at most `top_k` hits for `query`, best first, under
-    `settings.strategy`.
-    """
-
+    """Return at most `top_k` hits for `query`, best first."""
     if top_k <= 0 or not chunks:
         return []
 
@@ -125,12 +121,21 @@ def rerank_dense_hits(
     Qdrant returns payloads without vectors, so the strategies that need an
     embedding cannot be recomputed here. What is available is the server's own
     ordering, which is exactly the dense ranking RRF wants, plus the chunk text
-    BM25 needs. The lexical statistics are therefore drawn from the candidate
-    window rather than the whole collection — narrower than the local store's
-    corpus-wide frequencies, and the reason `candidate_k` should stay
-    comfortably wider than `top_k`.
-    """
+    BM25 needs.
 
+    Args:
+      query: The question the candidates were retrieved for.
+      dense_hits: The server's ordering, best first.
+      top_k: Maximum hits to return.
+      settings: Ranking knobs, including the fusion constant.
+
+    Returns:
+      At most `top_k` hits, best first. The lexical statistics are
+      drawn from the candidate window rather than the whole
+      collection. That is narrower than the local store's corpus-wide
+      frequencies, and the reason `candidate_k` should stay comfortably
+      wider than `top_k`.
+    """
     if top_k <= 0 or not dense_hits:
         return []
 
@@ -149,13 +154,17 @@ def rerank_dense_hits(
 
 
 def needs_candidate_window(strategy: constants.RetrievalStrategyName) -> bool:
-    """Report whether `strategy` ranks beyond `top_k` before choosing its results.
+    """Report whether `strategy` ranks beyond `top_k` before choosing.
 
-    A remote backend uses this to decide how many candidates to ask the server
-    for: the dense-only paths can request exactly `top_k`, while the fused paths
-    need a wider window to fuse over.
+    Args:
+      strategy: The strategy to report on.
+
+    Returns:
+      True if the strategy ranks deeper than `top_k`. A remote backend
+      uses this to decide how many candidates to ask the server for:
+      the dense-only paths can request exactly `top_k`, while the
+      fused paths need a wider window to fuse over.
     """
-
     return strategy in ("lexical", "hybrid_rrf")
 
 

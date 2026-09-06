@@ -19,8 +19,7 @@ from local_docs_rag_agent import models
 
 
 def build_answer_context(hits: list[models.RetrievalHit]) -> str:
-    """Render retrieved hits as the grounding context handed to a chat provider."""
-
+    """Return hits rendered as the context handed to a chat provider."""
     if not hits:
         return "No supporting documents were retrieved."
     return "\n\n".join(
@@ -41,8 +40,7 @@ def build_answer_context(hits: list[models.RetrievalHit]) -> str:
 
 
 def format_tool_search_results(hits: list[models.RetrievalHit]) -> str:
-    """Render retrieved hits as the return value of the agent's search tool."""
-
+    """Return hits rendered as the agent search tool's result."""
     if not hits:
         return "No relevant chunks were found."
     return "\n\n".join(
@@ -65,7 +63,6 @@ def format_tool_search_results(hits: list[models.RetrievalHit]) -> str:
 
 def collect_citations(hits: list[models.RetrievalHit]) -> list[str]:
     """Return the cited source paths, de-duplicated and in retrieval order."""
-
     seen: set[str] = set()
     citations: list[str] = []
     for hit in hits:
@@ -80,17 +77,13 @@ def collect_citation_spans(
     hits: list[models.RetrievalHit],
 ) -> list[models.CitationSpan]:
     """Return the exact source spans backing each hit, in retrieval order."""
-
     return [hit.citation_span for hit in hits]
 
 
 def merge_hits(
     existing: list[models.RetrievalHit], new_hits: list[models.RetrievalHit]
 ) -> None:
-    """Append hits not already present, so repeated tool searches accumulate
-    evidence.
-    """
-
+    """Append hits not already present, so tool searches accumulate."""
     seen = {hit.chunk.chunk_id for hit in existing}
     for hit in new_hits:
         if hit.chunk.chunk_id in seen:
@@ -105,10 +98,7 @@ def build_agent_answer(
     hits: list[models.RetrievalHit],
     diagnostics: models.AnswerDiagnostics,
 ) -> models.AgentAnswer:
-    """Assemble the final answer with citations derived from the hits that produced
-    it.
-    """
-
+    """Return the final answer, citing the hits that produced it."""
     return models.AgentAnswer(
         question=question,
         answer=answer,

@@ -20,6 +20,19 @@ def answer_with_basic_runtime(
     requested_runtime: constants.RuntimeName | None = None,
     runtime_reason: str | None = None,
 ) -> models.AgentAnswer:
+    """Retrieve, then answer only from what was retrieved.
+
+    Args:
+      config: The settings to answer under.
+      question: The question to answer.
+      requested_runtime: The runtime the caller originally asked for,
+        which differs from `basic` when another runtime delegated here.
+      runtime_reason: Why that delegation happened, recorded alongside
+        the chat provider's own status so a degraded run stays visible.
+
+    Returns:
+      The answer, its citations, and the diagnostics behind it.
+    """
     provider = provider_factory.build_chat_provider(config)
     outcome = pipeline.retrieve(config, question)
     hits = outcome.hits

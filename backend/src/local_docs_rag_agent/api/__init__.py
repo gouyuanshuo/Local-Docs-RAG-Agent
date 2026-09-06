@@ -1,1 +1,1 @@
-"""FastAPI application: app factory, routes, and public request/response schemas."""
+"""FastAPI application: app factory, routes, and public schemas."""

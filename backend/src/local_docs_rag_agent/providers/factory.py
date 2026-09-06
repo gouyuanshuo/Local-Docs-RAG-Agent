@@ -14,6 +14,15 @@ from local_docs_rag_agent.providers import chat, embedding
 def build_chat_provider(
     config: app_config.AppConfig,
 ) -> provider_base.ChatProvider:
+    """Build the chat provider described by `config`.
+
+    Args:
+      config: The settings to read credentials and model from.
+
+    Returns:
+      A provider ready to answer. A missing API key is not an error
+      here: the provider reports `fallback` and answers extractively.
+    """
     return chat.OpenAICompatibleChatProvider(
         api_key=config.llm_api_key,
         model=config.llm_model,
@@ -27,6 +36,15 @@ def build_chat_provider(
 def build_embedding_provider(
     config: app_config.AppConfig,
 ) -> provider_base.EmbeddingProvider:
+    """Build the embedding provider described by `config`.
+
+    Args:
+      config: The settings to read credentials, model, batching, and
+        retry policy from.
+
+    Returns:
+      A provider ready to embed.
+    """
     return embedding.OpenAICompatibleEmbeddingProvider(
         api_key=config.embedding_api_key,
         base_url=config.embedding_base_url,

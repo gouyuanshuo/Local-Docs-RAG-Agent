@@ -25,8 +25,7 @@ MILLISECOND_PRECISION = 2
 def serialize_provider_status(
     status: models.ProviderStatus,
 ) -> dict[str, object]:
-    """Serialize one provider's health, including why it degraded."""
-
+    """Return one provider's health, including why it degraded."""
     return {
         "provider": status.provider,
         "mode": status.mode,
@@ -37,8 +36,7 @@ def serialize_provider_status(
 def serialize_diagnostics(
     diagnostics: models.AnswerDiagnostics,
 ) -> dict[str, object]:
-    """Serialize the requested-versus-actual runtime and both provider statuses."""
-
+    """Return the runtime pair and every provider status."""
     return {
         "requested_runtime": diagnostics.requested_runtime,
         "actual_runtime": diagnostics.actual_runtime,
@@ -52,8 +50,7 @@ def serialize_diagnostics(
 
 
 def serialize_citation_span(span: models.CitationSpan) -> dict[str, object]:
-    """Serialize a cited span together with the exact source offsets it came from."""
-
+    """Return a cited span with the source offsets it came from."""
     return {
         "source_path": span.source_path,
         "chunk_id": span.chunk_id,
@@ -67,13 +64,12 @@ def serialize_citation_span(span: models.CitationSpan) -> dict[str, object]:
 def serialize_retrieval_config(
     config: app_config.AppConfig,
 ) -> dict[str, object]:
-    """Serialize the retrieval settings a result was produced under.
+    """Return the retrieval settings a result was produced under.
 
     Attaching this to eval output is what makes two runs comparable after the
     fact, instead of leaving the reader to guess which settings produced which
     numbers.
     """
-
     return {
         "vector_backend": config.vector_backend,
         "chunk_strategy": config.chunk_strategy,
@@ -91,8 +87,7 @@ def serialize_retrieval_config(
 
 
 def serialize_answer(answer: models.AgentAnswer) -> dict[str, object]:
-    """Serialize one answered question with its citations and diagnostics."""
-
+    """Return one answered question with its citations and diagnostics."""
     return {
         "question": answer.question,
         "answer": answer.answer,
@@ -106,8 +101,7 @@ def serialize_answer(answer: models.AgentAnswer) -> dict[str, object]:
 
 
 def serialize_eval_result(result: models.EvalResult) -> dict[str, object]:
-    """Serialize one eval case: its metrics, its expectations, and why it failed."""
-
+    """Return one eval case: metrics, expectations, and failures."""
     return {
         "question": result.question,
         "answer": result.answer,
@@ -137,8 +131,7 @@ def serialize_eval_summary(
     runtime: str,
     config: app_config.AppConfig | None = None,
 ) -> dict[str, object]:
-    """Aggregate per-case eval results into one reportable summary."""
-
+    """Return per-case eval results aggregated into one summary."""
     answer_keyword_hit_rate = _average(
         result.answer_keyword_hit_rate for result in results
     )

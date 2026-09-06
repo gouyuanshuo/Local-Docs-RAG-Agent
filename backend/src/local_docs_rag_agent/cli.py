@@ -32,8 +32,15 @@ CommandRegistrar = Callable[["SubParsers"], None]
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Parse `argv`, run the selected command, and return a process exit code."""
+    """Parse `argv`, run the chosen command, and return an exit code.
 
+    Args:
+      argv: Arguments to parse, or None to read `sys.argv`.
+
+    Returns:
+      0 on success, or 1 when the command raised an expected
+      failure, which is printed to stderr rather than traced.
+    """
     parser = build_parser()
     args = parser.parse_args(argv)
     handler: CommandHandler = args.handler
@@ -46,8 +53,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Build the top-level parser with every registered subcommand attached."""
+    """Build the top-level parser with every subcommand attached.
 
+    Returns:
+      The parser. Every subcommand binds its handler with
+      `set_defaults`, so `main` never grows a branch per command.
+    """
     parser = argparse.ArgumentParser(
         prog="local-docs-rag",
         description="Local Docs RAG Agent CLI",

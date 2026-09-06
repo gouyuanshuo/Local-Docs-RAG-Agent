@@ -25,8 +25,19 @@ from local_docs_rag_agent import config as app_config
 
 
 def load_eval_cases(eval_path: pathlib.Path) -> list[models.EvalCase]:
-    """Read a JSONL eval file, reporting the line number of the first bad case."""
+    """Read a JSONL eval file, reporting the first bad case's line.
 
+    Args:
+      eval_path: The JSONL file to read.
+
+    Returns:
+      Every case in file order.
+
+    Raises:
+      DataFormatError: If the file cannot be read or a line is not
+        a valid case. The message names the line number, so a bad
+        eval file can be repaired without bisecting it.
+    """
     cases: list[models.EvalCase] = []
     line_number: int | str = "unknown"
     try:
@@ -53,8 +64,15 @@ def load_eval_cases(eval_path: pathlib.Path) -> list[models.EvalCase]:
 
 
 def run_eval(config: app_config.AppConfig) -> list[models.EvalResult]:
-    """Answer every eval case under `config` and score the results."""
+    """Answer every eval case under `config` and score the results.
 
+    Args:
+      config: The settings to evaluate under.
+
+    Returns:
+      One result per case, each carrying the diagnostics of the run
+      that produced it, so a degraded run is visible per case.
+    """
     docs_agent = agent.LocalDocsAgent(config)
     results: list[models.EvalResult] = []
 
@@ -115,7 +133,6 @@ def keyword_match_rate(expected_items: list[str], observed_text: str) -> float:
     An empty expectation is neutral success, so a case may assert on some
     dimensions without being penalised for the ones it leaves unspecified.
     """
-
     if not expected_items:
         return 1.0
     hits = sum(1 for item in expected_items if item.lower() in observed_text)
@@ -125,8 +142,7 @@ def keyword_match_rate(expected_items: list[str], observed_text: str) -> float:
 def source_match_rate(
     expected_sources: list[str], observed_sources: list[str]
 ) -> float:
-    """Return the fraction of expected source paths present in `observed_sources`."""
-
+    """Return the fraction of expected sources that were observed."""
     if not expected_sources:
         return 1.0
     observed = set(observed_sources)
@@ -135,10 +151,11 @@ def source_match_rate(
 
 
 def failure_reasons(result: models.EvalResult) -> list[str]:
-    """Name every dimension the case fell short on, for triage without re-running
-    it.
-    """
+    """Name every dimension the case fell short on, for later triage.
 
+    Returns:
+      One reason per failed dimension, empty when the case passed.
+    """
     reasons: list[str] = []
     if result.retrieval_source_hit_rate < 1.0:
         reasons.append("retrieval_missed_expected_source")

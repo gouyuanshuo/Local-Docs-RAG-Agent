@@ -29,6 +29,16 @@ TRANSIENT_MESSAGE_TOKENS = (
 
 
 def is_transient_provider_error(exc: Exception) -> bool:
+    """Report whether `exc` is worth retrying.
+
+    Args:
+      exc: The exception raised by a provider call.
+
+    Returns:
+      True for a transient failure. Retrying a permanent one only
+      delays the report, so the three signals are checked in order of
+      reliability: exception type, HTTP status, then message text.
+    """
     if exc.__class__.__name__ in TRANSIENT_ERROR_NAMES:
         return True
     if getattr(exc, "status_code", None) in TRANSIENT_STATUS_CODES:
@@ -38,6 +48,17 @@ def is_transient_provider_error(exc: Exception) -> bool:
 
 
 def provider_error_reason(exc: Exception, *, limit: int = 240) -> str:
+    """Summarize `exc` as a stable reason string for a `ProviderStatus`.
+
+    Args:
+      exc: The exception to describe.
+      limit: Maximum number of characters kept from the message.
+
+    Returns:
+      A `provider_error:<Class>:<message>` string, truncated to
+      `limit`, so a diagnostics payload cannot be swamped by one
+      provider's stack trace.
+    """
     class_name = exc.__class__.__name__
     message = " ".join(str(exc).split())
     if len(message) > limit:

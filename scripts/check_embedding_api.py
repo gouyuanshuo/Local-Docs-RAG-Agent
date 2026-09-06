@@ -18,6 +18,13 @@ SAMPLE_TEXT = "Local Docs RAG Agent embedding connectivity check."
 
 
 def main() -> int:
+    """Report whether the configured embedding provider answers live.
+
+    Returns:
+      0 when the check passes, 1 when it does not. The failure is
+      printed rather than raised, so this reads as a check result
+      rather than a crash.
+    """
     _force_utf8_stdout()
     try:
         config = app_config.AppConfig.from_env()

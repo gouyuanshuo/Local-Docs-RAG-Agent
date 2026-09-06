@@ -70,6 +70,48 @@ The main repo layout is:
 - See `docs/architecture.md` for the per-layer boundaries and the extension recipes for
   adding a provider, a vector store, a runtime, a CLI command, or a config setting.
 
+## Code style
+
+Python follows the [Google Python Style Guide][google-style]. The parts that are
+mechanically enforced by `ruff check` and `ruff format` (see `pyproject.toml`) are:
+
+- 80-column lines (3.2). `ruff format` holds code to it; comments and docstrings
+  are wrapped by hand and `E501` still checks them.
+- Module-only imports (2.2): `from x import y` where `y` is a module, then
+  `y.Symbol` at the use site. Never import a class or function directly.
+- Google docstrings (3.8) on every public module, class, and function, with a
+  one-line summary and `Args:`, `Returns:`, and `Raises:` sections where they
+  apply.
+
+Four deviations are deliberate, and adding a fifth needs a reason in the commit:
+
+- `typing` and `collections.abc` names are imported directly. The style guide
+  exempts them, and `list[DocumentChunk]` reads better than the alternative.
+- `qdrant_client` and `agents` are imported inside the functions that use them.
+  The style guide permits a local import to break a dependency, and these are
+  what keep the package installable without the optional extras.
+- The `__init__.py` package facades re-export symbols. Re-exporting is what a
+  facade is for, and the rule below requires outside code to reach `rag`
+  through it.
+- Tests are exempt from the docstring rules only. A test's name is its
+  documentation, and a required one-line summary on each would add noise
+  without adding information. Every other rule, the line limit included,
+  applies to them.
+
+Two ruff rules are deliberately not enabled: `DOC501` and `DOC502` read `raise`
+statements literally, so they demand a `Raises:` entry for an exception that is
+raised and caught inside the same function, and reject one for an exception
+raised by a helper. This codebase does both, so `Raises:` sections are written
+and reviewed by hand.
+
+When a module import would shadow a common local name, bind it to an
+unambiguous one: `config` is imported as `app_config`, `rag.base` and
+`providers.base` as `rag_base` and `provider_base`, and `commands.eval` as
+`eval_command`. A local variable must never shadow an imported module: it
+raises `UnboundLocalError` at runtime and mypy does not report it.
+
+[google-style]: https://google.github.io/styleguide/pyguide.html
+
 ## Commit convention
 
 Commits follow Conventional Commits:

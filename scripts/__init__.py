@@ -1,1 +1,1 @@
-"""Manual, environment-dependent checks that are run by hand, never by pytest."""
+"""Manual, environment-dependent checks, run by hand and never by pytest."""

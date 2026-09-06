@@ -33,7 +33,7 @@ B = 0.75
 
 @dataclasses.dataclass(slots=True)
 class Bm25Index:
-    """Term statistics for one corpus, used to rank its documents against a query."""
+    """Term statistics for one corpus, used to rank it against a query."""
 
     term_counts: list[collections.Counter[str]]
     document_lengths: list[int]
@@ -42,8 +42,14 @@ class Bm25Index:
 
     @classmethod
     def build(cls, texts: list[str]) -> Bm25Index:
-        """Index `texts` positionally, so a rank refers back by list index."""
+        """Index `texts` positionally, so a rank refers back by index.
 
+        Args:
+          texts: The corpus to index.
+
+        Returns:
+          The index, holding this corpus's term statistics.
+        """
         term_counts = [
             collections.Counter(scoring.tokenize_terms(text)) for text in texts
         ]
@@ -61,8 +67,7 @@ class Bm25Index:
         )
 
     def score(self, query_terms: list[str], document_index: int) -> float:
-        """Return the BM25 score of one indexed document against `query_terms`."""
-
+        """Return one indexed document's BM25 score for `query_terms`."""
         if self.average_length <= 0:
             return 0.0
         counts = self.term_counts[document_index]
@@ -80,8 +85,7 @@ class Bm25Index:
         return total
 
     def rank(self, query: str) -> list[tuple[int, float]]:
-        """Return `(document_index, score)` for every scoring document, best first."""
-
+        """Return `(index, score)` for every scoring document, best first."""
         query_terms = scoring.tokenize_terms(query)
         if not query_terms:
             return []

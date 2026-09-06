@@ -51,7 +51,25 @@ line-length = 80
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+# `D` enforces the Google docstring rules (style guide 3.8): every public module,
+# class, and function is documented, the summary is one line, and every argument is
+# described. `DOC201`, which requires a `Returns:` section, is still a preview rule, so
+# it runs as its own CI step rather than turning preview mode on for every rule here.
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "D"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+# Tests document themselves through their names, and a required one-line summary on
+# each would add noise without adding information. They are still held to every other
+# rule, including the line limit.
+"tests/**" = ["D"]
+
+# DOC501 and DOC502 are deliberately not selected. Both read `raise` statements
+# literally, so they demand a `Raises:` entry for an exception that is raised and
+# caught inside the same function, and reject one for an exception raised by a helper.
+# This codebase does both, so the sections are written and reviewed by hand.
 
 [tool.ruff.lint.isort]
 known-first-party = ["local_docs_rag_agent"]

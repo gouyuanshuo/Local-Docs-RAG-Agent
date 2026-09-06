@@ -15,7 +15,6 @@ from local_docs_rag_agent.rag import discovery, pipeline
 
 def list_documents(config: app_config.AppConfig) -> list[str]:
     """Return the POSIX paths of every document the agent can currently read."""
-
     return [
         path.as_posix()
         for path in discovery.collect_document_paths(
@@ -29,11 +28,17 @@ def search_documents(
 ) -> list[dict[str, str | float]]:
     """Search the index and return hits as plain data, with their source spans.
 
-    This goes through the full retrieval pipeline, reranking included, so the
-    tool cannot report a different ordering from the one an answer would have
-    been built on.
-    """
+    Args:
+      config: The settings to search under.
+      query: The question to search for.
+      top_k: How many hits to return, or None for `config.top_k`.
 
+    Returns:
+      One mapping per hit, with its span. This goes through the full
+      retrieval pipeline, reranking included, so the tool cannot
+      report a different ordering from the one an answer would have
+      been built on.
+    """
     hits = pipeline.retrieve(config, query, top_k or config.top_k).hits
     return [
         {
@@ -50,5 +55,4 @@ def search_documents(
 
 def get_system_time() -> str:
     """Return the current UTC time, so answers can reason about "today"."""
-
     return datetime.datetime.now(datetime.UTC).isoformat()
