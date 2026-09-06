@@ -178,6 +178,25 @@ def _chunk_paragraphs(
     chunk_overlap: int,
     markdown_aware: bool,
 ) -> list[models.DocumentChunk]:
+    """Group paragraph blocks into chunks, overlapping at the boundaries.
+
+    The work is three separate decisions, and they are kept separate:
+    :func:`_group_stop` says which blocks belong together,
+    :func:`_chunk_from_blocks` turns that run into a chunk, and
+    :func:`_next_group_start` says where the following chunk begins.
+
+    Args:
+      source_path: Path of the document, used for chunk ids and titles.
+      text: The document's full text.
+      source_title: Fallback title for a chunk under no heading.
+      chunk_size: Maximum characters per chunk.
+      chunk_overlap: Characters each chunk repeats from the previous one.
+      markdown_aware: Whether a heading ends a chunk.
+
+    Returns:
+      The chunks, in document order. A document with no paragraph blocks
+      falls back to fixed-size slicing rather than returning nothing.
+    """
     blocks = _extract_paragraph_blocks(
         text, source_title, markdown_aware=markdown_aware
     )
@@ -193,93 +212,166 @@ def _chunk_paragraphs(
     )
 
     chunks: list[models.DocumentChunk] = []
-    start_index = 0
-    chunk_index = 0
     strategy = "markdown" if markdown_aware else "paragraph"
+    start = 0
 
-    while start_index < len(blocks):
-        text_parts: list[str] = []
-        current_section = blocks[start_index].section_title
-        current_heading_level = blocks[start_index].heading_level
-        start_char = blocks[start_index].start_char
-        end_char = blocks[start_index].end_char
-        cursor = start_index
-
-        while cursor < len(blocks):
-            block = blocks[cursor]
-            candidate_parts = [*text_parts, block.text]
-            candidate_text = "\n\n".join(candidate_parts).strip()
-            section_changed = (
-                markdown_aware
-                and cursor > start_index
-                and block.section_title != current_section
-            )
-            if (
-                candidate_text
-                and len(candidate_text) > chunk_size
-                and text_parts
-            ):
-                break
-            if section_changed and text_parts:
-                break
-
-            text_parts = candidate_parts
-            end_char = block.end_char
-            current_section = block.section_title
-            current_heading_level = block.heading_level
-            cursor += 1
-
-            if len(candidate_text) >= chunk_size:
-                break
-
-        chunk_text_value = "\n\n".join(text_parts).strip()
-        if not chunk_text_value:
-            start_index += 1
+    while start < len(blocks):
+        stop = _group_stop(
+            blocks,
+            start=start,
+            chunk_size=chunk_size,
+            markdown_aware=markdown_aware,
+        )
+        chunk = _chunk_from_blocks(
+            blocks[start:stop],
+            source_path=source_path,
+            source_title=source_title,
+            strategy=strategy,
+            chunk_index=len(chunks),
+        )
+        if chunk is None:
+            # A run of blank blocks produces no chunk; step over its first
+            # block rather than grouping the same run again.
+            start += 1
             continue
 
-        section = Section(
-            title=current_section,
-            heading_level=current_heading_level,
-            start_char=start_char,
-            end_char=end_char,
-            text=chunk_text_value,
+        chunks.append(chunk)
+        if stop >= len(blocks):
+            break
+        start = _next_group_start(
+            blocks, start=start, stop=stop, chunk_overlap=chunk_overlap
         )
-        metadata = _build_metadata(
+
+    return chunks
+
+
+def _group_stop(
+    blocks: list[ParagraphBlock],
+    *,
+    start: int,
+    chunk_size: int,
+    markdown_aware: bool,
+) -> int:
+    """Return one past the last block belonging with `blocks[start]`.
+
+    Args:
+      blocks: Every block of the document, in order.
+      start: Index of the block the group begins at.
+      chunk_size: Maximum characters a chunk should hold.
+      markdown_aware: Whether a heading ends the group, so a chunk never
+        mixes two sections.
+
+    Returns:
+      The exclusive end of the group, always greater than `start`: the first
+      block is taken unconditionally, because a block too large to fit alone
+      has already been split by `_split_oversized_blocks` and a group of
+      nothing would not advance.
+    """
+    parts: list[str] = []
+    section = blocks[start].section_title
+    stop = start
+
+    for index in range(start, len(blocks)):
+        block = blocks[index]
+        candidate = "\n\n".join([*parts, block.text]).strip()
+        leaves_section = (
+            markdown_aware and index > start and block.section_title != section
+        )
+        if parts and candidate and len(candidate) > chunk_size:
+            break
+        if parts and leaves_section:
+            break
+
+        parts.append(block.text)
+        section = block.section_title
+        stop = index + 1
+
+        if len(candidate) >= chunk_size:
+            break
+
+    return stop
+
+
+def _chunk_from_blocks(
+    group: list[ParagraphBlock],
+    *,
+    source_path: pathlib.Path,
+    source_title: str,
+    strategy: str,
+    chunk_index: int,
+) -> models.DocumentChunk | None:
+    """Build one chunk from a run of consecutive blocks.
+
+    Args:
+      group: The blocks to join, in order.
+      source_path: Path of the document, used for the chunk id.
+      source_title: Fallback title when the group sits under no heading.
+      strategy: Chunk strategy recorded in the metadata.
+      chunk_index: Position of this chunk within the document.
+
+    Returns:
+      The chunk, spanning the first block's start to the last block's end, or
+      None when the group holds no text at all. The section title and heading
+      level come from the last block, which is the one a reader of the chunk's
+      final lines is under.
+    """
+    text = "\n\n".join(block.text for block in group).strip()
+    if not text:
+        return None
+
+    first, last = group[0], group[-1]
+    section = Section(
+        title=last.section_title,
+        heading_level=last.heading_level,
+        start_char=first.start_char,
+        end_char=last.end_char,
+        text=text,
+    )
+    return _make_chunk(
+        source_path=source_path,
+        title=last.section_title or source_title,
+        text=text,
+        chunk_index=chunk_index,
+        start_char=first.start_char,
+        end_char=last.end_char,
+        metadata=_build_metadata(
             strategy=strategy,
             source_title=source_title,
             section=section,
-            start_char=start_char,
-            end_char=end_char,
-        )
-        chunks.append(
-            _make_chunk(
-                source_path=source_path,
-                title=current_section or source_title,
-                text=chunk_text_value,
-                chunk_index=chunk_index,
-                start_char=start_char,
-                end_char=end_char,
-                metadata=metadata,
-            )
-        )
-        chunk_index += 1
+            start_char=first.start_char,
+            end_char=last.end_char,
+        ),
+    )
 
-        if cursor >= len(blocks):
-            break
 
-        overlap_chars = 0
-        next_start_index = max(start_index + 1, cursor - 1)
-        probe = cursor - 1
-        while probe > start_index:
-            overlap_chars += len(blocks[probe].text)
-            if overlap_chars >= chunk_overlap:
-                next_start_index = probe
-                break
-            probe -= 1
-            next_start_index = probe
-        start_index = max(start_index + 1, next_start_index)
+def _next_group_start(
+    blocks: list[ParagraphBlock],
+    *,
+    start: int,
+    stop: int,
+    chunk_overlap: int,
+) -> int:
+    """Return the block index the next chunk begins at.
 
-    return chunks
+    Args:
+      blocks: Every block of the document, in order.
+      start: Where the chunk just emitted began.
+      stop: One past where it ended.
+      chunk_overlap: Characters the next chunk should repeat.
+
+    Returns:
+      The earliest trailing block whose text, together with the blocks after
+      it, covers `chunk_overlap` characters, so a fact spanning a boundary
+      stays retrievable from both sides. Never earlier than `start + 1`: a
+      block longer than the overlap must still advance, or the same group
+      would be emitted forever.
+    """
+    repeated = 0
+    for index in range(stop - 1, start, -1):
+        repeated += len(blocks[index].text)
+        if repeated >= chunk_overlap:
+            return max(start + 1, index)
+    return start + 1
 
 
 def _make_chunk(

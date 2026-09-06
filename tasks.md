@@ -154,9 +154,11 @@ Current theme:
       flags from it
 - [x] Cover the new coupling with tests: the request schema, the response
       schema, the CLI flags, and the run label must each name every axis
-- [ ] Untangle `_chunk_paragraphs` in `rag/chunker.py`: 51 statements and
+- [x] Untangle `_chunk_paragraphs` in `rag/chunker.py`: 51 statements and
       complexity 11, with five parallel mutable variables and three break
       conditions across two nested loops
+- [x] Cover the chunker's grouping, section boundaries, and overlap advance
+      with tests; it had four tests and none reached the paragraph path
 - [ ] Consider splitting `rag/qdrant_store.py` (472 lines) along collection
       lifecycle, CRUD, search, and error normalization
 
