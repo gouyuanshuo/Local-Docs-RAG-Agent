@@ -326,6 +326,10 @@ def _build_leaderboard(
                 "retrieval_span_hit_rate": summary.get(
                     "retrieval_span_hit_rate", 0.0
                 ),
+                "retrieval_reciprocal_rank": summary.get(
+                    "retrieval_reciprocal_rank", 0.0
+                ),
+                "retrieval_precision": summary.get("retrieval_precision", 0.0),
                 "citation_span_hit_rate": summary.get(
                     "citation_span_hit_rate", 0.0
                 ),
@@ -334,9 +338,16 @@ def _build_leaderboard(
                 ),
             }
         )
+    # Ranked by reciprocal rank first, not by the hit rate. The hit rate
+    # joins every retrieved chunk before matching, so it cannot tell a
+    # configuration that puts the answer first from one that buries it
+    # fourth, and a wider `top_k` can only raise it. Ranking on it made the
+    # leaderboard prefer exactly the loose retrieval a second stage exists
+    # to tighten.
     leaderboard.sort(
         key=lambda row: (
-            _as_float(row["retrieval_span_hit_rate"]),
+            _as_float(row["retrieval_reciprocal_rank"]),
+            _as_float(row["retrieval_precision"]),
             _as_float(row["answer_keyword_hit_rate"]),
             _as_float(row["citation_span_hit_rate"]),
             -_as_float(row["avg_response_time_ms"]),

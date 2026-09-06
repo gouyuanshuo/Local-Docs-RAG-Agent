@@ -29,6 +29,8 @@ export function CompareLeaderboard({ result }: CompareLeaderboardProps) {
                   <span className="meta-pill">{row.avg_response_time_ms.toFixed(2)} ms</span>
                 </div>
                 <div className="compare-metrics">
+                  <span>rank {row.retrieval_reciprocal_rank}</span>
+                  <span>precision {row.retrieval_precision}</span>
                   <span>retrieval span {row.retrieval_span_hit_rate}</span>
                   <span>retrieval source {row.retrieval_source_hit_rate}</span>
                   <span>citation span {row.citation_span_hit_rate}</span>

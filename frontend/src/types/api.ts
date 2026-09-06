@@ -72,6 +72,10 @@ export type CompareLeaderboardRow = {
   answer_keyword_hit_rate: number;
   retrieval_source_hit_rate: number;
   retrieval_span_hit_rate: number;
+  // The rank-aware pair the board is ordered by. `retrieval_span_hit_rate`
+  // cannot tell first place from fourth, and rises with a wider top_k.
+  retrieval_reciprocal_rank: number;
+  retrieval_precision: number;
   citation_span_hit_rate: number;
   avg_response_time_ms: number;
 };

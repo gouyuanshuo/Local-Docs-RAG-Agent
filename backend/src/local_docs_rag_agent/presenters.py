@@ -110,6 +110,8 @@ def serialize_eval_result(result: models.EvalResult) -> dict[str, object]:
         "answer_keyword_hit_rate": result.answer_keyword_hit_rate,
         "retrieval_source_hit_rate": result.retrieval_source_hit_rate,
         "retrieval_span_hit_rate": result.retrieval_span_hit_rate,
+        "retrieval_reciprocal_rank": result.retrieval_reciprocal_rank,
+        "retrieval_precision": result.retrieval_precision,
         "citation_source_hit_rate": result.citation_source_hit_rate,
         "citation_span_hit_rate": result.citation_span_hit_rate,
         "response_time_ms": result.response_time_ms,
@@ -153,6 +155,12 @@ def serialize_eval_summary(
         ),
         "retrieval_span_hit_rate": _average(
             result.retrieval_span_hit_rate for result in results
+        ),
+        "retrieval_reciprocal_rank": _average(
+            result.retrieval_reciprocal_rank for result in results
+        ),
+        "retrieval_precision": _average(
+            result.retrieval_precision for result in results
         ),
         "citation_source_hit_rate": citation_source_hit_rate,
         "citation_span_hit_rate": citation_span_hit_rate,

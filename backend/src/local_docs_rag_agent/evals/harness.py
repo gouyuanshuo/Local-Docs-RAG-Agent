@@ -88,6 +88,11 @@ def run_eval(config: app_config.AppConfig) -> list[models.EvalResult]:
         retrieved_text = " ".join(
             hit.chunk.text for hit in response.retrieved_chunks
         ).lower()
+        # Kept as a ranked list as well as a blob: the blob answers "was it
+        # retrieved at all", and only the list answers "how far down".
+        ranked_texts = [
+            hit.chunk.text.lower() for hit in response.retrieved_chunks
+        ]
         retrieved_sources = list(
             dict.fromkeys(
                 hit.chunk.source_path for hit in response.retrieved_chunks
@@ -107,6 +112,12 @@ def run_eval(config: app_config.AppConfig) -> list[models.EvalResult]:
             ),
             retrieval_span_hit_rate=keyword_match_rate(
                 case.expected_retrieval_keywords, retrieved_text
+            ),
+            retrieval_reciprocal_rank=reciprocal_rank(
+                case.expected_retrieval_keywords, ranked_texts
+            ),
+            retrieval_precision=retrieval_precision(
+                case.expected_retrieval_keywords, ranked_texts
             ),
             citation_source_hit_rate=source_match_rate(
                 case.expected_source_paths, response.citations
@@ -139,6 +150,68 @@ def keyword_match_rate(expected_items: list[str], observed_text: str) -> float:
     return hits / len(expected_items)
 
 
+def reciprocal_rank(
+    expected_items: list[str], ranked_texts: list[str]
+) -> float:
+    """Return how near the top of the results the expected text was found.
+
+    This is the metric a reranker moves. `keyword_match_rate` joins every
+    retrieved chunk into one string before matching, so it answers only
+    whether the evidence was retrieved at all: reordering the same chunks
+    cannot change it, and widening `top_k` can only raise it. Reciprocal rank
+    reads the results as the ordered list they are.
+
+    Args:
+      expected_items: Keywords the retrieved evidence should contain.
+      ranked_texts: Lowercased chunk texts, best first.
+
+    Returns:
+      The mean of `1 / position` over the expected keywords, counting a
+      keyword that appears nowhere as zero. 1.0 means every keyword was in
+      the first result; an empty expectation is neutral success.
+    """
+    if not expected_items:
+        return 1.0
+    total = 0.0
+    for item in expected_items:
+        needle = item.lower()
+        for position, text in enumerate(ranked_texts, start=1):
+            if needle in text:
+                total += 1.0 / position
+                break
+    return total / len(expected_items)
+
+
+def retrieval_precision(
+    expected_items: list[str], ranked_texts: list[str]
+) -> float:
+    """Return the fraction of retrieved chunks that carry expected text.
+
+    Recall alone rewards retrieving more, which is the opposite of what a
+    second-stage reranker is for. Precision is what makes a wider `top_k`
+    cost something in the leaderboard rather than being free.
+
+    Args:
+      expected_items: Keywords that make a chunk relevant to the case.
+      ranked_texts: Lowercased chunk texts, best first.
+
+    Returns:
+      The share of results containing at least one expected keyword. An
+      empty expectation is neutral success; retrieving nothing when
+      something was expected scores zero.
+    """
+    if not expected_items:
+        return 1.0
+    if not ranked_texts:
+        return 0.0
+    relevant = sum(
+        1
+        for text in ranked_texts
+        if any(item.lower() in text for item in expected_items)
+    )
+    return relevant / len(ranked_texts)
+
+
 def source_match_rate(
     expected_sources: list[str], observed_sources: list[str]
 ) -> float:
@@ -164,6 +237,13 @@ def failure_reasons(result: models.EvalResult) -> list[str]:
         and result.expected_retrieval_keywords
     ):
         reasons.append("retrieval_missed_expected_span")
+    elif (
+        result.retrieval_reciprocal_rank < 1.0
+        and result.expected_retrieval_keywords
+    ):
+        # Retrieved, but not first. This is precisely the case a reranker
+        # exists to fix, and the blob metric above cannot see it.
+        reasons.append("retrieval_ranked_expected_span_below_first")
     if result.answer_keyword_hit_rate < 1.0 and result.expected_answer_keywords:
         reasons.append("answer_missing_expected_keywords")
     if result.citation_source_hit_rate < 1.0:

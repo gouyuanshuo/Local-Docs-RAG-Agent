@@ -208,6 +208,8 @@ class EvalResultResponse(pydantic.BaseModel):
     answer_keyword_hit_rate: float = pydantic.Field(ge=0, le=1)
     retrieval_source_hit_rate: float = pydantic.Field(ge=0, le=1)
     retrieval_span_hit_rate: float = pydantic.Field(ge=0, le=1)
+    retrieval_reciprocal_rank: float = pydantic.Field(ge=0, le=1)
+    retrieval_precision: float = pydantic.Field(ge=0, le=1)
     citation_source_hit_rate: float = pydantic.Field(ge=0, le=1)
     citation_span_hit_rate: float = pydantic.Field(ge=0, le=1)
     response_time_ms: float = pydantic.Field(ge=0)
@@ -228,6 +230,8 @@ class EvalSummaryResponse(pydantic.BaseModel):
     answer_keyword_hit_rate: float
     retrieval_source_hit_rate: float
     retrieval_span_hit_rate: float
+    retrieval_reciprocal_rank: float
+    retrieval_precision: float
     citation_source_hit_rate: float
     citation_span_hit_rate: float
     avg_response_time_ms: float
@@ -244,6 +248,8 @@ class EvalLeaderboardRowResponse(pydantic.BaseModel):
     answer_keyword_hit_rate: float
     retrieval_source_hit_rate: float
     retrieval_span_hit_rate: float
+    retrieval_reciprocal_rank: float
+    retrieval_precision: float
     citation_span_hit_rate: float
     avg_response_time_ms: float
 

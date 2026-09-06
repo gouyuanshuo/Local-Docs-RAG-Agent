@@ -185,6 +185,20 @@ It is:
   - fallback mode
   - runtime actually used
 
+### Metric correction (2026-09-07)
+
+The retrieval metrics joined every retrieved chunk into one string before
+matching. That made them structurally unable to measure ranking: reordering
+the same chunks left the score identical, so the second-stage reranker could
+not register any improvement at all, and a wider `top_k` raised the score for
+free. The comparison leaderboard sorted on that metric first, so it actively
+preferred loose, wide retrieval over precise retrieval.
+
+`retrieval_reciprocal_rank` and `retrieval_precision` now measure position and
+noise, and the leaderboard ranks on them. Any comparison run recorded before
+this date ranked on the blind metric and should be re-run before its ordering
+is trusted.
+
 ### Why this comes second
 
 If fallback behavior is invisible, eval results and optimization decisions become misleading.

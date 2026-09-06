@@ -32,7 +32,10 @@ The goal is not model training. The goal is to build a usable AI application wit
   - `agents_sdk`
 - Supports OpenAI-compatible providers through `.env`
 - Works with Qwen via DashScope-compatible endpoints
-- Tracks simple eval metrics:
+- Tracks eval metrics that can see *where* the evidence ranked, not only
+  whether it was retrieved:
+  - retrieval reciprocal rank (the leaderboard's primary key)
+  - retrieval precision
   - keyword hit rate
   - source hit rate
   - citation span hit rate
@@ -326,6 +329,30 @@ every `llm` cell costs a model call per eval case. Ask for it explicitly:
 python -m local_docs_rag_agent.cli eval-compare \
   --reranker none --reranker llm
 ```
+
+### Reading the eval metrics
+
+`retrieval_span_hit_rate`, `citation_span_hit_rate`, and the keyword rates all
+join the retrieved text together before matching. That answers one question
+well — was the evidence retrieved at all — and is blind to two others:
+
+- reordering the same chunks cannot change them, so a reranker scores exactly
+  the same as no reranker
+- a wider `TOP_K` can only raise them, because there is more text to match
+
+Two metrics answer those:
+
+- `retrieval_reciprocal_rank` — the mean of `1 / position` over the expected
+  keywords, counting a keyword found nowhere as zero. 1.0 means the evidence
+  was in the first result. This is what a second-stage reranker moves, and it
+  is the leaderboard's primary sort key.
+- `retrieval_precision` — the share of retrieved chunks that carry expected
+  text. This is what makes a wider `TOP_K` cost something instead of being
+  free.
+
+A case whose evidence was retrieved but not ranked first is reported as
+`retrieval_ranked_expected_span_below_first`, separately from a case that
+missed it entirely.
 
 ### Retrieval backend
 

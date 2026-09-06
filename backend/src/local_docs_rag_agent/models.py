@@ -201,6 +201,8 @@ class EvalResult:
     answer_keyword_hit_rate: float
     retrieval_source_hit_rate: float
     retrieval_span_hit_rate: float
+    retrieval_reciprocal_rank: float
+    retrieval_precision: float
     citation_source_hit_rate: float
     citation_span_hit_rate: float
     response_time_ms: float

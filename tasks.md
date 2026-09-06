@@ -162,6 +162,25 @@ Current theme:
 - [ ] Consider splitting `rag/qdrant_store.py` (472 lines) along collection
       lifecycle, CRUD, search, and error normalization
 
+### Eval measurement (Phase A follow-through)
+
+- [x] Add `retrieval_reciprocal_rank` and `retrieval_precision`, so the harness
+      can see where evidence ranked rather than only whether it was retrieved
+- [x] Rank the comparison leaderboard on them, replacing a primary key that
+      rose with `top_k` and could not see reranking at all
+- [x] Report "retrieved but not first" separately from "missed entirely"
+- [ ] Grow the eval set beyond two questions against one document. With two
+      cases every rate has three possible values, so no two configurations can
+      be told apart; the four retrieval strategies tie for that reason and not
+      because they are equivalent
+- [ ] Write the cases against `docs/` by failure mode, so the set can separate
+      the strategies: rare exact terms (favours BM25), pure paraphrase with no
+      term overlap (favours dense), evidence that is second on both signals
+      (favours RRF), near-duplicate distractors (favours the reranker), and
+      answers spanning a section boundary (tests chunking and overlap)
+- [ ] Re-run `eval-compare` on a live provider once the set can discriminate,
+      and record which strategy actually wins
+
 ### Follow-ups
 
 - [ ] Consider grouping `AppConfig` into per-concern sub-configs if the field count
