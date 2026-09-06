@@ -3,22 +3,16 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+import pathlib
 
-from local_docs_rag_agent.config import AppConfig
-from local_docs_rag_agent.evals.comparison import (
-    default_chunk_strategies,
-    default_rerankers,
-    default_retrieval_strategies,
-    default_vector_backends,
-    run_eval_matrix,
-)
+from local_docs_rag_agent import config as app_config
+from local_docs_rag_agent.evals import comparison
 
-DEFAULT_COMPARE_OUTPUT_PATH = Path("data/evals/compare_latest.json")
+DEFAULT_COMPARE_OUTPUT_PATH = pathlib.Path("data/evals/compare_latest.json")
 
 
 def run_eval_compare_command(
-    config: AppConfig,
+    config: app_config.AppConfig,
     runtimes: list[str] | None = None,
     chunk_strategies: list[str] | None = None,
     vector_backends: list[str] | None = None,
@@ -31,20 +25,25 @@ def run_eval_compare_command(
 ) -> None:
     """Compare eval results across the requested axes and print the report as JSON.
 
-    An omitted axis falls back to the configured value, so the default invocation
-    compares chunk strategies while holding everything else steady.
+    An omitted axis falls back to the configured value, so the default
+    invocation compares chunk strategies while holding everything else steady.
     """
 
-    payload = run_eval_matrix(
+    payload = comparison.run_eval_matrix(
         config=config,
         runtimes=runtimes or [config.agent_runtime],
-        chunk_strategies=chunk_strategies or default_chunk_strategies(),
-        vector_backends=vector_backends or default_vector_backends(config),
+        chunk_strategies=chunk_strategies
+        or comparison.default_chunk_strategies(),
+        vector_backends=vector_backends
+        or comparison.default_vector_backends(config),
         top_ks=top_ks or [config.top_k],
         chunk_sizes=chunk_sizes or [config.chunk_size],
         chunk_overlaps=chunk_overlaps or [config.chunk_overlap],
-        retrieval_strategies=retrieval_strategies or default_retrieval_strategies(),
-        rerankers=rerankers or default_rerankers(config),
-        output_path=Path(output_path) if output_path else DEFAULT_COMPARE_OUTPUT_PATH,
+        retrieval_strategies=retrieval_strategies
+        or comparison.default_retrieval_strategies(),
+        rerankers=rerankers or comparison.default_rerankers(config),
+        output_path=pathlib.Path(output_path)
+        if output_path
+        else DEFAULT_COMPARE_OUTPUT_PATH,
     )
     print(json.dumps(payload, ensure_ascii=True, indent=2))

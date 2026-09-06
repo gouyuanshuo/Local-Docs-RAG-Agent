@@ -2,108 +2,114 @@
 
 The SDK is imported lazily so the package stays installable without the `agents`
 extra. Any missing dependency, missing key, or run failure degrades to the basic
-runtime with a `runtime_fallback:` reason recorded in the diagnostics rather than
-raising, because a degraded answer is still useful as long as it is labelled as one.
+runtime with a `runtime_fallback:` reason recorded in the diagnostics rather
+than raising, because a degraded answer is still useful as long as it is
+labelled as one.
 """
 
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
-from textwrap import dedent
+import dataclasses
+import textwrap
 from typing import Any
 
-from openai import AsyncOpenAI
+import openai
 
-from local_docs_rag_agent.config import AppConfig
-from local_docs_rag_agent.models import AgentAnswer, AnswerDiagnostics, ProviderStatus, RetrievalHit
-from local_docs_rag_agent.providers.openai_client import build_async_openai_client
-from local_docs_rag_agent.rag.pipeline import retrieve
-from local_docs_rag_agent.runtime.basic import answer_with_basic_runtime
-from local_docs_rag_agent.runtime.shared import (
-    build_agent_answer,
-    format_tool_search_results,
-    merge_hits,
-)
-from local_docs_rag_agent.tools import get_system_time, list_documents
+from local_docs_rag_agent import config as app_config
+from local_docs_rag_agent import models, tools
+from local_docs_rag_agent.providers import openai_client
+from local_docs_rag_agent.rag import pipeline
+from local_docs_rag_agent.runtime import basic as basic_runtime
+from local_docs_rag_agent.runtime import shared as runtime_shared
 
 
-@dataclass(slots=True)
+@dataclasses.dataclass(slots=True)
 class AgentRuntimeContext:
-    config: AppConfig
-    retrieved_hits: list[RetrievalHit] = field(default_factory=list)
-    # The agent decides whether to search at all, so both retrieval statuses start
-    # `unknown` and are only replaced if the search tool actually runs.
-    embedding_status: ProviderStatus = field(
-        default_factory=lambda: ProviderStatus(
+    config: app_config.AppConfig
+    retrieved_hits: list[models.RetrievalHit] = dataclasses.field(
+        default_factory=list
+    )
+    # The agent decides whether to search at all, so both retrieval statuses
+    # start `unknown` and are only replaced if the search tool actually runs.
+    embedding_status: models.ProviderStatus = dataclasses.field(
+        default_factory=lambda: models.ProviderStatus(
             provider="embedding", mode="unknown", reason="search_not_run"
         )
     )
-    reranker_status: ProviderStatus = field(
-        default_factory=lambda: ProviderStatus(
+    reranker_status: models.ProviderStatus = dataclasses.field(
+        default_factory=lambda: models.ProviderStatus(
             provider="reranker", mode="unknown", reason="search_not_run"
         )
     )
 
 
-def answer_with_agents_sdk(config: AppConfig, question: str) -> AgentAnswer:
+def answer_with_agents_sdk(
+    config: app_config.AppConfig, question: str
+) -> models.AgentAnswer:
     agents_sdk_available = _supports_agents_sdk()
     if not agents_sdk_available or not config.llm_api_key:
         fallback_reason = (
-            "agents_sdk_unavailable" if not agents_sdk_available else "missing_llm_api_key"
+            "agents_sdk_unavailable"
+            if not agents_sdk_available
+            else "missing_llm_api_key"
         )
-        return answer_with_basic_runtime(
+        return basic_runtime.answer_with_basic_runtime(
             config,
             question,
             requested_runtime="agents_sdk",
             runtime_reason=f"runtime_fallback:{fallback_reason}",
         )
 
-    openai_client = build_async_openai_client(
+    client = openai_client.build_async_openai_client(
         api_key=config.llm_api_key,
         base_url=config.llm_base_url,
         trust_env=config.external_http_trust_env,
     )
     run_context = AgentRuntimeContext(config=config)
     try:
-        agent = _build_sdk_agent(config, openai_client)
+        agent = _build_sdk_agent(config, client)
         result = asyncio.run(
             _run_agent(
                 agent=agent,
                 question=question,
                 run_context=run_context,
                 max_turns=config.agents_max_turns,
-                openai_client=openai_client,
+                client=client,
             )
         )
     except Exception as exc:
-        if not openai_client.is_closed():
-            asyncio.run(openai_client.close())
-        return answer_with_basic_runtime(
+        if not client.is_closed():
+            asyncio.run(client.close())
+        return basic_runtime.answer_with_basic_runtime(
             config,
             question,
             requested_runtime="agents_sdk",
-            runtime_reason=f"runtime_fallback:agents_sdk_error:{exc.__class__.__name__}",
+            runtime_reason=(
+                f"runtime_fallback:agents_sdk_error:{exc.__class__.__name__}"
+            ),
         )
 
     final_output = str(result.final_output).strip()
     if not final_output:
-        return answer_with_basic_runtime(
+        return basic_runtime.answer_with_basic_runtime(
             config,
             question,
             requested_runtime="agents_sdk",
             runtime_reason="runtime_fallback:empty_agent_output",
         )
 
-    diagnostics = AnswerDiagnostics(
+    diagnostics = models.AnswerDiagnostics(
         requested_runtime="agents_sdk",
         actual_runtime="agents_sdk",
         vector_backend=config.vector_backend,
-        chat_provider=ProviderStatus(provider=config.llm_provider, mode="live"),
+        chat_provider=models.ProviderStatus(
+            provider=config.llm_provider, mode="live"
+        ),
         embedding_provider=run_context.embedding_status,
         reranker=run_context.reranker_status,
     )
-    return build_agent_answer(
+    return runtime_shared.build_agent_answer(
         question=question,
         answer=final_output,
         hits=run_context.retrieved_hits,
@@ -111,49 +117,58 @@ def answer_with_agents_sdk(config: AppConfig, question: str) -> AgentAnswer:
     )
 
 
-def _build_sdk_agent(config: AppConfig, openai_client: AsyncOpenAI) -> Any:
-    from agents import Agent, RunContextWrapper, function_tool
+def _build_sdk_agent(
+    config: app_config.AppConfig, client: openai.AsyncOpenAI
+) -> Any:
+    import agents
 
-    # function_tool resolves postponed annotations from the module global namespace.
-    globals()["RunContextWrapper"] = RunContextWrapper
+    # function_tool resolves postponed annotations from the module global
+    # namespace.
+    globals()["RunContextWrapper"] = agents.RunContextWrapper
 
-    @function_tool
-    def list_local_documents(ctx: RunContextWrapper[AgentRuntimeContext]) -> str:
+    @agents.function_tool
+    def list_local_documents(
+        ctx: agents.RunContextWrapper[AgentRuntimeContext],
+    ) -> str:
         """List the local documents that are available for question answering."""
-        documents = list_documents(ctx.context.config)
+        documents = tools.list_documents(ctx.context.config)
         if not documents:
             return "No local documents were found."
         return "\n".join(documents)
 
-    @function_tool
+    @agents.function_tool
     def search_local_documents(
-        ctx: RunContextWrapper[AgentRuntimeContext],
+        ctx: agents.RunContextWrapper[AgentRuntimeContext],
         query: str,
         top_k: int | None = None,
     ) -> str:
         """Search local documents for evidence before answering a docs question."""
-        # The tool's own `top_k` is applied by retrieval rather than by truncating
-        # afterwards, so the reranker reorders the window the agent actually asked for.
-        outcome = retrieve(ctx.context.config, query, top_k)
+        # The tool's own `top_k` is applied by retrieval rather than by
+        # truncating afterwards, so the reranker reorders the window the agent
+        # actually asked for.
+        outcome = pipeline.retrieve(ctx.context.config, query, top_k)
         ctx.context.embedding_status = outcome.embedding_status
         ctx.context.reranker_status = outcome.reranker_status
-        merge_hits(ctx.context.retrieved_hits, outcome.hits)
-        return format_tool_search_results(outcome.hits)
+        runtime_shared.merge_hits(ctx.context.retrieved_hits, outcome.hits)
+        return runtime_shared.format_tool_search_results(outcome.hits)
 
-    @function_tool
+    @agents.function_tool
     def get_current_time() -> str:
         """Return the current UTC time."""
-        return get_system_time()
+        return tools.get_system_time()
 
-    return Agent(
+    return agents.Agent(
         name="Local Docs RAG Agent",
-        model=_build_agent_model(config, openai_client),
-        instructions=dedent(
+        model=_build_agent_model(config, client),
+        instructions=textwrap.dedent(
             """
             You are a local-document QA agent.
-            For document questions, call `search_local_documents` before answering.
-            Call `list_local_documents` when the user asks what files are available.
-            Only answer from evidence. If evidence is insufficient, say what is missing.
+            For document questions, call `search_local_documents`
+            before answering.
+            Call `list_local_documents` when the user asks what files
+            are available.
+            Only answer from evidence. If evidence is insufficient,
+            say what is missing.
             Cite source ids inline like [S1], [S2].
             End with a `Sources:` line naming the relevant `source_path` values.
             """
@@ -168,19 +183,19 @@ async def _run_agent(
     question: str,
     run_context: AgentRuntimeContext,
     max_turns: int,
-    openai_client: AsyncOpenAI,
+    client: openai.AsyncOpenAI,
 ) -> Any:
-    from agents import Runner
+    import agents
 
     try:
-        return await Runner.run(
+        return await agents.Runner.run(
             agent,
             question,
             context=run_context,
             max_turns=max_turns,
         )
     finally:
-        await openai_client.close()
+        await client.close()
 
 
 def _supports_agents_sdk() -> bool:
@@ -191,15 +206,17 @@ def _supports_agents_sdk() -> bool:
     return True
 
 
-def _build_agent_model(config: AppConfig, openai_client: AsyncOpenAI) -> Any:
-    from agents import OpenAIChatCompletionsModel, OpenAIResponsesModel
+def _build_agent_model(
+    config: app_config.AppConfig, client: openai.AsyncOpenAI
+) -> Any:
+    import agents
 
     if config.llm_api_style == "chat_completions":
-        return OpenAIChatCompletionsModel(
+        return agents.OpenAIChatCompletionsModel(
             model=config.llm_model,
-            openai_client=openai_client,
+            openai_client=client,
         )
-    return OpenAIResponsesModel(
+    return agents.OpenAIResponsesModel(
         model=config.llm_model,
-        openai_client=openai_client,
+        openai_client=client,
     )

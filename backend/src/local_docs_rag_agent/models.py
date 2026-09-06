@@ -1,24 +1,24 @@
-"""Framework-free domain records shared by retrieval, runtimes, evals, and delivery.
+"""Framework-free domain records shared by retrieval, runtimes, evals, and
+delivery.
 
-These dataclasses are the vocabulary the whole backend speaks: a chunk and where in
-its source file it came from, a scored retrieval hit, an answer with its citations,
-and the honest provider/runtime diagnostics attached to both. Nothing here knows about
-FastAPI, Pydantic, or argparse, so the same records serialize to an HTTP response, a
-CLI payload, and an eval report without change.
+These dataclasses are the vocabulary the whole backend speaks: a chunk and where
+in its source file it came from, a scored retrieval hit, an answer with its
+citations, and the honest provider/runtime diagnostics attached to both. Nothing
+here knows about FastAPI, Pydantic, or argparse, so the same records serialize
+to an HTTP response, a CLI payload, and an eval report without change.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import dataclasses
 from typing import Literal
 
-from local_docs_rag_agent.constants import RuntimeName, VectorBackendName
-from local_docs_rag_agent.exceptions import DataFormatError
+from local_docs_rag_agent import constants, exceptions
 
 ProviderMode = Literal["ready", "live", "fallback", "unknown"]
 
 
-@dataclass(slots=True)
+@dataclasses.dataclass(slots=True)
 class DocumentChunk:
     chunk_id: str
     source_path: str
@@ -28,7 +28,7 @@ class DocumentChunk:
     start_char: int
     end_char: int
     embedding: list[float] | None = None
-    metadata: dict[str, object] = field(default_factory=dict)
+    metadata: dict[str, object] = dataclasses.field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -56,14 +56,19 @@ class DocumentChunk:
             metadata_value = payload.get("metadata", {})
             if not isinstance(metadata_value, dict):
                 raise TypeError("metadata must be an object")
-            metadata = {str(key): value for key, value in metadata_value.items()}
+            metadata = {
+                str(key): value for key, value in metadata_value.items()
+            }
             embedding_value = payload.get("embedding")
             embedding = _optional_float_list(embedding_value)
         except (KeyError, TypeError, ValueError) as exc:
-            raise DataFormatError(f"Invalid document chunk payload: {exc}") from exc
+            raise exceptions.DataFormatError(
+                f"Invalid document chunk payload: {exc}"
+            ) from exc
         if chunk_index < 0 or start_char < 0 or end_char < start_char:
-            raise DataFormatError(
-                "Invalid document chunk payload: indexes and character span are inconsistent"
+            raise exceptions.DataFormatError(
+                "Invalid document chunk payload: indexes and character "
+                "span are inconsistent"
             )
         return cls(
             chunk_id=chunk_id,
@@ -78,7 +83,7 @@ class DocumentChunk:
         )
 
 
-@dataclass(slots=True)
+@dataclasses.dataclass(slots=True)
 class CitationSpan:
     source_path: str
     chunk_id: str
@@ -88,28 +93,28 @@ class CitationSpan:
     text: str
 
 
-@dataclass(slots=True)
+@dataclasses.dataclass(slots=True)
 class RetrievalHit:
     chunk: DocumentChunk
     score: float
     citation_span: CitationSpan
 
 
-@dataclass(slots=True)
+@dataclasses.dataclass(slots=True)
 class ProviderStatus:
     provider: str
     mode: ProviderMode
     reason: str | None = None
 
 
-@dataclass(slots=True)
+@dataclasses.dataclass(slots=True)
 class RetrievalOutcome:
     """What one retrieval produced, and the health of every stage that produced it.
 
-    Retrieval runs in two stages that can degrade independently — embeddings and the
-    reranker — so the hits alone are not a complete answer to "what happened here".
-    Returning them together is what lets a runtime attach both statuses to its
-    diagnostics without knowing how retrieval is assembled.
+    Retrieval runs in two stages that can degrade independently — embeddings and
+    the reranker — so the hits alone are not a complete answer to "what happened
+    here". Returning them together is what lets a runtime attach both statuses
+    to its diagnostics without knowing how retrieval is assembled.
     """
 
     hits: list[RetrievalHit]
@@ -117,24 +122,24 @@ class RetrievalOutcome:
     reranker_status: ProviderStatus
 
 
-@dataclass(slots=True)
+@dataclasses.dataclass(slots=True)
 class AnswerDiagnostics:
     """Truthful record of how an answer was actually produced.
 
-    `requested_runtime` and `actual_runtime` differ whenever a runtime degraded, and
-    the provider statuses stay `fallback` rather than being smoothed into success, so
-    a caller can reject a degraded run instead of trusting it.
+    `requested_runtime` and `actual_runtime` differ whenever a runtime degraded,
+    and the provider statuses stay `fallback` rather than being smoothed into
+    success, so a caller can reject a degraded run instead of trusting it.
     """
 
-    requested_runtime: RuntimeName
-    actual_runtime: RuntimeName
-    vector_backend: VectorBackendName
+    requested_runtime: constants.RuntimeName
+    actual_runtime: constants.RuntimeName
+    vector_backend: constants.VectorBackendName
     chat_provider: ProviderStatus
     embedding_provider: ProviderStatus
     reranker: ProviderStatus
 
 
-@dataclass(slots=True)
+@dataclasses.dataclass(slots=True)
 class AgentAnswer:
     question: str
     answer: str
@@ -144,17 +149,19 @@ class AgentAnswer:
     diagnostics: AnswerDiagnostics
 
 
-@dataclass(slots=True)
+@dataclasses.dataclass(slots=True)
 class EvalCase:
     question: str
     expected_answer_keywords: list[str]
     expected_source_paths: list[str]
-    expected_span_keywords: list[str] = field(default_factory=list)
-    expected_retrieval_keywords: list[str] = field(default_factory=list)
+    expected_span_keywords: list[str] = dataclasses.field(default_factory=list)
+    expected_retrieval_keywords: list[str] = dataclasses.field(
+        default_factory=list
+    )
     notes: str | None = None
 
 
-@dataclass(slots=True)
+@dataclasses.dataclass(slots=True)
 class EvalResult:
     question: str
     answer: str
@@ -167,11 +174,15 @@ class EvalResult:
     citation_span_hit_rate: float
     response_time_ms: float
     diagnostics: AnswerDiagnostics | None = None
-    failure_reasons: list[str] = field(default_factory=list)
-    expected_source_paths: list[str] = field(default_factory=list)
-    expected_answer_keywords: list[str] = field(default_factory=list)
-    expected_span_keywords: list[str] = field(default_factory=list)
-    expected_retrieval_keywords: list[str] = field(default_factory=list)
+    failure_reasons: list[str] = dataclasses.field(default_factory=list)
+    expected_source_paths: list[str] = dataclasses.field(default_factory=list)
+    expected_answer_keywords: list[str] = dataclasses.field(
+        default_factory=list
+    )
+    expected_span_keywords: list[str] = dataclasses.field(default_factory=list)
+    expected_retrieval_keywords: list[str] = dataclasses.field(
+        default_factory=list
+    )
 
 
 def _required_string(payload: dict[str, object], key: str) -> str:
@@ -193,6 +204,9 @@ def _optional_float_list(value: object) -> list[float] | None:
         return None
     if not isinstance(value, list):
         raise TypeError("embedding must be a list or null")
-    if not all(isinstance(item, int | float) and not isinstance(item, bool) for item in value):
+    if not all(
+        isinstance(item, int | float) and not isinstance(item, bool)
+        for item in value
+    ):
         raise TypeError("embedding values must be numbers")
     return [float(item) for item in value]

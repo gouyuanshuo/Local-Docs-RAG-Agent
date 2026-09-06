@@ -1,36 +1,30 @@
 """Creates the FastAPI application: middleware, static hosting, and error handling.
 
-The app serves the built frontend from `frontend/dist` when it exists, and falls back
-to a JSON pointer toward the dev server when it does not, so the same entry point works
-for a built deployment and for local development.
+The app serves the built frontend from `frontend/dist` when it exists, and falls
+back to a JSON pointer toward the dev server when it does not, so the same entry
+point works for a built deployment and for local development.
 
-Domain errors are translated here rather than in each route: a `LocalDocsError` becomes
-a response carrying its stable code and action hint, which is what lets the frontend
-show an actionable message instead of a generic failure.
+Domain errors are translated here rather than in each route: a `LocalDocsError`
+becomes a response carrying its stable code and action hint, which is what lets
+the frontend show an actionable message instead of a generic failure.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
+import pathlib
 
+import fastapi
 import uvicorn
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi import responses as fastapi_responses
+from fastapi import staticfiles as fastapi_staticfiles
+from fastapi.middleware import cors as fastapi_cors
 
-from local_docs_rag_agent.api.routes import router
-from local_docs_rag_agent.exceptions import (
-    ConfigurationError,
-    DataFormatError,
-    LocalDocsError,
-    ProviderUnavailableError,
-    VectorStoreError,
-)
+from local_docs_rag_agent import exceptions
+from local_docs_rag_agent.api import routes
 
 
-def _repo_root() -> Path:
-    current = Path(__file__).resolve()
+def _repo_root() -> pathlib.Path:
+    current = pathlib.Path(__file__).resolve()
     for parent in current.parents:
         if (parent / "pyproject.toml").exists():
             return parent
@@ -42,36 +36,41 @@ FRONTEND_ASSETS_DIR = FRONTEND_DIST_DIR / "assets"
 FRONTEND_INDEX_PATH = FRONTEND_DIST_DIR / "index.html"
 
 
-def create_app() -> FastAPI:
-    app = FastAPI(title="Local Docs RAG Agent", version="0.1.0")
+def create_app() -> fastapi.FastAPI:
+    app = fastapi.FastAPI(title="Local Docs RAG Agent", version="0.1.0")
     _configure_cors(app)
     _register_error_handlers(app)
-    app.include_router(router)
+    app.include_router(routes.router)
 
     if FRONTEND_ASSETS_DIR.is_dir():
         app.mount(
             "/assets",
-            StaticFiles(directory=FRONTEND_ASSETS_DIR),
+            fastapi_staticfiles.StaticFiles(directory=FRONTEND_ASSETS_DIR),
             name="assets",
         )
 
     @app.get("/", response_model=None)
-    def index() -> FileResponse | JSONResponse:
+    def index() -> (
+        fastapi_responses.FileResponse | fastapi_responses.JSONResponse
+    ):
         if FRONTEND_INDEX_PATH.is_file():
-            return FileResponse(FRONTEND_INDEX_PATH)
-        return JSONResponse(
+            return fastapi_responses.FileResponse(FRONTEND_INDEX_PATH)
+        return fastapi_responses.JSONResponse(
             {
                 "name": "Local Docs RAG Agent API",
-                "message": "Frontend dev server not running. Start it with `pnpm run dev`.",
+                "message": (
+                    "Frontend dev server not running. "
+                    "Start it with `pnpm run dev`."
+                ),
             }
         )
 
     return app
 
 
-def _configure_cors(app: FastAPI) -> None:
+def _configure_cors(app: fastapi.FastAPI) -> None:
     app.add_middleware(
-        CORSMiddleware,
+        fastapi_cors.CORSMiddleware,
         allow_origins=[
             "http://127.0.0.1:5173",
             "http://127.0.0.1:5174",
@@ -85,15 +84,15 @@ def _configure_cors(app: FastAPI) -> None:
     )
 
 
-def _register_error_handlers(app: FastAPI) -> None:
-    @app.exception_handler(LocalDocsError)
+def _register_error_handlers(app: fastapi.FastAPI) -> None:
+    @app.exception_handler(exceptions.LocalDocsError)
     async def handle_local_docs_error(
-        request: Request,
-        exc: LocalDocsError,
-    ) -> JSONResponse:
+        request: fastapi.Request,
+        exc: exceptions.LocalDocsError,
+    ) -> fastapi_responses.JSONResponse:
         del request
         status_code = _status_code_for_error(exc)
-        return JSONResponse(
+        return fastapi_responses.JSONResponse(
             status_code=status_code,
             content={
                 "code": exc.code,
@@ -103,10 +102,14 @@ def _register_error_handlers(app: FastAPI) -> None:
         )
 
 
-def _status_code_for_error(exc: LocalDocsError) -> int:
-    if isinstance(exc, (ConfigurationError, DataFormatError)):
+def _status_code_for_error(exc: exceptions.LocalDocsError) -> int:
+    if isinstance(
+        exc, (exceptions.ConfigurationError, exceptions.DataFormatError)
+    ):
         return 400
-    if isinstance(exc, (ProviderUnavailableError, VectorStoreError)):
+    if isinstance(
+        exc, (exceptions.ProviderUnavailableError, exceptions.VectorStoreError)
+    ):
         return 503
     return 500
 

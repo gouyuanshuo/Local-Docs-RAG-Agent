@@ -1,38 +1,40 @@
 """Capabilities the agent runtimes expose as callable tools.
 
-Each function takes plain arguments and returns plain data so it can be wrapped by the
-Agents SDK or called directly by the basic runtime, and so the same capability is
-testable without an agent in the loop.
+Each function takes plain arguments and returns plain data so it can be wrapped
+by the Agents SDK or called directly by the basic runtime, and so the same
+capability is testable without an agent in the loop.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import datetime
 
-from local_docs_rag_agent.config import AppConfig
-from local_docs_rag_agent.rag.discovery import collect_document_paths
-from local_docs_rag_agent.rag.pipeline import retrieve
+from local_docs_rag_agent import config as app_config
+from local_docs_rag_agent.rag import discovery, pipeline
 
 
-def list_documents(config: AppConfig) -> list[str]:
+def list_documents(config: app_config.AppConfig) -> list[str]:
     """Return the POSIX paths of every document the agent can currently read."""
 
     return [
         path.as_posix()
-        for path in collect_document_paths(config.docs_dir, config.docs_exclude_patterns)
+        for path in discovery.collect_document_paths(
+            config.docs_dir, config.docs_exclude_patterns
+        )
     ]
 
 
 def search_documents(
-    config: AppConfig, query: str, top_k: int | None = None
+    config: app_config.AppConfig, query: str, top_k: int | None = None
 ) -> list[dict[str, str | float]]:
     """Search the index and return hits as plain data, with their source spans.
 
-    This goes through the full retrieval pipeline, reranking included, so the tool
-    cannot report a different ordering from the one an answer would have been built on.
+    This goes through the full retrieval pipeline, reranking included, so the
+    tool cannot report a different ordering from the one an answer would have
+    been built on.
     """
 
-    hits = retrieve(config, query, top_k or config.top_k).hits
+    hits = pipeline.retrieve(config, query, top_k or config.top_k).hits
     return [
         {
             "source_path": hit.chunk.source_path,
@@ -49,4 +51,4 @@ def search_documents(
 def get_system_time() -> str:
     """Return the current UTC time, so answers can reason about "today"."""
 
-    return datetime.now(UTC).isoformat()
+    return datetime.datetime.now(datetime.UTC).isoformat()

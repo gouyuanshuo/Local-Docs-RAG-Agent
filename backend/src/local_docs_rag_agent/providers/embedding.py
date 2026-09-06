@@ -1,10 +1,10 @@
 """OpenAI-compatible embedding provider with batching, retry, and a hash fallback.
 
 Requests are batched because hosted endpoints cap inputs per call, and transient
-failures are retried with exponential backoff before the provider gives up. On giving
-up it returns deterministic hash embeddings and reports `fallback`: those vectors keep
-local retrieval working offline, but they are not comparable with live vectors, which
-is why Qdrant ingest refuses them.
+failures are retried with exponential backoff before the provider gives up. On
+giving up it returns deterministic hash embeddings and reports `fallback`: those
+vectors keep local retrieval working offline, but they are not comparable with
+live vectors, which is why Qdrant ingest refuses them.
 """
 
 from __future__ import annotations
@@ -13,18 +13,14 @@ import hashlib
 import math
 import time
 
-from openai import OpenAI
+import openai
 
-from local_docs_rag_agent.models import ProviderStatus
-from local_docs_rag_agent.providers.base import EmbeddingProvider
-from local_docs_rag_agent.providers.errors import (
-    is_transient_provider_error,
-    provider_error_reason,
-)
-from local_docs_rag_agent.providers.openai_client import build_sync_openai_client
+from local_docs_rag_agent import models
+from local_docs_rag_agent.providers import base as provider_base
+from local_docs_rag_agent.providers import errors, openai_client
 
 
-class OpenAICompatibleEmbeddingProvider(EmbeddingProvider):
+class OpenAICompatibleEmbeddingProvider(provider_base.EmbeddingProvider):
     def __init__(
         self,
         api_key: str | None,
@@ -39,10 +35,12 @@ class OpenAICompatibleEmbeddingProvider(EmbeddingProvider):
     ) -> None:
         self._provider_label = provider_label.lower()
         self._trust_env = trust_env
-        self._status = ProviderStatus(provider=self._provider_label, mode="ready")
-        self._client: OpenAI | None = None
+        self._status = models.ProviderStatus(
+            provider=self._provider_label, mode="ready"
+        )
+        self._client: openai.OpenAI | None = None
         if api_key:
-            self._client = build_sync_openai_client(
+            self._client = openai_client.build_sync_openai_client(
                 api_key=api_key,
                 base_url=base_url,
                 trust_env=trust_env,
@@ -53,8 +51,10 @@ class OpenAICompatibleEmbeddingProvider(EmbeddingProvider):
         self._max_retries = max(0, max_retries)
         self._retry_backoff_ms = max(0, retry_backoff_ms)
         if not api_key:
-            self._status = ProviderStatus(
-                provider=self._provider_label, mode="fallback", reason="missing_api_key"
+            self._status = models.ProviderStatus(
+                provider=self._provider_label,
+                mode="fallback",
+                reason="missing_api_key",
             )
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
@@ -81,37 +81,51 @@ class OpenAICompatibleEmbeddingProvider(EmbeddingProvider):
                             input=batch,
                             dimensions=self._dimensions,
                         )
-                    batch_embeddings = [item.embedding for item in response.data]
+                    batch_embeddings = [
+                        item.embedding for item in response.data
+                    ]
                     if len(batch_embeddings) != len(batch):
                         raise RuntimeError(
                             "embedding_count_mismatch:"
-                            f"expected={len(batch)}:received={len(batch_embeddings)}"
+                            f"expected={len(batch)}:"
+                            f"received={len(batch_embeddings)}"
                         )
                     total_attempts += attempt
                     results.extend(batch_embeddings)
                     break
                 except Exception as exc:
-                    if is_transient_provider_error(exc) and attempt < self._max_retries:
+                    if (
+                        errors.is_transient_provider_error(exc)
+                        and attempt < self._max_retries
+                    ):
                         sleep_ms = self._retry_backoff_ms * (2**attempt)
                         if sleep_ms > 0:
                             time.sleep(sleep_ms / 1000.0)
                         attempt += 1
                         continue
-                    self._status = ProviderStatus(
+                    self._status = models.ProviderStatus(
                         provider=self._provider_label,
                         mode="fallback",
                         reason=_fallback_reason(
-                            exc=exc, attempts=attempt + 1, max_retries=self._max_retries
+                            exc=exc,
+                            attempts=attempt + 1,
+                            max_retries=self._max_retries,
                         ),
                     )
                     return [_hash_embed(text) for text in texts]
 
-        reason = f"recovered_after_retry:{total_attempts}" if total_attempts > 0 else None
-        self._status = ProviderStatus(provider=self._provider_label, mode="live", reason=reason)
+        reason = (
+            f"recovered_after_retry:{total_attempts}"
+            if total_attempts > 0
+            else None
+        )
+        self._status = models.ProviderStatus(
+            provider=self._provider_label, mode="live", reason=reason
+        )
         return results
 
     @property
-    def status(self) -> ProviderStatus:
+    def status(self) -> models.ProviderStatus:
         return self._status
 
 
@@ -135,9 +149,9 @@ def _hash_embed(text: str, size: int = 128) -> list[float]:
 
 def _fallback_reason(exc: Exception, attempts: int, max_retries: int) -> str:
     class_name = exc.__class__.__name__
-    if is_transient_provider_error(exc):
+    if errors.is_transient_provider_error(exc):
         return (
             f"provider_transient_error:{class_name}:retry_exhausted:{attempts}:"
             f"max_retries:{max_retries}"
         )
-    return provider_error_reason(exc)
+    return errors.provider_error_reason(exc)

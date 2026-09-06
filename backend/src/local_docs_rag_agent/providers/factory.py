@@ -1,19 +1,20 @@
 """The single construction point for configured providers.
 
-Everything else takes a built provider as an argument. That keeps `AppConfig` reading
-in one place and makes providers straightforward to substitute in tests.
+Everything else takes a built provider as an argument. That keeps `AppConfig`
+reading in one place and makes providers straightforward to substitute in tests.
 """
 
 from __future__ import annotations
 
-from local_docs_rag_agent.config import AppConfig
-from local_docs_rag_agent.providers.base import ChatProvider, EmbeddingProvider
-from local_docs_rag_agent.providers.chat import OpenAICompatibleChatProvider
-from local_docs_rag_agent.providers.embedding import OpenAICompatibleEmbeddingProvider
+from local_docs_rag_agent import config as app_config
+from local_docs_rag_agent.providers import base as provider_base
+from local_docs_rag_agent.providers import chat, embedding
 
 
-def build_chat_provider(config: AppConfig) -> ChatProvider:
-    return OpenAICompatibleChatProvider(
+def build_chat_provider(
+    config: app_config.AppConfig,
+) -> provider_base.ChatProvider:
+    return chat.OpenAICompatibleChatProvider(
         api_key=config.llm_api_key,
         model=config.llm_model,
         base_url=config.llm_base_url,
@@ -23,8 +24,10 @@ def build_chat_provider(config: AppConfig) -> ChatProvider:
     )
 
 
-def build_embedding_provider(config: AppConfig) -> EmbeddingProvider:
-    return OpenAICompatibleEmbeddingProvider(
+def build_embedding_provider(
+    config: app_config.AppConfig,
+) -> provider_base.EmbeddingProvider:
+    return embedding.OpenAICompatibleEmbeddingProvider(
         api_key=config.embedding_api_key,
         base_url=config.embedding_base_url,
         model=config.embedding_model,

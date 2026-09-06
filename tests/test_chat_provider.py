@@ -1,8 +1,8 @@
-from local_docs_rag_agent.providers.chat import OpenAICompatibleChatProvider
+from local_docs_rag_agent.providers import chat
 
 
 def test_fallback_answer_keeps_multiline_chunk_content() -> None:
-    provider = OpenAICompatibleChatProvider(
+    provider = chat.OpenAICompatibleChatProvider(
         api_key=None,
         model="unused",
         provider_label="test",

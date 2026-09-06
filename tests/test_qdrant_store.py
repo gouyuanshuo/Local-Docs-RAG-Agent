@@ -1,37 +1,36 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
+import types
 from typing import Any
 
 import pytest
 import qdrant_client
 
-from local_docs_rag_agent.exceptions import ProviderUnavailableError, VectorStoreError
-from local_docs_rag_agent.models import DocumentChunk, ProviderStatus
-from local_docs_rag_agent.providers.base import EmbeddingProvider
-from local_docs_rag_agent.rag.qdrant_store import (
-    QdrantChunkStore,
-    looks_like_qdrant_unreachable,
-    qdrant_operation_error,
-)
+from local_docs_rag_agent import exceptions, models
+from local_docs_rag_agent.providers import base as provider_base
+from local_docs_rag_agent.rag import qdrant_store
 
 
-class StubEmbeddingProvider(EmbeddingProvider):
+class StubEmbeddingProvider(provider_base.EmbeddingProvider):
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         return [[1.0] for _ in texts]
 
     @property
-    def status(self) -> ProviderStatus:
-        return ProviderStatus(provider="stub", mode="live")
+    def status(self) -> models.ProviderStatus:
+        return models.ProviderStatus(provider="stub", mode="live")
 
 
 class FallbackEmbeddingProvider(StubEmbeddingProvider):
     @property
-    def status(self) -> ProviderStatus:
-        return ProviderStatus(provider="stub", mode="fallback", reason="offline")
+    def status(self) -> models.ProviderStatus:
+        return models.ProviderStatus(
+            provider="stub", mode="fallback", reason="offline"
+        )
 
 
-def test_qdrant_client_receives_proxy_trust_setting(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_qdrant_client_receives_proxy_trust_setting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     captured: dict[str, Any] = {}
 
     class FakeQdrantClient:
@@ -40,7 +39,7 @@ def test_qdrant_client_receives_proxy_trust_setting(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr(qdrant_client, "QdrantClient", FakeQdrantClient)
 
-    QdrantChunkStore(
+    qdrant_store.QdrantChunkStore(
         url="https://qdrant.example",
         api_key="test-key",
         collection_name="test-collection",
@@ -54,11 +53,14 @@ def test_qdrant_client_receives_proxy_trust_setting(monkeypatch: pytest.MonkeyPa
 
 
 def test_winerror_10054_is_normalized_as_unreachable() -> None:
-    message = "[WinError 10054] An existing connection was forcibly closed by the remote host"
+    message = (
+        "[WinError 10054] An existing connection was forcibly closed "
+        "by the remote host"
+    )
 
-    assert looks_like_qdrant_unreachable(message)
+    assert qdrant_store.looks_like_qdrant_unreachable(message)
 
-    error = qdrant_operation_error(
+    error = qdrant_store.qdrant_operation_error(
         operation="collection_exists",
         url="https://qdrant.example",
         collection_name="test-collection",
@@ -70,8 +72,8 @@ def test_winerror_10054_is_normalized_as_unreachable() -> None:
     assert "EXTERNAL_HTTP_TRUST_ENV=false" in str(error)
 
 
-def test_unreachable_error_knows_when_environment_proxy_is_already_disabled() -> None:
-    error = qdrant_operation_error(
+def test_unreachable_error_knows_proxy_is_already_disabled() -> None:
+    error = qdrant_store.qdrant_operation_error(
         operation="collection_exists",
         url="https://qdrant.example",
         collection_name="test-collection",
@@ -82,7 +84,9 @@ def test_unreachable_error_knows_when_environment_proxy_is_already_disabled() ->
     assert "already disabled" in str(error)
 
 
-def test_qdrant_search_rejects_fallback_embedding_vector(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_qdrant_search_rejects_fallback_embedding_vector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     class FakeQdrantClient:
         def __init__(self, **kwargs: Any) -> None:
             self.query_called = False
@@ -91,7 +95,7 @@ def test_qdrant_search_rejects_fallback_embedding_vector(monkeypatch: pytest.Mon
             self.query_called = True
 
     monkeypatch.setattr(qdrant_client, "QdrantClient", FakeQdrantClient)
-    store = QdrantChunkStore(
+    store = qdrant_store.QdrantChunkStore(
         url="https://qdrant.example",
         api_key=None,
         collection_name="test",
@@ -99,22 +103,28 @@ def test_qdrant_search_rejects_fallback_embedding_vector(monkeypatch: pytest.Mon
         embedding_provider=FallbackEmbeddingProvider(),
     )
 
-    with pytest.raises(ProviderUnavailableError, match="live embedding"):
+    with pytest.raises(
+        exceptions.ProviderUnavailableError, match="live embedding"
+    ):
         store.search("question", top_k=3)
 
     assert store._client.query_called is False
 
 
-def test_qdrant_save_rejects_chunk_without_embedding(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(qdrant_client, "QdrantClient", lambda **kwargs: object())
-    store = QdrantChunkStore(
+def test_qdrant_save_rejects_chunk_without_embedding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        qdrant_client, "QdrantClient", lambda **kwargs: object()
+    )
+    store = qdrant_store.QdrantChunkStore(
         url="https://qdrant.example",
         api_key=None,
         collection_name="test",
         timeout_s=10,
         embedding_provider=StubEmbeddingProvider(),
     )
-    chunk = DocumentChunk(
+    chunk = models.DocumentChunk(
         chunk_id="one",
         source_path="doc.md",
         title="Doc",
@@ -124,13 +134,15 @@ def test_qdrant_save_rejects_chunk_without_embedding(monkeypatch: pytest.MonkeyP
         end_char=7,
     )
 
-    with pytest.raises(VectorStoreError) as error:
+    with pytest.raises(exceptions.VectorStoreError) as error:
         store.save([chunk])
 
     assert error.value.reason_code == "invalid_vectors"
 
 
-def test_qdrant_load_paginates_until_offset_is_exhausted(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_qdrant_load_paginates_until_offset_is_exhausted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     payloads = [
         {
             "chunk_id": chunk_id,
@@ -149,15 +161,17 @@ def test_qdrant_load_paginates_until_offset_is_exhausted(monkeypatch: pytest.Mon
         def __init__(self, **kwargs: Any) -> None:
             self.offsets: list[object] = []
 
-        def scroll(self, **kwargs: Any) -> tuple[list[SimpleNamespace], object]:
+        def scroll(
+            self, **kwargs: Any
+        ) -> tuple[list[types.SimpleNamespace], object]:
             offset = kwargs.get("offset")
             self.offsets.append(offset)
             if offset is None:
-                return [SimpleNamespace(payload=payloads[0])], "page-2"
-            return [SimpleNamespace(payload=payloads[1])], None
+                return [types.SimpleNamespace(payload=payloads[0])], "page-2"
+            return [types.SimpleNamespace(payload=payloads[1])], None
 
     monkeypatch.setattr(qdrant_client, "QdrantClient", FakeQdrantClient)
-    store = QdrantChunkStore(
+    store = qdrant_store.QdrantChunkStore(
         url="https://qdrant.example",
         api_key=None,
         collection_name="test",

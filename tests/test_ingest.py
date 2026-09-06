@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+import pathlib
 
 import pytest
 
-from local_docs_rag_agent.config import AppConfig
-from local_docs_rag_agent.exceptions import ConfigurationError
-from local_docs_rag_agent.models import DocumentChunk, ProviderStatus
-from local_docs_rag_agent.rag import ingest
+from local_docs_rag_agent import config as app_config
+from local_docs_rag_agent import exceptions, models
+from local_docs_rag_agent.providers import factory as provider_factory
+from local_docs_rag_agent.rag import ingest, qdrant_store, store_factory
 
 
 class FakeEmbeddingProvider:
@@ -16,14 +16,14 @@ class FakeEmbeddingProvider:
         return [[1.0, 0.0] for _ in texts]
 
     @property
-    def status(self) -> ProviderStatus:
-        return ProviderStatus(provider="fake", mode="live")
+    def status(self) -> models.ProviderStatus:
+        return models.ProviderStatus(provider="fake", mode="live")
 
 
 class FakeQdrantStore:
     def __init__(self, collection_exists: bool) -> None:
         self._collection_exists = collection_exists
-        self.saved_chunks: list[DocumentChunk] = []
+        self.saved_chunks: list[models.DocumentChunk] = []
         self.removed_source_paths: list[str] = []
         self.replaced_source_paths: list[str] = []
 
@@ -32,7 +32,7 @@ class FakeQdrantStore:
 
     def save(
         self,
-        chunks: list[DocumentChunk],
+        chunks: list[models.DocumentChunk],
         removed_source_paths: list[str] | None = None,
         replaced_source_paths: list[str] | None = None,
     ) -> None:
@@ -41,14 +41,17 @@ class FakeQdrantStore:
         self.replaced_source_paths = replaced_source_paths or []
 
 
-def _qdrant_config(tmp_path: Path, docs_dir: Path, manifest_path: Path) -> AppConfig:
-    return AppConfig.from_env().with_overrides(
+def _qdrant_config(
+    tmp_path: pathlib.Path, docs_dir: pathlib.Path, manifest_path: pathlib.Path
+) -> app_config.AppConfig:
+    return app_config.AppConfig.from_env().with_overrides(
         docs_dir=docs_dir,
         docs_exclude_patterns=[],
         index_path=tmp_path / "chunks.jsonl",
         ingest_manifest_path=manifest_path,
-        # Pinned so the index fingerprint records embedding_mode="live" regardless of
-        # whether the machine running the test has embedding credentials configured.
+        # Pinned so the index fingerprint records embedding_mode="live"
+        # regardless of whether the machine running the test has embedding
+        # credentials configured.
         embedding_api_key="test-embedding-key",
         vector_backend="qdrant",
         qdrant_url="https://qdrant.example",
@@ -63,17 +66,21 @@ def _install_fakes(
     monkeypatch: pytest.MonkeyPatch,
     store: FakeQdrantStore,
 ) -> None:
-    monkeypatch.setattr(ingest, "QdrantChunkStore", FakeQdrantStore)
-    monkeypatch.setattr(ingest, "build_embedding_provider", lambda config: FakeEmbeddingProvider())
+    monkeypatch.setattr(qdrant_store, "QdrantChunkStore", FakeQdrantStore)
     monkeypatch.setattr(
-        ingest,
+        provider_factory,
+        "build_embedding_provider",
+        lambda config: FakeEmbeddingProvider(),
+    )
+    monkeypatch.setattr(
+        store_factory,
         "build_store",
         lambda config, embedding_provider=None: store,
     )
 
 
 def test_missing_collection_reingests_unchanged_manifest(
-    tmp_path: Path,
+    tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     docs_dir = tmp_path / "docs"
@@ -98,7 +105,9 @@ def test_missing_collection_reingests_unchanged_manifest(
     store = FakeQdrantStore(collection_exists=False)
     _install_fakes(monkeypatch, store)
 
-    chunks = ingest.ingest_documents(_qdrant_config(tmp_path, docs_dir, manifest_path))
+    chunks = ingest.ingest_documents(
+        _qdrant_config(tmp_path, docs_dir, manifest_path)
+    )
 
     assert chunks
     assert store.saved_chunks == chunks
@@ -106,7 +115,7 @@ def test_missing_collection_reingests_unchanged_manifest(
 
 
 def test_existing_collection_skips_unchanged_document(
-    tmp_path: Path,
+    tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     docs_dir = tmp_path / "docs"
@@ -144,7 +153,7 @@ def test_existing_collection_skips_unchanged_document(
 
 
 def test_incremental_ingest_deletes_stale_source(
-    tmp_path: Path,
+    tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     docs_dir = tmp_path / "docs"
@@ -167,14 +176,16 @@ def test_incremental_ingest_deletes_stale_source(
     store = FakeQdrantStore(collection_exists=True)
     _install_fakes(monkeypatch, store)
 
-    chunks = ingest.ingest_documents(_qdrant_config(tmp_path, docs_dir, manifest_path))
+    chunks = ingest.ingest_documents(
+        _qdrant_config(tmp_path, docs_dir, manifest_path)
+    )
 
     assert chunks == []
     assert store.removed_source_paths == [removed_source]
 
 
 def test_changed_document_that_becomes_empty_deletes_old_chunks(
-    tmp_path: Path,
+    tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     docs_dir = tmp_path / "docs"
@@ -198,7 +209,9 @@ def test_changed_document_that_becomes_empty_deletes_old_chunks(
     store = FakeQdrantStore(collection_exists=True)
     _install_fakes(monkeypatch, store)
 
-    chunks = ingest.ingest_documents(_qdrant_config(tmp_path, docs_dir, manifest_path))
+    chunks = ingest.ingest_documents(
+        _qdrant_config(tmp_path, docs_dir, manifest_path)
+    )
 
     assert chunks == []
     assert store.replaced_source_paths == [source_path.as_posix()]
@@ -207,34 +220,36 @@ def test_changed_document_that_becomes_empty_deletes_old_chunks(
 
 
 def test_missing_docs_directory_does_not_overwrite_index_or_manifest(
-    tmp_path: Path,
+    tmp_path: pathlib.Path,
 ) -> None:
     missing_docs = tmp_path / "missing"
     index_path = tmp_path / "chunks.jsonl"
     manifest_path = tmp_path / "manifest.json"
     index_path.write_text("existing-index", encoding="utf-8")
     manifest_path.write_text("existing-manifest", encoding="utf-8")
-    config = AppConfig.from_env().with_overrides(
+    config = app_config.AppConfig.from_env().with_overrides(
         docs_dir=missing_docs,
         index_path=index_path,
         ingest_manifest_path=manifest_path,
         vector_backend="local",
     )
 
-    with pytest.raises(ConfigurationError, match="does not exist"):
+    with pytest.raises(exceptions.ConfigurationError, match="does not exist"):
         ingest.ingest_documents(config)
 
     assert index_path.read_text(encoding="utf-8") == "existing-index"
     assert manifest_path.read_text(encoding="utf-8") == "existing-manifest"
 
 
-def test_ensure_index_rebuilds_when_chunk_configuration_changes(tmp_path: Path) -> None:
+def test_ensure_index_rebuilds_when_chunk_configuration_changes(
+    tmp_path: pathlib.Path,
+) -> None:
     docs_dir = tmp_path / "docs"
     docs_dir.mkdir()
     (docs_dir / "sample.txt").write_text("a" * 80, encoding="utf-8")
     index_path = tmp_path / "chunks.jsonl"
     manifest_path = tmp_path / "manifest.json"
-    config = AppConfig.from_env().with_overrides(
+    config = app_config.AppConfig.from_env().with_overrides(
         docs_dir=docs_dir,
         docs_exclude_patterns=[],
         index_path=index_path,

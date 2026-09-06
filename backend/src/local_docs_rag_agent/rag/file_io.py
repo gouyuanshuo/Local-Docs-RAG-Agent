@@ -1,24 +1,25 @@
 """Atomic text-file replacement for the index and the manifest.
 
-Both files are rewritten in full on every ingest. Writing to a sibling temporary file
-and replacing the target means an interrupted run leaves the previous version intact
-rather than a truncated one that would fail to parse on the next read.
+Both files are rewritten in full on every ingest. Writing to a sibling temporary
+file and replacing the target means an interrupted run leaves the previous
+version intact rather than a truncated one that would fail to parse on the next
+read.
 """
 
 from __future__ import annotations
 
 import os
-from pathlib import Path
-from tempfile import NamedTemporaryFile
+import pathlib
+import tempfile
 
 
-def atomic_write_text(path: Path, content: str) -> None:
+def atomic_write_text(path: pathlib.Path, content: str) -> None:
     """Write text through a sibling temporary file, then atomically replace."""
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path: Path | None = None
+    temporary_path: pathlib.Path | None = None
     try:
-        with NamedTemporaryFile(
+        with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
             dir=path.parent,
@@ -26,7 +27,7 @@ def atomic_write_text(path: Path, content: str) -> None:
             suffix=".tmp",
             delete=False,
         ) as handle:
-            temporary_path = Path(handle.name)
+            temporary_path = pathlib.Path(handle.name)
             handle.write(content)
             handle.flush()
             os.fsync(handle.fileno())

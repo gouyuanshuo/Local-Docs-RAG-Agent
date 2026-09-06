@@ -1,8 +1,10 @@
-"""Retrieval-augmented generation: document discovery, chunking, storage, and ingest.
+"""Retrieval-augmented generation: document discovery, chunking, storage, and
+ingest.
 
-This module is the package facade. Code outside `rag` should import from here rather
-than reaching into individual modules, so the internal split between the protocol, the
-two store implementations, and the ingest pipeline stays free to change.
+This module is the package facade. Code outside `rag` should import from here
+rather than reaching into individual modules, so the internal split between the
+protocol, the two store implementations, and the ingest pipeline stays free to
+change.
 
 The dependency direction inside the package runs one way:
 
@@ -13,10 +15,10 @@ The dependency direction inside the package runs one way:
                                                                      -> scoring
                                               -> rerank -> llm_rerank
 
-`base` and `models` sit at the bottom and import nothing from the layers above them.
-`pipeline` sits at the top: it is the only module that knows both retrieval stages
-exist, which is what keeps a store unaware of reranking and a reranker unaware of
-backends.
+`base` and `models` sit at the bottom and import nothing from the layers above
+them. `pipeline` sits at the top: it is the only module that knows both
+retrieval stages exist, which is what keeps a store unaware of reranking and a
+reranker unaware of backends.
 """
 
 from local_docs_rag_agent.rag.base import ChunkStore
@@ -32,7 +34,10 @@ from local_docs_rag_agent.rag.pipeline import build_reranker, retrieve
 from local_docs_rag_agent.rag.qdrant_store import QdrantChunkStore
 from local_docs_rag_agent.rag.rerank import IdentityReranker, Reranker
 from local_docs_rag_agent.rag.retrieval import RetrievalSettings, rank_chunks
-from local_docs_rag_agent.rag.store_factory import build_store, retrieval_settings
+from local_docs_rag_agent.rag.store_factory import (
+    build_store,
+    retrieval_settings,
+)
 
 __all__ = [
     "SUPPORTED_EXTENSIONS",

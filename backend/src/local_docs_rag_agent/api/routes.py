@@ -1,59 +1,39 @@
 """Maps HTTP requests to application operations.
 
-Handlers stay thin on purpose: they read a fresh `AppConfig`, call one application
-function, and hand the result to a presenter. Retrieval and provider policy live
-behind those calls, so the CLI can reach the same behaviour without going through HTTP.
+Handlers stay thin on purpose: they read a fresh `AppConfig`, call one
+application function, and hand the result to a presenter. Retrieval and provider
+policy live behind those calls, so the CLI can reach the same behaviour without
+going through HTTP.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import datetime
 
-from fastapi import APIRouter
+import fastapi
 
-from local_docs_rag_agent.agent import LocalDocsAgent
-from local_docs_rag_agent.api.schemas import (
-    AppInfoResponse,
-    AskRequest,
-    AskResponse,
-    DocumentsResponse,
-    EvalCompareRequest,
-    EvalCompareResponse,
-    EvalRequest,
-    EvalSummaryResponse,
-    HealthResponse,
-    IngestResponse,
-)
-from local_docs_rag_agent.config import AppConfig
-from local_docs_rag_agent.evals.comparison import (
-    default_chunk_strategies,
-    default_rerankers,
-    default_retrieval_strategies,
-    default_vector_backends,
-    run_eval_matrix,
-)
-from local_docs_rag_agent.evals.harness import run_eval
-from local_docs_rag_agent.presenters import serialize_answer, serialize_eval_summary
-from local_docs_rag_agent.rag import ensure_index, ingest_documents
-from local_docs_rag_agent.tools import list_documents
+from local_docs_rag_agent import agent, presenters, rag, tools
+from local_docs_rag_agent import config as app_config
+from local_docs_rag_agent.api import schemas
+from local_docs_rag_agent.evals import comparison, harness
 
-router = APIRouter(prefix="/api")
+router = fastapi.APIRouter(prefix="/api")
 API_NAME = "Local Docs RAG Agent"
 
 
-@router.get("/health", response_model=HealthResponse)
-def health() -> HealthResponse:
-    return HealthResponse(
+@router.get("/health", response_model=schemas.HealthResponse)
+def health() -> schemas.HealthResponse:
+    return schemas.HealthResponse(
         status="ok",
-        backend_time_utc=datetime.now(UTC).isoformat(),
+        backend_time_utc=datetime.datetime.now(datetime.UTC).isoformat(),
     )
 
 
-@router.get("/info", response_model=AppInfoResponse)
-def info() -> AppInfoResponse:
-    config = AppConfig.from_env()
-    documents = list_documents(config)
-    return AppInfoResponse.model_validate(
+@router.get("/info", response_model=schemas.AppInfoResponse)
+def info() -> schemas.AppInfoResponse:
+    config = app_config.AppConfig.from_env()
+    documents = tools.list_documents(config)
+    return schemas.AppInfoResponse.model_validate(
         {
             "name": API_NAME,
             "runtime": config.agent_runtime,
@@ -77,53 +57,67 @@ def info() -> AppInfoResponse:
     )
 
 
-@router.get("/documents", response_model=DocumentsResponse)
-def documents() -> DocumentsResponse:
-    docs = list_documents(AppConfig.from_env())
-    return DocumentsResponse(count=len(docs), documents=docs)
+@router.get("/documents", response_model=schemas.DocumentsResponse)
+def documents() -> schemas.DocumentsResponse:
+    docs = tools.list_documents(app_config.AppConfig.from_env())
+    return schemas.DocumentsResponse(count=len(docs), documents=docs)
 
 
-@router.post("/ingest", response_model=IngestResponse)
-def ingest() -> IngestResponse:
-    config = AppConfig.from_env()
-    chunks = ingest_documents(config)
-    return IngestResponse.model_validate(
+@router.post("/ingest", response_model=schemas.IngestResponse)
+def ingest() -> schemas.IngestResponse:
+    config = app_config.AppConfig.from_env()
+    chunks = rag.ingest_documents(config)
+    return schemas.IngestResponse.model_validate(
         {"num_chunks": len(chunks), "vector_backend": config.vector_backend}
     )
 
 
-@router.post("/ask", response_model=AskResponse)
-def ask(payload: AskRequest) -> AskResponse:
-    config = AppConfig.from_env().with_runtime(payload.runtime)
-    ensure_index(config)
-    answer = LocalDocsAgent(config).answer(payload.question)
-    return AskResponse.model_validate(serialize_answer(answer))
-
-
-@router.post("/eval", response_model=EvalSummaryResponse)
-def evaluate(payload: EvalRequest) -> EvalSummaryResponse:
-    config = AppConfig.from_env().with_runtime(payload.runtime)
-    ensure_index(config)
-    results = run_eval(config)
-    return EvalSummaryResponse.model_validate(
-        serialize_eval_summary(results, runtime=config.agent_runtime, config=config)
+@router.post("/ask", response_model=schemas.AskResponse)
+def ask(payload: schemas.AskRequest) -> schemas.AskResponse:
+    config = app_config.AppConfig.from_env().with_runtime(payload.runtime)
+    rag.ensure_index(config)
+    answer = agent.LocalDocsAgent(config).answer(payload.question)
+    return schemas.AskResponse.model_validate(
+        presenters.serialize_answer(answer)
     )
 
 
-@router.post("/eval/compare", response_model=EvalCompareResponse)
-def compare_eval(payload: EvalCompareRequest) -> EvalCompareResponse:
-    config = AppConfig.from_env()
-    comparison = run_eval_matrix(
+@router.post("/eval", response_model=schemas.EvalSummaryResponse)
+def evaluate(payload: schemas.EvalRequest) -> schemas.EvalSummaryResponse:
+    config = app_config.AppConfig.from_env().with_runtime(payload.runtime)
+    rag.ensure_index(config)
+    results = harness.run_eval(config)
+    return schemas.EvalSummaryResponse.model_validate(
+        presenters.serialize_eval_summary(
+            results, runtime=config.agent_runtime, config=config
+        )
+    )
+
+
+@router.post("/eval/compare", response_model=schemas.EvalCompareResponse)
+def compare_eval(
+    payload: schemas.EvalCompareRequest,
+) -> schemas.EvalCompareResponse:
+    config = app_config.AppConfig.from_env()
+    report = comparison.run_eval_matrix(
         config=config,
         runtimes=list(payload.runtimes or [config.agent_runtime]),
-        chunk_strategies=list(payload.chunk_strategies or default_chunk_strategies()),
-        vector_backends=list(payload.vector_backends or default_vector_backends(config)),
+        chunk_strategies=list(
+            payload.chunk_strategies or comparison.default_chunk_strategies()
+        ),
+        vector_backends=list(
+            payload.vector_backends
+            or comparison.default_vector_backends(config)
+        ),
         top_ks=list(payload.top_ks or [config.top_k]),
         chunk_sizes=list(payload.chunk_sizes or [config.chunk_size]),
         chunk_overlaps=list(payload.chunk_overlaps or [config.chunk_overlap]),
         retrieval_strategies=list(
-            payload.retrieval_strategies or default_retrieval_strategies()
+            payload.retrieval_strategies
+            or comparison.default_retrieval_strategies()
         ),
-        rerankers=list(payload.rerankers or default_rerankers(config)),
+        rerankers=list(
+            payload.rerankers or comparison.default_rerankers(config)
+        ),
     )
-    return EvalCompareResponse.model_validate(comparison)
+    return schemas.EvalCompareResponse.model_validate(report)

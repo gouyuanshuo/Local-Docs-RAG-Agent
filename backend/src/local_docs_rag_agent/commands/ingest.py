@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from local_docs_rag_agent.config import AppConfig
-from local_docs_rag_agent.rag import ingest_documents
+from local_docs_rag_agent import config as app_config
+from local_docs_rag_agent import rag
 
 
-def run_ingest(config: AppConfig) -> None:
-    chunks = ingest_documents(config)
+def run_ingest(config: app_config.AppConfig) -> None:
+    chunks = rag.ingest_documents(config)
     print(f"Ingested {len(chunks)} chunks into {config.vector_backend} store.")

@@ -1,40 +1,43 @@
 """Builds the configured chunk store.
 
-This is the only place that turns `VECTOR_BACKEND` into a concrete store, so ingest,
-retrieval, the agent tools, and the connectivity scripts all reach the same backend
-with the same embedding provider. Adding a backend means adding a branch here and an
-implementation of `ChunkStore` — nothing else needs to know it exists.
+This is the only place that turns `VECTOR_BACKEND` into a concrete store, so
+ingest, retrieval, the agent tools, and the connectivity scripts all reach the
+same backend with the same embedding provider. Adding a backend means adding a
+branch here and an implementation of `ChunkStore` — nothing else needs to know
+it exists.
 """
 
 from __future__ import annotations
 
-from local_docs_rag_agent.config import AppConfig
-from local_docs_rag_agent.exceptions import ConfigurationError
-from local_docs_rag_agent.providers.base import EmbeddingProvider
-from local_docs_rag_agent.providers.factory import build_embedding_provider
-from local_docs_rag_agent.rag.base import ChunkStore
-from local_docs_rag_agent.rag.local_store import LocalJsonlChunkStore
-from local_docs_rag_agent.rag.qdrant_store import QdrantChunkStore
-from local_docs_rag_agent.rag.retrieval import RetrievalSettings
+from local_docs_rag_agent import config as app_config
+from local_docs_rag_agent import exceptions
+from local_docs_rag_agent.providers import base as provider_base
+from local_docs_rag_agent.providers import factory as provider_factory
+from local_docs_rag_agent.rag import base as rag_base
+from local_docs_rag_agent.rag import local_store, qdrant_store, retrieval
 
 
 def build_store(
-    config: AppConfig,
-    embedding_provider: EmbeddingProvider | None = None,
-) -> ChunkStore:
+    config: app_config.AppConfig,
+    embedding_provider: provider_base.EmbeddingProvider | None = None,
+) -> rag_base.ChunkStore:
     """Return the chunk store selected by `config`.
 
-    Callers that already hold an embedding provider should pass it, so a single ingest
-    run reports one coherent provider status instead of building a second client whose
-    health is tracked separately.
+    Callers that already hold an embedding provider should pass it, so a single
+    ingest run reports one coherent provider status instead of building a second
+    client whose health is tracked separately.
     """
 
-    provider = embedding_provider or build_embedding_provider(config)
+    provider = embedding_provider or provider_factory.build_embedding_provider(
+        config
+    )
     settings = retrieval_settings(config)
     if config.vector_backend == "qdrant":
         if not config.qdrant_url:
-            raise ConfigurationError("QDRANT_URL must be set when VECTOR_BACKEND=qdrant")
-        return QdrantChunkStore(
+            raise exceptions.ConfigurationError(
+                "QDRANT_URL must be set when VECTOR_BACKEND=qdrant"
+            )
+        return qdrant_store.QdrantChunkStore(
             url=config.qdrant_url,
             api_key=config.qdrant_api_key,
             collection_name=config.qdrant_collection,
@@ -43,17 +46,19 @@ def build_store(
             trust_env=config.external_http_trust_env,
             settings=settings,
         )
-    return LocalJsonlChunkStore(
+    return local_store.LocalJsonlChunkStore(
         config.index_path,
         embedding_provider=provider,
         settings=settings,
     )
 
 
-def retrieval_settings(config: AppConfig) -> RetrievalSettings:
+def retrieval_settings(
+    config: app_config.AppConfig,
+) -> retrieval.RetrievalSettings:
     """Project the ranking knobs out of `config` for the stores to consume."""
 
-    return RetrievalSettings(
+    return retrieval.RetrievalSettings(
         strategy=config.retrieval_strategy,
         candidate_k=config.retrieval_candidate_k,
         rrf_k=config.rrf_k,

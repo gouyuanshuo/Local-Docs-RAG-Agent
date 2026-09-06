@@ -1,22 +1,21 @@
 """OpenAI-compatible chat provider with an explicit extractive fallback.
 
-When no key is configured, or a request fails or returns nothing, the provider answers
-by quoting the retrieved context instead of raising. The answer is prefixed with the
-reason and the status is set to `fallback`, so a degraded answer is always labelled as
-one rather than passing for a live model response.
+When no key is configured, or a request fails or returns nothing, the provider
+answers by quoting the retrieved context instead of raising. The answer is
+prefixed with the reason and the status is set to `fallback`, so a degraded
+answer is always labelled as one rather than passing for a live model response.
 """
 
 from __future__ import annotations
 
 import re
-from textwrap import dedent
+import textwrap
 
-from openai import OpenAI
+import openai
 
-from local_docs_rag_agent.models import ProviderStatus
-from local_docs_rag_agent.providers.base import ChatProvider
-from local_docs_rag_agent.providers.errors import provider_error_reason
-from local_docs_rag_agent.providers.openai_client import build_sync_openai_client
+from local_docs_rag_agent import models
+from local_docs_rag_agent.providers import base as provider_base
+from local_docs_rag_agent.providers import errors, openai_client
 
 SYSTEM_INSTRUCTIONS = (
     "You are a local-document QA agent. "
@@ -24,10 +23,12 @@ SYSTEM_INSTRUCTIONS = (
     "If the context is insufficient, say what is missing instead of guessing. "
     "Keep the answer concise and cite source ids inline like [S1], [S2]."
 )
-CONTEXT_CONTENT_PATTERN = re.compile(r"(?ms)^content:\s*(.*?)(?=^\[S\d+\]\s*$|\Z)")
+CONTEXT_CONTENT_PATTERN = re.compile(
+    r"(?ms)^content:\s*(.*?)(?=^\[S\d+\]\s*$|\Z)"
+)
 
 
-class OpenAICompatibleChatProvider(ChatProvider):
+class OpenAICompatibleChatProvider(provider_base.ChatProvider):
     def __init__(
         self,
         api_key: str | None,
@@ -41,16 +42,18 @@ class OpenAICompatibleChatProvider(ChatProvider):
         self._api_style = api_style
         self._provider_label = provider_label.lower()
         self._trust_env = trust_env
-        self._status = ProviderStatus(provider=self._provider_label, mode="ready")
-        self._client: OpenAI | None = None
+        self._status = models.ProviderStatus(
+            provider=self._provider_label, mode="ready"
+        )
+        self._client: openai.OpenAI | None = None
         if api_key:
-            self._client = build_sync_openai_client(
+            self._client = openai_client.build_sync_openai_client(
                 api_key=api_key,
                 base_url=base_url,
                 trust_env=trust_env,
             )
         if not api_key:
-            self._status = ProviderStatus(
+            self._status = models.ProviderStatus(
                 provider=self._provider_label,
                 mode="fallback",
                 reason="missing_api_key",
@@ -60,11 +63,12 @@ class OpenAICompatibleChatProvider(ChatProvider):
         if not self._client:
             return self._fallback_answer(question=question, context=context)
 
-        prompt = dedent(
+        prompt = textwrap.dedent(
             f"""
             You are a local-document QA agent.
             Answer the user's question using only the provided context.
-            If the context is insufficient, say what is missing instead of guessing.
+            If the context is insufficient, say what is missing
+            instead of guessing.
             Keep the answer concise and cite source ids inline like [S1], [S2].
 
             Question:
@@ -78,18 +82,20 @@ class OpenAICompatibleChatProvider(ChatProvider):
         try:
             output_text = self._request_answer(prompt)
         except Exception as exc:
-            self._status = ProviderStatus(
+            self._status = models.ProviderStatus(
                 provider=self._provider_label,
                 mode="fallback",
-                reason=provider_error_reason(exc),
+                reason=errors.provider_error_reason(exc),
             )
             return self._fallback_answer(question=question, context=context)
 
         if output_text:
-            self._status = ProviderStatus(provider=self._provider_label, mode="live")
+            self._status = models.ProviderStatus(
+                provider=self._provider_label, mode="live"
+            )
             return output_text
 
-        self._status = ProviderStatus(
+        self._status = models.ProviderStatus(
             provider=self._provider_label,
             mode="fallback",
             reason="empty_provider_output",
@@ -97,7 +103,7 @@ class OpenAICompatibleChatProvider(ChatProvider):
         return self._fallback_answer(question=question, context=context)
 
     @property
-    def status(self) -> ProviderStatus:
+    def status(self) -> models.ProviderStatus:
         return self._status
 
     def _request_answer(self, prompt: str) -> str:
@@ -113,7 +119,9 @@ class OpenAICompatibleChatProvider(ChatProvider):
             )
             return (completion.choices[0].message.content or "").strip()
 
-        response = self._client.responses.create(model=self._model, input=prompt)
+        response = self._client.responses.create(
+            model=self._model, input=prompt
+        )
         return str(response.output_text).strip()
 
     def _fallback_answer(self, question: str, context: str) -> str:

@@ -1,16 +1,16 @@
-from pathlib import Path
+import pathlib
 
 import pytest
 
-from local_docs_rag_agent.exceptions import ConfigurationError
-from local_docs_rag_agent.rag.chunker import chunk_text
+from local_docs_rag_agent import exceptions
+from local_docs_rag_agent.rag import chunker
 
 
 def test_fixed_chunk_offsets_refer_to_original_text() -> None:
     source_text = "   leading text followed by more content   "
 
-    chunks = chunk_text(
-        source_path=Path("sample.txt"),
+    chunks = chunker.chunk_text(
+        source_path=pathlib.Path("sample.txt"),
         text=source_text,
         chunk_size=20,
         chunk_overlap=5,
@@ -18,7 +18,10 @@ def test_fixed_chunk_offsets_refer_to_original_text() -> None:
     )
 
     assert chunks[0].start_char == 3
-    assert all(chunk.text == source_text[chunk.start_char : chunk.end_char] for chunk in chunks)
+    assert all(
+        chunk.text == source_text[chunk.start_char : chunk.end_char]
+        for chunk in chunks
+    )
 
 
 @pytest.mark.parametrize(
@@ -29,9 +32,9 @@ def test_invalid_chunk_parameters_are_rejected(
     chunk_size: int,
     chunk_overlap: int,
 ) -> None:
-    with pytest.raises(ConfigurationError):
-        chunk_text(
-            source_path=Path("sample.txt"),
+    with pytest.raises(exceptions.ConfigurationError):
+        chunker.chunk_text(
+            source_path=pathlib.Path("sample.txt"),
             text="content",
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
@@ -39,9 +42,9 @@ def test_invalid_chunk_parameters_are_rejected(
 
 
 def test_unknown_chunk_strategy_is_rejected() -> None:
-    with pytest.raises(ConfigurationError, match="strategy"):
-        chunk_text(
-            source_path=Path("sample.txt"),
+    with pytest.raises(exceptions.ConfigurationError, match="strategy"):
+        chunker.chunk_text(
+            source_path=pathlib.Path("sample.txt"),
             text="content",
             chunk_size=10,
             chunk_overlap=2,
@@ -50,8 +53,8 @@ def test_unknown_chunk_strategy_is_rejected() -> None:
 
 
 def test_long_paragraph_is_split_to_configured_size() -> None:
-    chunks = chunk_text(
-        source_path=Path("sample.txt"),
+    chunks = chunker.chunk_text(
+        source_path=pathlib.Path("sample.txt"),
         text="a" * 95,
         chunk_size=30,
         chunk_overlap=5,

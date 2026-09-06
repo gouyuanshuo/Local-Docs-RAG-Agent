@@ -1,16 +1,18 @@
 from __future__ import annotations
 
-from pathlib import Path
+import pathlib
 
 import pytest
-from fastapi.testclient import TestClient
+from fastapi import testclient as fastapi_testclient
 
-from local_docs_rag_agent.api.app import create_app
+from local_docs_rag_agent.api import app as api_app
 
 
-def test_info_exposes_external_http_proxy_setting(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_info_exposes_external_http_proxy_setting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("EXTERNAL_HTTP_TRUST_ENV", "false")
-    client = TestClient(create_app())
+    client = fastapi_testclient.TestClient(api_app.create_app())
 
     response = client.get("/api/info")
 
@@ -20,10 +22,10 @@ def test_info_exposes_external_http_proxy_setting(monkeypatch: pytest.MonkeyPatc
 
 def test_expected_application_error_has_stable_response(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
+    tmp_path: pathlib.Path,
 ) -> None:
     monkeypatch.setenv("DOCS_DIR", str(tmp_path / "missing"))
-    client = TestClient(create_app())
+    client = fastapi_testclient.TestClient(api_app.create_app())
 
     response = client.get("/api/documents")
 
@@ -33,6 +35,8 @@ def test_expected_application_error_has_stable_response(
 
 
 def test_ask_rejects_blank_question() -> None:
-    response = TestClient(create_app()).post("/api/ask", json={"question": "   "})
+    response = fastapi_testclient.TestClient(api_app.create_app()).post(
+        "/api/ask", json={"question": "   "}
+    )
 
     assert response.status_code == 422

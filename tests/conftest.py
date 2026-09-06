@@ -1,20 +1,26 @@
 """Shared pytest configuration.
 
-The suite is meant to be deterministic and offline, but `AppConfig.from_env` reads the
-process environment and loads a project-local `.env`. Without isolation a developer's
-own `.env` silently supplies API keys and endpoints, so a test can pass on their machine
-and fail in CI, or pass for a reason that has nothing to do with what it asserts.
+The suite is meant to be deterministic and offline, but `AppConfig.from_env`
+reads the process environment and loads a project-local `.env`. Without
+isolation a developer's own `.env` silently supplies API keys and endpoints, so
+a test can pass on their machine and fail in CI, or pass for a reason that has
+nothing to do with what it asserts.
 
-The autouse fixture below neutralizes both sources for every test. A test that needs a
-particular setting still sets it explicitly with `monkeypatch.setenv`, which then reads
-as part of the test rather than as an accident of the machine.
+The autouse fixture below neutralizes both sources for every test. A test that
+needs a particular setting still sets it explicitly with `monkeypatch.setenv`,
+which then reads as part of the test rather than as an accident of the machine.
+
+The dotenv loader is patched where it is defined, in `env`, rather than on the
+module that calls it. Under module-only imports there is no second binding to
+patch, and patching the definition covers every caller rather than the one that
+happened to be named here.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from local_docs_rag_agent import config as config_module
+from local_docs_rag_agent import env
 
 APPLICATION_ENVIRONMENT_VARIABLES = (
     "AGENTS_MAX_TURNS",
@@ -62,6 +68,6 @@ APPLICATION_ENVIRONMENT_VARIABLES = (
 def isolated_application_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     """Run every test against configuration defaults, not the developer's machine."""
 
-    monkeypatch.setattr(config_module, "load_project_dotenv", lambda: None)
+    monkeypatch.setattr(env, "load_project_dotenv", lambda: None)
     for name in APPLICATION_ENVIRONMENT_VARIABLES:
         monkeypatch.delenv(name, raising=False)

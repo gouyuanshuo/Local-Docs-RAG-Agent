@@ -1,27 +1,22 @@
 """Qdrant-backed chunk store with normalized operational failures.
 
 `qdrant_client` is imported lazily so the package installs and runs without the
-`qdrant` extra, and every client call is funnelled through `qdrant_operation_error`
-so callers see a `VectorStoreError` with a stable `reason_code` instead of a raw
-transport exception. The eval matrix relies on those codes to tell "Qdrant is not
-reachable here" apart from "this configuration genuinely failed".
+`qdrant` extra, and every client call is funnelled through
+`qdrant_operation_error` so callers see a `VectorStoreError` with a stable
+`reason_code` instead of a raw transport exception. The eval matrix relies on
+those codes to tell "Qdrant is not reachable here" apart from "this
+configuration genuinely failed".
 """
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Iterable
 from typing import Any
-from uuid import NAMESPACE_URL, UUID, uuid5
 
-from local_docs_rag_agent.exceptions import ProviderUnavailableError, VectorStoreError
-from local_docs_rag_agent.models import DocumentChunk, ProviderStatus, RetrievalHit
-from local_docs_rag_agent.providers.base import EmbeddingProvider
-from local_docs_rag_agent.rag.retrieval import (
-    RetrievalSettings,
-    needs_candidate_window,
-    rerank_dense_hits,
-)
-from local_docs_rag_agent.rag.scoring import build_retrieval_hit
+from local_docs_rag_agent import exceptions, models
+from local_docs_rag_agent.providers import base as provider_base
+from local_docs_rag_agent.rag import retrieval, scoring
 
 
 class QdrantChunkStore:
@@ -33,20 +28,23 @@ class QdrantChunkStore:
         api_key: str | None,
         collection_name: str,
         timeout_s: int,
-        embedding_provider: EmbeddingProvider,
+        embedding_provider: provider_base.EmbeddingProvider,
         trust_env: bool = True,
-        settings: RetrievalSettings | None = None,
+        settings: retrieval.RetrievalSettings | None = None,
     ) -> None:
         try:
-            from qdrant_client import QdrantClient
+            import qdrant_client
         except ImportError as exc:
-            raise VectorStoreError(
+            raise exceptions.VectorStoreError(
                 "qdrant-client is not installed",
                 reason_code="dependency_missing",
-                action_hint="Install the qdrant dependency with `pip install -e .[qdrant]`.",
+                action_hint=(
+                    "Install the qdrant dependency with "
+                    "`pip install -e .[qdrant]`."
+                ),
             ) from exc
 
-        self._client: Any = QdrantClient(
+        self._client: Any = qdrant_client.QdrantClient(
             url=url,
             api_key=api_key,
             timeout=timeout_s,
@@ -56,7 +54,7 @@ class QdrantChunkStore:
         self._collection_name = collection_name
         self._embedding_provider = embedding_provider
         self._trust_env = trust_env
-        self._settings = settings or RetrievalSettings()
+        self._settings = settings or retrieval.RetrievalSettings()
 
     def collection_exists(self) -> bool:
         try:
@@ -66,7 +64,7 @@ class QdrantChunkStore:
 
     def save(
         self,
-        chunks: list[DocumentChunk],
+        chunks: list[models.DocumentChunk],
         removed_source_paths: list[str] | None = None,
         replaced_source_paths: list[str] | None = None,
     ) -> None:
@@ -74,14 +72,19 @@ class QdrantChunkStore:
         try:
             from qdrant_client import models
         except ImportError as exc:
-            raise VectorStoreError(
+            raise exceptions.VectorStoreError(
                 "qdrant-client is not installed",
                 reason_code="dependency_missing",
-                action_hint="Install the qdrant dependency with `pip install -e .[qdrant]`.",
+                action_hint=(
+                    "Install the qdrant dependency with "
+                    "`pip install -e .[qdrant]`."
+                ),
             ) from exc
 
         try:
-            collection_exists = bool(self._client.collection_exists(self._collection_name))
+            collection_exists = bool(
+                self._client.collection_exists(self._collection_name)
+            )
             if not collection_exists and vector_size is None:
                 return
             if collection_exists and vector_size is not None:
@@ -90,12 +93,15 @@ class QdrantChunkStore:
                     self._collection_name,
                 )
                 if existing_size != vector_size:
-                    raise VectorStoreError(
-                        "Qdrant collection vector size does not match incoming embeddings",
+                    raise exceptions.VectorStoreError(
+                        "Qdrant collection vector size does not match "
+                        "incoming embeddings",
                         reason_code="vector_size_mismatch",
                         action_hint=(
-                            f"Collection dimension is {existing_size}; incoming dimension is "
-                            f"{vector_size}. Recreate the collection or use the matching model."
+                            f"Collection dimension is {existing_size}; "
+                            f"incoming dimension is {vector_size}. "
+                            "Recreate the collection or use the "
+                            "matching model."
                         ),
                     )
             elif not collection_exists:
@@ -126,8 +132,8 @@ class QdrantChunkStore:
         except Exception as exc:
             raise self._operation_error("save", exc) from exc
 
-    def load(self) -> list[DocumentChunk]:
-        chunks: list[DocumentChunk] = []
+    def load(self) -> list[models.DocumentChunk]:
+        chunks: list[models.DocumentChunk] = []
         next_offset: Any = None
         try:
             while True:
@@ -139,7 +145,7 @@ class QdrantChunkStore:
                     offset=next_offset,
                 )
                 chunks.extend(
-                    DocumentChunk.from_dict(record.payload)
+                    models.DocumentChunk.from_dict(record.payload)
                     for record in records
                     if isinstance(record.payload, dict)
                 )
@@ -148,27 +154,30 @@ class QdrantChunkStore:
         except Exception as exc:
             raise self._operation_error("load", exc) from exc
 
-    def search(self, query: str, top_k: int) -> list[RetrievalHit]:
+    def search(self, query: str, top_k: int) -> list[models.RetrievalHit]:
         if top_k <= 0:
             return []
         query_vectors = self._embedding_provider.embed_texts([query])
         if self._embedding_provider.status.mode != "live":
             status = self._embedding_provider.status
-            raise ProviderUnavailableError(
+            raise exceptions.ProviderUnavailableError(
                 "Qdrant search requires a live embedding provider",
                 action_hint=(
                     f"Provider {status.provider!r} is in {status.mode!r} mode: "
-                    f"{status.reason or 'no reason supplied'}. Check embedding configuration."
+                    f"{status.reason or 'no reason supplied'}. "
+                    "Check embedding configuration."
                 ),
             )
         if len(query_vectors) != 1 or not query_vectors[0]:
-            raise ProviderUnavailableError(
+            raise exceptions.ProviderUnavailableError(
                 "Embedding provider did not return one non-empty query vector"
             )
 
-        # The dense-only strategies take exactly what they need from the server; the
-        # fused ones need a wider window to re-rank within.
-        fuses_locally = needs_candidate_window(self._settings.strategy)
+        # The dense-only strategies take exactly what they need from the server;
+        # the fused ones need a wider window to re-rank within.
+        fuses_locally = retrieval.needs_candidate_window(
+            self._settings.strategy
+        )
         limit = self._settings.window(top_k) if fuses_locally else top_k
         try:
             response = self._client.query_points(
@@ -180,8 +189,8 @@ class QdrantChunkStore:
             )
             points: Iterable[Any] = getattr(response, "points", response)
             dense_hits = [
-                build_retrieval_hit(
-                    DocumentChunk.from_dict(point.payload),
+                scoring.build_retrieval_hit(
+                    models.DocumentChunk.from_dict(point.payload),
                     float(point.score),
                 )
                 for point in points
@@ -190,12 +199,12 @@ class QdrantChunkStore:
         except Exception as exc:
             raise self._operation_error("search", exc) from exc
 
-        # `blended` needs the chunk vectors to combine signals, and the server does not
-        # return them, so on this backend it means what it has always meant here: the
-        # server's own dense ordering.
+        # `blended` needs the chunk vectors to combine signals, and the server
+        # does not return them, so on this backend it means what it has always
+        # meant here: the server's own dense ordering.
         if not fuses_locally:
             return dense_hits[:top_k]
-        return rerank_dense_hits(
+        return retrieval.rerank_dense_hits(
             query=query,
             dense_hits=dense_hits,
             top_k=top_k,
@@ -203,7 +212,7 @@ class QdrantChunkStore:
         )
 
     @property
-    def embedding_status(self) -> ProviderStatus:
+    def embedding_status(self) -> models.ProviderStatus:
         return self._embedding_provider.status
 
     def _delete_by_source_paths(self, source_paths: list[str]) -> None:
@@ -238,10 +247,15 @@ class QdrantChunkStore:
             )
         except Exception as exc:
             lowered = str(exc).lower()
-            if "already exists" not in lowered and "already exist" not in lowered:
+            if (
+                "already exists" not in lowered
+                and "already exist" not in lowered
+            ):
                 raise
 
-    def _operation_error(self, operation: str, exc: Exception) -> VectorStoreError:
+    def _operation_error(
+        self, operation: str, exc: Exception
+    ) -> exceptions.VectorStoreError:
         return qdrant_operation_error(
             operation=operation,
             url=self._url,
@@ -251,42 +265,44 @@ class QdrantChunkStore:
         )
 
 
-def _validate_chunk_embeddings(chunks: list[DocumentChunk]) -> int | None:
+def _validate_chunk_embeddings(
+    chunks: list[models.DocumentChunk],
+) -> int | None:
     if not chunks:
         return None
     missing = [chunk.chunk_id for chunk in chunks if not chunk.embedding]
     if missing:
         preview = ", ".join(missing[:3])
-        raise VectorStoreError(
+        raise exceptions.VectorStoreError(
             f"Cannot save chunks without embeddings: {preview}",
             reason_code="invalid_vectors",
         )
     dimensions = {len(chunk.embedding or []) for chunk in chunks}
     if len(dimensions) != 1:
-        raise VectorStoreError(
+        raise exceptions.VectorStoreError(
             "Cannot save embeddings with inconsistent dimensions",
             reason_code="invalid_vectors",
         )
     return dimensions.pop()
 
 
-def _embedding_for_chunk(chunk: DocumentChunk) -> list[float]:
+def _embedding_for_chunk(chunk: models.DocumentChunk) -> list[float]:
     if not chunk.embedding:
-        raise VectorStoreError(
+        raise exceptions.VectorStoreError(
             f"Chunk {chunk.chunk_id} does not have an embedding",
             reason_code="invalid_vectors",
         )
     return chunk.embedding
 
 
-def _chunk_payload(chunk: DocumentChunk) -> dict[str, object]:
+def _chunk_payload(chunk: models.DocumentChunk) -> dict[str, object]:
     payload = chunk.to_dict()
     payload.pop("embedding", None)
     return payload
 
 
-def _qdrant_point_id(chunk_id: str) -> UUID:
-    return uuid5(NAMESPACE_URL, chunk_id)
+def _qdrant_point_id(chunk_id: str) -> uuid.UUID:
+    return uuid.uuid5(uuid.NAMESPACE_URL, chunk_id)
 
 
 def _collection_vector_size(client: Any, collection_name: str) -> int:
@@ -295,12 +311,13 @@ def _collection_vector_size(client: Any, collection_name: str) -> int:
     if hasattr(vectors, "size"):
         return int(vectors.size)
     if isinstance(vectors, dict):
-        raise VectorStoreError(
-            "Configured Qdrant collection uses named vectors, which are not supported",
+        raise exceptions.VectorStoreError(
+            "Configured Qdrant collection uses named vectors, which are "
+            "not supported",
             reason_code="invalid_collection",
             action_hint="Use a collection with one unnamed dense vector.",
         )
-    raise VectorStoreError(
+    raise exceptions.VectorStoreError(
         "Unable to determine Qdrant collection vector size",
         reason_code="invalid_collection",
     )
@@ -312,14 +329,15 @@ def qdrant_operation_error(
     collection_name: str,
     exc: Exception,
     trust_env: bool | None = None,
-) -> VectorStoreError:
+) -> exceptions.VectorStoreError:
     """Translate a raw client failure into a `VectorStoreError` with a reason code.
 
-    An already-normalized error is passed through unchanged so a specific diagnosis,
-    such as a vector-size mismatch, is not flattened into a generic failure.
+    An already-normalized error is passed through unchanged so a specific
+    diagnosis, such as a vector-size mismatch, is not flattened into a generic
+    failure.
     """
 
-    if isinstance(exc, VectorStoreError):
+    if isinstance(exc, exceptions.VectorStoreError):
         return exc
 
     context = f"operation={operation} collection={collection_name} url={url}"
@@ -328,17 +346,19 @@ def qdrant_operation_error(
         proxy_hint = (
             "Environment proxies are already disabled for this client."
             if trust_env is False
-            else "If stale proxy variables are present, set EXTERNAL_HTTP_TRUST_ENV=false."
+            else "If stale proxy variables are present, set "
+            "EXTERNAL_HTTP_TRUST_ENV=false."
         )
-        return VectorStoreError(
+        return exceptions.VectorStoreError(
             f"Qdrant service appears unreachable. {context}. error={detail}",
             reason_code="unreachable",
             action_hint=(
-                "Check QDRANT_URL, network access, and whether the service is running. "
+                "Check QDRANT_URL, network access, and whether the "
+                "service is running. "
                 f"{proxy_hint}"
             ),
         )
-    return VectorStoreError(
+    return exceptions.VectorStoreError(
         f"Qdrant operation failed. {context}. error={detail}",
         reason_code="operation_failed",
     )
@@ -347,8 +367,8 @@ def qdrant_operation_error(
 def looks_like_qdrant_unreachable(message: str) -> bool:
     """Report whether an error message describes a connectivity failure.
 
-    Matching on message text is deliberate: the client wraps transport errors from
-    several libraries, so the exception type alone does not identify them.
+    Matching on message text is deliberate: the client wraps transport errors
+    from several libraries, so the exception type alone does not identify them.
     """
 
     lowered = message.lower()

@@ -1,28 +1,22 @@
 """Split source documents into retrievable chunks that keep their character spans.
 
-Three strategies share one entry point, :func:`chunk_text`: `fixed` slices by size,
-`paragraph` groups blank-line-separated blocks, and `markdown` additionally refuses to
-merge blocks across a heading so a chunk never mixes two sections. Every chunk records
-the character span it came from, which is what makes the citation spans in an answer
-point back at real source text.
+Three strategies share one entry point, :func:`chunk_text`: `fixed` slices by
+size, `paragraph` groups blank-line-separated blocks, and `markdown`
+additionally refuses to merge blocks across a heading so a chunk never mixes two
+sections. Every chunk records the character span it came from, which is what
+makes the citation spans in an answer point back at real source text.
 """
 
 from __future__ import annotations
 
+import dataclasses
+import pathlib
 from collections.abc import Iterator
-from dataclasses import dataclass
-from pathlib import Path
 
-from local_docs_rag_agent.constants import (
-    CHUNK_STRATEGIES,
-    DEFAULT_CHUNK_STRATEGY,
-    ChunkStrategyName,
-)
-from local_docs_rag_agent.exceptions import ConfigurationError
-from local_docs_rag_agent.models import DocumentChunk
+from local_docs_rag_agent import constants, exceptions, models
 
 
-@dataclass(slots=True)
+@dataclasses.dataclass(slots=True)
 class Section:
     title: str
     heading_level: int | None
@@ -31,7 +25,7 @@ class Section:
     text: str
 
 
-@dataclass(slots=True)
+@dataclasses.dataclass(slots=True)
 class ParagraphBlock:
     text: str
     start_char: int
@@ -41,20 +35,24 @@ class ParagraphBlock:
 
 
 def chunk_text(
-    source_path: Path,
+    source_path: pathlib.Path,
     text: str,
     chunk_size: int,
     chunk_overlap: int,
-    chunk_strategy: str = DEFAULT_CHUNK_STRATEGY,
-) -> list[DocumentChunk]:
+    chunk_strategy: str = constants.DEFAULT_CHUNK_STRATEGY,
+) -> list[models.DocumentChunk]:
     _validate_chunk_parameters(chunk_size, chunk_overlap)
     if not text.strip():
         return []
 
     strategy = _normalize_strategy(chunk_strategy)
-    source_title = source_path.stem.replace("_", " ").strip() or source_path.name
+    source_title = (
+        source_path.stem.replace("_", " ").strip() or source_path.name
+    )
     if strategy == "fixed":
-        return _chunk_fixed(source_path, text, source_title, chunk_size, chunk_overlap)
+        return _chunk_fixed(
+            source_path, text, source_title, chunk_size, chunk_overlap
+        )
     if strategy == "paragraph":
         return _chunk_paragraphs(
             source_path,
@@ -74,37 +72,45 @@ def chunk_text(
     )
 
 
-def _normalize_strategy(chunk_strategy: str | None) -> ChunkStrategyName:
+def _normalize_strategy(
+    chunk_strategy: str | None,
+) -> constants.ChunkStrategyName:
     if not chunk_strategy:
-        return DEFAULT_CHUNK_STRATEGY
+        return constants.DEFAULT_CHUNK_STRATEGY
     normalized = chunk_strategy.strip().lower()
-    if normalized in CHUNK_STRATEGIES:
+    if normalized in constants.CHUNK_STRATEGIES:
         return normalized
-    allowed = ", ".join(CHUNK_STRATEGIES)
-    raise ConfigurationError(f"Chunk strategy must be one of {allowed}; got {chunk_strategy!r}")
+    allowed = ", ".join(constants.CHUNK_STRATEGIES)
+    raise exceptions.ConfigurationError(
+        f"Chunk strategy must be one of {allowed}; got {chunk_strategy!r}"
+    )
 
 
 def _validate_chunk_parameters(chunk_size: int, chunk_overlap: int) -> None:
     if chunk_size <= 0:
-        raise ConfigurationError(f"Chunk size must be greater than 0, got {chunk_size}")
+        raise exceptions.ConfigurationError(
+            f"Chunk size must be greater than 0, got {chunk_size}"
+        )
     if chunk_overlap < 0:
-        raise ConfigurationError(f"Chunk overlap must be at least 0, got {chunk_overlap}")
+        raise exceptions.ConfigurationError(
+            f"Chunk overlap must be at least 0, got {chunk_overlap}"
+        )
     if chunk_overlap >= chunk_size:
-        raise ConfigurationError(
+        raise exceptions.ConfigurationError(
             "Chunk overlap must be smaller than chunk size "
             f"(overlap={chunk_overlap}, size={chunk_size})"
         )
 
 
 def _chunk_fixed(
-    source_path: Path,
+    source_path: pathlib.Path,
     text: str,
     source_title: str,
     chunk_size: int,
     chunk_overlap: int,
-) -> list[DocumentChunk]:
+) -> list[models.DocumentChunk]:
     sections = _extract_sections(text, source_title)
-    chunks: list[DocumentChunk] = []
+    chunks: list[models.DocumentChunk] = []
     start = 0
     chunk_index = 0
 
@@ -142,16 +148,20 @@ def _chunk_fixed(
 
 
 def _chunk_paragraphs(
-    source_path: Path,
+    source_path: pathlib.Path,
     text: str,
     source_title: str,
     chunk_size: int,
     chunk_overlap: int,
     markdown_aware: bool,
-) -> list[DocumentChunk]:
-    blocks = _extract_paragraph_blocks(text, source_title, markdown_aware=markdown_aware)
+) -> list[models.DocumentChunk]:
+    blocks = _extract_paragraph_blocks(
+        text, source_title, markdown_aware=markdown_aware
+    )
     if not blocks:
-        return _chunk_fixed(source_path, text, source_title, chunk_size, chunk_overlap)
+        return _chunk_fixed(
+            source_path, text, source_title, chunk_size, chunk_overlap
+        )
     blocks = _split_oversized_blocks(
         blocks,
         source_text=text,
@@ -159,7 +169,7 @@ def _chunk_paragraphs(
         chunk_overlap=chunk_overlap,
     )
 
-    chunks: list[DocumentChunk] = []
+    chunks: list[models.DocumentChunk] = []
     start_index = 0
     chunk_index = 0
     strategy = "markdown" if markdown_aware else "paragraph"
@@ -177,9 +187,15 @@ def _chunk_paragraphs(
             candidate_parts = [*text_parts, block.text]
             candidate_text = "\n\n".join(candidate_parts).strip()
             section_changed = (
-                markdown_aware and cursor > start_index and block.section_title != current_section
+                markdown_aware
+                and cursor > start_index
+                and block.section_title != current_section
             )
-            if candidate_text and len(candidate_text) > chunk_size and text_parts:
+            if (
+                candidate_text
+                and len(candidate_text) > chunk_size
+                and text_parts
+            ):
                 break
             if section_changed and text_parts:
                 break
@@ -244,15 +260,15 @@ def _chunk_paragraphs(
 
 
 def _make_chunk(
-    source_path: Path,
+    source_path: pathlib.Path,
     title: str,
     text: str,
     chunk_index: int,
     start_char: int,
     end_char: int,
     metadata: dict[str, object],
-) -> DocumentChunk:
-    return DocumentChunk(
+) -> models.DocumentChunk:
+    return models.DocumentChunk(
         chunk_id=f"{source_path.as_posix()}::chunk-{chunk_index}",
         source_path=source_path.as_posix(),
         title=title,
@@ -305,7 +321,13 @@ def _extract_sections(text: str, source_title: str) -> list[Section]:
     if sections:
         return sections
     return [
-        Section(title=source_title, heading_level=None, start_char=0, end_char=len(text), text=text)
+        Section(
+            title=source_title,
+            heading_level=None,
+            start_char=0,
+            end_char=len(text),
+            text=text,
+        )
     ]
 
 
@@ -323,7 +345,11 @@ def _extract_paragraph_blocks(
     for line in text.splitlines(keepends=True):
         raw_line = line
         stripped = raw_line.strip()
-        heading_match = _parse_markdown_heading(raw_line) if markdown_aware else (None, None)
+        heading_match = (
+            _parse_markdown_heading(raw_line)
+            if markdown_aware
+            else (None, None)
+        )
         if heading_match[0] is not None:
             _flush_paragraph(
                 blocks,
@@ -411,7 +437,9 @@ def _split_oversized_blocks(
         start = block.start_char
         while start < block.end_char:
             end = min(block.end_char, start + chunk_size)
-            body, content_start, content_end = _strip_span(source_text, start, end)
+            body, content_start, content_end = _strip_span(
+                source_text, start, end
+            )
             if body:
                 normalized.append(
                     ParagraphBlock(

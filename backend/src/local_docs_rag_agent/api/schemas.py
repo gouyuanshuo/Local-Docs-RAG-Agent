@@ -1,60 +1,62 @@
 """Public request and response contracts for the HTTP API.
 
-These models are the only place the backend promises a wire shape. The option types
-are imported from `constants` rather than re-declared, so a new runtime or chunk
-strategy is accepted by request validation the moment it is supported by the
-configuration layer, and can never drift out of sync with it.
+These models are the only place the backend promises a wire shape. The option
+types are imported from `constants` rather than re-declared, so a new runtime or
+chunk strategy is accepted by request validation the moment it is supported by
+the configuration layer, and can never drift out of sync with it.
 """
 
 from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, NonNegativeInt, PositiveInt, StringConstraints
+import pydantic
 
-from local_docs_rag_agent.constants import (
-    AGENT_RUNTIMES,
-    CHUNK_STRATEGIES,
-    RERANKERS,
-    RETRIEVAL_STRATEGIES,
-    VECTOR_BACKENDS,
-    ChunkStrategyName,
-    RerankerName,
-    RetrievalStrategyName,
-    RuntimeName,
-    VectorBackendName,
-)
-from local_docs_rag_agent.models import ProviderMode
+from local_docs_rag_agent import constants, models
 
-NonEmptyString = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
-RuntimeList = Annotated[list[RuntimeName], Field(min_length=1, max_length=len(AGENT_RUNTIMES))]
+NonEmptyString = Annotated[
+    str, pydantic.StringConstraints(strip_whitespace=True, min_length=1)
+]
+RuntimeList = Annotated[
+    list[constants.RuntimeName],
+    pydantic.Field(min_length=1, max_length=len(constants.AGENT_RUNTIMES)),
+]
 ChunkStrategyList = Annotated[
-    list[ChunkStrategyName],
-    Field(min_length=1, max_length=len(CHUNK_STRATEGIES)),
+    list[constants.ChunkStrategyName],
+    pydantic.Field(min_length=1, max_length=len(constants.CHUNK_STRATEGIES)),
 ]
 VectorBackendList = Annotated[
-    list[VectorBackendName],
-    Field(min_length=1, max_length=len(VECTOR_BACKENDS)),
+    list[constants.VectorBackendName],
+    pydantic.Field(min_length=1, max_length=len(constants.VECTOR_BACKENDS)),
 ]
 RetrievalStrategyList = Annotated[
-    list[RetrievalStrategyName],
-    Field(min_length=1, max_length=len(RETRIEVAL_STRATEGIES)),
+    list[constants.RetrievalStrategyName],
+    pydantic.Field(
+        min_length=1, max_length=len(constants.RETRIEVAL_STRATEGIES)
+    ),
 ]
-RerankerList = Annotated[list[RerankerName], Field(min_length=1, max_length=len(RERANKERS))]
-PositiveIntList = Annotated[list[PositiveInt], Field(min_length=1, max_length=8)]
-NonNegativeIntList = Annotated[list[NonNegativeInt], Field(min_length=1, max_length=8)]
+RerankerList = Annotated[
+    list[constants.RerankerName],
+    pydantic.Field(min_length=1, max_length=len(constants.RERANKERS)),
+]
+PositiveIntList = Annotated[
+    list[pydantic.PositiveInt], pydantic.Field(min_length=1, max_length=8)
+]
+NonNegativeIntList = Annotated[
+    list[pydantic.NonNegativeInt], pydantic.Field(min_length=1, max_length=8)
+]
 
 
-class AskRequest(BaseModel):
+class AskRequest(pydantic.BaseModel):
     question: NonEmptyString
-    runtime: RuntimeName | None = None
+    runtime: constants.RuntimeName | None = None
 
 
-class EvalRequest(BaseModel):
-    runtime: RuntimeName | None = None
+class EvalRequest(pydantic.BaseModel):
+    runtime: constants.RuntimeName | None = None
 
 
-class EvalCompareRequest(BaseModel):
+class EvalCompareRequest(pydantic.BaseModel):
     runtimes: RuntimeList | None = None
     chunk_strategies: ChunkStrategyList | None = None
     vector_backends: VectorBackendList | None = None
@@ -65,101 +67,101 @@ class EvalCompareRequest(BaseModel):
     rerankers: RerankerList | None = None
 
 
-class IngestResponse(BaseModel):
-    num_chunks: NonNegativeInt
-    vector_backend: VectorBackendName
+class IngestResponse(pydantic.BaseModel):
+    num_chunks: pydantic.NonNegativeInt
+    vector_backend: constants.VectorBackendName
 
 
-class HealthResponse(BaseModel):
+class HealthResponse(pydantic.BaseModel):
     status: Literal["ok"]
     backend_time_utc: str
 
 
-class AppInfoResponse(BaseModel):
+class AppInfoResponse(pydantic.BaseModel):
     name: str
-    runtime: RuntimeName
-    vector_backend: VectorBackendName
+    runtime: constants.RuntimeName
+    vector_backend: constants.VectorBackendName
     docs_dir: str
     docs_exclude_patterns: list[str]
-    docs_count: NonNegativeInt
+    docs_count: pydantic.NonNegativeInt
     llm_provider: str
     llm_model: str
     embedding_provider: str
     embedding_model: str
-    top_k: PositiveInt
-    retrieval_strategy: RetrievalStrategyName
-    reranker: RerankerName
-    chunk_strategy: ChunkStrategyName
-    chunk_size: PositiveInt
-    chunk_overlap: NonNegativeInt
+    top_k: pydantic.PositiveInt
+    retrieval_strategy: constants.RetrievalStrategyName
+    reranker: constants.RerankerName
+    chunk_strategy: constants.ChunkStrategyName
+    chunk_size: pydantic.PositiveInt
+    chunk_overlap: pydantic.NonNegativeInt
     qdrant_collection: str
     external_http_trust_env: bool
 
 
-class DocumentsResponse(BaseModel):
-    count: NonNegativeInt
+class DocumentsResponse(pydantic.BaseModel):
+    count: pydantic.NonNegativeInt
     documents: list[str]
 
 
-class ProviderStatusResponse(BaseModel):
+class ProviderStatusResponse(pydantic.BaseModel):
     provider: str
-    mode: ProviderMode
+    mode: models.ProviderMode
     reason: str | None = None
 
 
-class CitationSpanResponse(BaseModel):
+class CitationSpanResponse(pydantic.BaseModel):
     source_path: str
     chunk_id: str
-    chunk_index: NonNegativeInt
-    start_char: NonNegativeInt
-    end_char: NonNegativeInt
+    chunk_index: pydantic.NonNegativeInt
+    start_char: pydantic.NonNegativeInt
+    end_char: pydantic.NonNegativeInt
     text: str
 
 
-class AnswerDiagnosticsResponse(BaseModel):
-    requested_runtime: RuntimeName
-    actual_runtime: RuntimeName
-    vector_backend: VectorBackendName
+class AnswerDiagnosticsResponse(pydantic.BaseModel):
+    requested_runtime: constants.RuntimeName
+    actual_runtime: constants.RuntimeName
+    vector_backend: constants.VectorBackendName
     chat_provider: ProviderStatusResponse
     embedding_provider: ProviderStatusResponse
     reranker: ProviderStatusResponse
 
 
-class AskResponse(BaseModel):
+class AskResponse(pydantic.BaseModel):
     question: str
     answer: str
     citations: list[str]
     citation_spans: list[CitationSpanResponse]
-    runtime: RuntimeName
+    runtime: constants.RuntimeName
     diagnostics: AnswerDiagnosticsResponse
 
 
-class RetrievalConfigResponse(BaseModel):
-    vector_backend: VectorBackendName
-    chunk_strategy: ChunkStrategyName
-    chunk_size: PositiveInt
-    chunk_overlap: NonNegativeInt
-    top_k: PositiveInt
-    retrieval_strategy: RetrievalStrategyName
-    retrieval_candidate_k: PositiveInt
-    rrf_k: PositiveInt
-    reranker: RerankerName
-    rerank_candidate_k: PositiveInt
+class RetrievalConfigResponse(pydantic.BaseModel):
+    vector_backend: constants.VectorBackendName
+    chunk_strategy: constants.ChunkStrategyName
+    chunk_size: pydantic.PositiveInt
+    chunk_overlap: pydantic.NonNegativeInt
+    top_k: pydantic.PositiveInt
+    retrieval_strategy: constants.RetrievalStrategyName
+    retrieval_candidate_k: pydantic.PositiveInt
+    rrf_k: pydantic.PositiveInt
+    reranker: constants.RerankerName
+    rerank_candidate_k: pydantic.PositiveInt
     docs_dir: str
     docs_exclude_patterns: list[str]
 
 
-class EvalResultResponse(BaseModel):
+class EvalResultResponse(pydantic.BaseModel):
     question: str
     answer: str
     citations: list[str]
     retrieved_sources: list[str]
-    answer_keyword_hit_rate: float = Field(ge=0, le=1)
-    retrieval_source_hit_rate: float = Field(ge=0, le=1)
-    retrieval_span_hit_rate: float = Field(ge=0, le=1)
-    citation_source_hit_rate: float = Field(ge=0, le=1)
-    citation_span_hit_rate: float = Field(ge=0, le=1)
-    response_time_ms: float = Field(ge=0)
+    answer_keyword_hit_rate: float = pydantic.Field(ge=0, le=1)
+    retrieval_source_hit_rate: float = pydantic.Field(ge=0, le=1)
+    retrieval_span_hit_rate: float = pydantic.Field(ge=0, le=1)
+    citation_source_hit_rate: float = pydantic.Field(ge=0, le=1)
+    citation_span_hit_rate: float = pydantic.Field(ge=0, le=1)
+    response_time_ms: float = pydantic.Field(ge=0)
     diagnostics: AnswerDiagnosticsResponse | None = None
     expected_source_paths: list[str]
     expected_answer_keywords: list[str]
@@ -168,9 +170,9 @@ class EvalResultResponse(BaseModel):
     failure_reasons: list[str]
 
 
-class EvalSummaryResponse(BaseModel):
-    num_cases: NonNegativeInt
-    runtime: RuntimeName
+class EvalSummaryResponse(pydantic.BaseModel):
+    num_cases: pydantic.NonNegativeInt
+    runtime: constants.RuntimeName
     retrieval_config: RetrievalConfigResponse | None
     answer_keyword_hit_rate: float
     retrieval_source_hit_rate: float
@@ -184,7 +186,7 @@ class EvalSummaryResponse(BaseModel):
     results: list[EvalResultResponse]
 
 
-class EvalLeaderboardRowResponse(BaseModel):
+class EvalLeaderboardRowResponse(pydantic.BaseModel):
     label: str
     answer_keyword_hit_rate: float
     retrieval_source_hit_rate: float
@@ -193,31 +195,31 @@ class EvalLeaderboardRowResponse(BaseModel):
     avg_response_time_ms: float
 
 
-class EvalMatrixRunResponse(BaseModel):
+class EvalMatrixRunResponse(pydantic.BaseModel):
     label: str
     status: Literal["ok", "skipped", "error"]
     reason: str | None = None
     error: str | None = None
     retrieval_config: RetrievalConfigResponse | None = None
-    runtime: RuntimeName | None = None
+    runtime: constants.RuntimeName | None = None
     summary: EvalSummaryResponse | None = None
 
 
-class EvalCompareResponse(BaseModel):
-    num_runs: NonNegativeInt
-    runtimes: list[RuntimeName]
-    chunk_strategies: list[ChunkStrategyName]
-    vector_backends: list[VectorBackendName]
-    top_ks: list[PositiveInt]
-    chunk_sizes: list[PositiveInt]
-    chunk_overlaps: list[NonNegativeInt]
-    retrieval_strategies: list[RetrievalStrategyName]
-    rerankers: list[RerankerName]
+class EvalCompareResponse(pydantic.BaseModel):
+    num_runs: pydantic.NonNegativeInt
+    runtimes: list[constants.RuntimeName]
+    chunk_strategies: list[constants.ChunkStrategyName]
+    vector_backends: list[constants.VectorBackendName]
+    top_ks: list[pydantic.PositiveInt]
+    chunk_sizes: list[pydantic.PositiveInt]
+    chunk_overlaps: list[pydantic.NonNegativeInt]
+    retrieval_strategies: list[constants.RetrievalStrategyName]
+    rerankers: list[constants.RerankerName]
     leaderboard: list[EvalLeaderboardRowResponse]
     runs: list[EvalMatrixRunResponse]
 
 
-class ErrorResponse(BaseModel):
+class ErrorResponse(pydantic.BaseModel):
     code: str
     detail: str
     action_hint: str | None = None

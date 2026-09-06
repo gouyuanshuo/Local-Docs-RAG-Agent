@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import sys
-from types import ModuleType, SimpleNamespace
+import types
 from typing import Any, ClassVar
 
 import pytest
 
-from local_docs_rag_agent.config import AppConfig
-from local_docs_rag_agent.models import DocumentChunk, ProviderStatus, RetrievalOutcome
-from local_docs_rag_agent.rag.scoring import build_retrieval_hit
+from local_docs_rag_agent import config as app_config
+from local_docs_rag_agent import models
+from local_docs_rag_agent.providers import openai_client
+from local_docs_rag_agent.rag import pipeline, scoring
 from local_docs_rag_agent.runtime import agents_sdk
+from local_docs_rag_agent.runtime import basic as basic_runtime
 
 
 class FakeAsyncOpenAI:
@@ -65,7 +67,7 @@ class FakeRunner:
         *,
         context: agents_sdk.AgentRuntimeContext,
         max_turns: int,
-    ) -> SimpleNamespace:
+    ) -> types.SimpleNamespace:
         wrapper = FakeRunContextWrapper(context)
         tool_output = agent.tools[1](wrapper, question, 1)
         cls.calls.append(
@@ -75,13 +77,16 @@ class FakeRunner:
                 "tool_output": tool_output,
             }
         )
-        return SimpleNamespace(final_output="Attention uses queries and keys. [S1]")
+        return types.SimpleNamespace(
+            final_output="Attention uses queries and keys. [S1]"
+        )
 
 
-def _install_fake_agents(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
-    fake_module = ModuleType("agents")
-    # Populated through the module namespace rather than by attribute assignment: a
-    # synthetic module has no declared attributes for a type checker to accept.
+def _install_fake_agents(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
+    fake_module = types.ModuleType("agents")
+    # Populated through the module namespace rather than by attribute
+    # assignment: a synthetic module has no declared attributes for a type
+    # checker to accept.
     fake_module.__dict__.update(
         Agent=FakeAgent,
         RunContextWrapper=FakeRunContextWrapper,
@@ -96,8 +101,8 @@ def _install_fake_agents(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     return fake_module
 
 
-def _config(api_style: str) -> AppConfig:
-    return AppConfig.from_env().with_overrides(
+def _config(api_style: str) -> app_config.AppConfig:
+    return app_config.AppConfig.from_env().with_overrides(
         agent_runtime="agents_sdk",
         vector_backend="local",
         llm_api_key="fake-key",
@@ -107,8 +112,8 @@ def _config(api_style: str) -> AppConfig:
     )
 
 
-def _retrieval_outcome() -> RetrievalOutcome:
-    chunk = DocumentChunk(
+def _retrieval_outcome() -> models.RetrievalOutcome:
+    chunk = models.DocumentChunk(
         chunk_id="attention::0",
         source_path="docs/attention.md",
         title="Attention",
@@ -118,10 +123,12 @@ def _retrieval_outcome() -> RetrievalOutcome:
         end_char=41,
         embedding=[1.0],
     )
-    return RetrievalOutcome(
-        hits=[build_retrieval_hit(chunk, 0.95)],
-        embedding_status=ProviderStatus(provider="fake-embedding", mode="live"),
-        reranker_status=ProviderStatus(
+    return models.RetrievalOutcome(
+        hits=[scoring.build_retrieval_hit(chunk, 0.95)],
+        embedding_status=models.ProviderStatus(
+            provider="fake-embedding", mode="live"
+        ),
+        reranker_status=models.ProviderStatus(
             provider="none", mode="ready", reason="reranker_disabled"
         ),
     )
@@ -142,9 +149,11 @@ def test_agents_runtime_uses_fake_runner_and_preserves_diagnostics(
     _install_fake_agents(monkeypatch)
     client = FakeAsyncOpenAI()
     monkeypatch.setattr(agents_sdk, "_supports_agents_sdk", lambda: True)
-    monkeypatch.setattr(agents_sdk, "build_async_openai_client", lambda **kwargs: client)
     monkeypatch.setattr(
-        agents_sdk,
+        openai_client, "build_async_openai_client", lambda **kwargs: client
+    )
+    monkeypatch.setattr(
+        pipeline,
         "retrieve",
         lambda config, query, top_k: _retrieval_outcome(),
     )
@@ -155,7 +164,9 @@ def test_agents_runtime_uses_fake_runner_and_preserves_diagnostics(
     assert answer.answer == "Attention uses queries and keys. [S1]"
     assert answer.citations == ["docs/attention.md"]
     assert [span.chunk_id for span in answer.citation_spans] == ["attention::0"]
-    assert [hit.chunk.chunk_id for hit in answer.retrieved_chunks] == ["attention::0"]
+    assert [hit.chunk.chunk_id for hit in answer.retrieved_chunks] == [
+        "attention::0"
+    ]
     assert answer.diagnostics.requested_runtime == "agents_sdk"
     assert answer.diagnostics.actual_runtime == "agents_sdk"
     assert answer.diagnostics.chat_provider.mode == "live"
@@ -189,12 +200,19 @@ def test_agents_runtime_closes_client_and_exposes_runner_fallback(
         return fallback_answer
 
     monkeypatch.setattr(agents_sdk, "_supports_agents_sdk", lambda: True)
-    monkeypatch.setattr(agents_sdk, "build_async_openai_client", lambda **kwargs: client)
-    monkeypatch.setattr(agents_sdk, "answer_with_basic_runtime", fake_basic_runtime)
+    monkeypatch.setattr(
+        openai_client, "build_async_openai_client", lambda **kwargs: client
+    )
+    monkeypatch.setattr(
+        basic_runtime, "answer_with_basic_runtime", fake_basic_runtime
+    )
 
     answer = agents_sdk.answer_with_agents_sdk(_config("responses"), "question")
 
     assert answer is fallback_answer
     assert client.closed is True
     assert fallback_call["requested_runtime"] == "agents_sdk"
-    assert fallback_call["runtime_reason"] == "runtime_fallback:agents_sdk_error:RuntimeError"
+    assert (
+        fallback_call["runtime_reason"]
+        == "runtime_fallback:agents_sdk_error:RuntimeError"
+    )

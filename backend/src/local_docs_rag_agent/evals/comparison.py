@@ -1,74 +1,68 @@
 """Runs the eval harness across a matrix of retrieval and runtime configurations.
 
-Each cell re-ingests and re-evaluates under one `AppConfig` variant so the results are
-comparable. A cell that cannot run is reported as `skipped` with a reason, and a cell
-that fails is reported as `error`; neither is silently dropped, because a leaderboard
-that hides its gaps is worse than no leaderboard.
+Each cell re-ingests and re-evaluates under one `AppConfig` variant so the
+results are comparable. A cell that cannot run is reported as `skipped` with a
+reason, and a cell that fails is reported as `error`; neither is silently
+dropped, because a leaderboard that hides its gaps is worse than no leaderboard.
 """
 
 from __future__ import annotations
 
+import itertools
 import json
+import math
+import pathlib
 from collections.abc import Sequence
-from itertools import product
-from math import prod
-from pathlib import Path
 
-from local_docs_rag_agent.config import AppConfig
-from local_docs_rag_agent.constants import (
-    CHUNK_STRATEGIES,
-    RETRIEVAL_STRATEGIES,
-    ChunkStrategyName,
-    RerankerName,
-    RetrievalStrategyName,
-    VectorBackendName,
-)
-from local_docs_rag_agent.evals.harness import run_eval
-from local_docs_rag_agent.exceptions import ConfigurationError, VectorStoreError
-from local_docs_rag_agent.presenters import serialize_eval_summary, serialize_retrieval_config
-from local_docs_rag_agent.rag import ingest_documents
-from local_docs_rag_agent.rag.file_io import atomic_write_text
+from local_docs_rag_agent import config as app_config
+from local_docs_rag_agent import constants, exceptions, presenters, rag
+from local_docs_rag_agent.evals import harness
+from local_docs_rag_agent.rag import file_io
 
 # Guards API and CLI input from expanding into an unbounded Cartesian workload.
 MAX_MATRIX_RUNS = 128
 
 
-def default_chunk_strategies() -> list[ChunkStrategyName]:
+def default_chunk_strategies() -> list[constants.ChunkStrategyName]:
     """Return the chunk strategies compared when a caller does not choose any."""
 
-    return list(CHUNK_STRATEGIES)
+    return list(constants.CHUNK_STRATEGIES)
 
 
-def default_retrieval_strategies() -> list[RetrievalStrategyName]:
+def default_retrieval_strategies() -> list[constants.RetrievalStrategyName]:
     """Return the retrieval strategies compared when a caller does not choose any."""
 
-    return list(RETRIEVAL_STRATEGIES)
+    return list(constants.RETRIEVAL_STRATEGIES)
 
 
-def default_rerankers(config: AppConfig) -> list[RerankerName]:
+def default_rerankers(
+    config: app_config.AppConfig,
+) -> list[constants.RerankerName]:
     """Return the rerankers compared when a caller does not choose any.
 
-    Unlike every other axis this one does not sweep, it holds the configured value.
-    Each `llm` cell spends one model call per eval case, so sweeping by default would
-    turn a routine comparison into an unrequested bill; opting in with `--reranker llm`
-    keeps that a decision.
+    Unlike every other axis this one does not sweep, it holds the configured
+    value. Each `llm` cell spends one model call per eval case, so sweeping by
+    default would turn a routine comparison into an unrequested bill; opting in
+    with `--reranker llm` keeps that a decision.
     """
 
     return [config.reranker]
 
 
-def default_vector_backends(config: AppConfig) -> list[VectorBackendName]:
+def default_vector_backends(
+    config: app_config.AppConfig,
+) -> list[constants.VectorBackendName]:
     """Return the vector backends worth comparing for `config`.
 
-    Qdrant is only included when a URL is configured; otherwise every Qdrant cell
-    would report the same `missing_qdrant_url` skip.
+    Qdrant is only included when a URL is configured; otherwise every Qdrant
+    cell would report the same `missing_qdrant_url` skip.
     """
 
     return ["local", "qdrant"] if config.qdrant_url else ["local"]
 
 
 def run_eval_matrix(
-    config: AppConfig,
+    config: app_config.AppConfig,
     runtimes: Sequence[str],
     chunk_strategies: Sequence[str],
     vector_backends: Sequence[str],
@@ -77,17 +71,20 @@ def run_eval_matrix(
     chunk_overlaps: Sequence[int],
     retrieval_strategies: Sequence[str] | None = None,
     rerankers: Sequence[str] | None = None,
-    output_path: Path | None = None,
+    output_path: pathlib.Path | None = None,
 ) -> dict[str, object]:
     """Evaluate every combination of the requested axes and rank the results.
 
-    Raises `ConfigurationError` when an axis is empty or when the Cartesian product
-    would exceed `MAX_MATRIX_RUNS`, so a single request cannot start an unbounded run.
+    Raises `ConfigurationError` when an axis is empty or when the Cartesian
+    product would exceed `MAX_MATRIX_RUNS`, so a single request cannot start an
+    unbounded run.
     """
 
-    # An omitted axis holds the configured value steady rather than sweeping, so an
-    # existing caller keeps producing the run count it produced before.
-    strategies: Sequence[str] = retrieval_strategies or [config.retrieval_strategy]
+    # An omitted axis holds the configured value steady rather than sweeping, so
+    # an existing caller keeps producing the run count it produced before.
+    strategies: Sequence[str] = retrieval_strategies or [
+        config.retrieval_strategy
+    ]
     reranker_names: Sequence[str] = rerankers or [config.reranker]
     axis_lengths = [
         len(runtimes),
@@ -99,17 +96,20 @@ def run_eval_matrix(
         len(strategies),
         len(reranker_names),
     ]
-    num_combinations = prod(axis_lengths)
+    num_combinations = math.prod(axis_lengths)
     if 0 in axis_lengths:
-        raise ConfigurationError("Eval comparison axes must not be empty")
+        raise exceptions.ConfigurationError(
+            "Eval comparison axes must not be empty"
+        )
     if num_combinations > MAX_MATRIX_RUNS:
-        raise ConfigurationError(
-            f"Eval comparison requested {num_combinations} runs; maximum is {MAX_MATRIX_RUNS}",
+        raise exceptions.ConfigurationError(
+            f"Eval comparison requested {num_combinations} runs; "
+            f"maximum is {MAX_MATRIX_RUNS}",
             action_hint="Reduce one or more comparison axes.",
         )
     runs: list[dict[str, object]] = []
 
-    combinations = product(
+    combinations = itertools.product(
         runtimes,
         vector_backends,
         chunk_strategies,
@@ -155,7 +155,7 @@ def run_eval_matrix(
         "runs": runs,
     }
     if output_path is not None:
-        atomic_write_text(output_path, _dump_json(payload))
+        file_io.atomic_write_text(output_path, _dump_json(payload))
     return payload
 
 
@@ -163,11 +163,11 @@ def _dump_json(payload: dict[str, object]) -> str:
     return json.dumps(payload, ensure_ascii=True, indent=2)
 
 
-def _run_matrix_case(config: AppConfig) -> dict[str, object]:
+def _run_matrix_case(config: app_config.AppConfig) -> dict[str, object]:
     label = _run_label(config)
     common = {
         "label": label,
-        "retrieval_config": serialize_retrieval_config(config),
+        "retrieval_config": presenters.serialize_retrieval_config(config),
         "runtime": config.agent_runtime,
     }
     skip_reason = _skip_reason(config)
@@ -175,9 +175,9 @@ def _run_matrix_case(config: AppConfig) -> dict[str, object]:
         return {**common, "status": "skipped", "reason": skip_reason}
 
     try:
-        ingest_documents(config)
-        results = run_eval(config)
-        summary = serialize_eval_summary(
+        rag.ingest_documents(config)
+        results = harness.run_eval(config)
+        summary = presenters.serialize_eval_summary(
             results,
             runtime=config.agent_runtime,
             config=config,
@@ -194,25 +194,28 @@ def _run_matrix_case(config: AppConfig) -> dict[str, object]:
         }
 
 
-def _run_label(config: AppConfig) -> str:
+def _run_label(config: app_config.AppConfig) -> str:
     return (
-        f"{config.agent_runtime}:{config.vector_backend}:{config.chunk_strategy}"
+        f"{config.agent_runtime}:{config.vector_backend}"
+        f":{config.chunk_strategy}"
         f":{config.retrieval_strategy}:rr-{config.reranker}"
         f":k{config.top_k}:s{config.chunk_size}:o{config.chunk_overlap}"
     )
 
 
-def _skip_reason(config: AppConfig) -> str | None:
+def _skip_reason(config: app_config.AppConfig) -> str | None:
     if config.vector_backend == "qdrant" and not config.qdrant_url:
         return "missing_qdrant_url"
     return None
 
 
-def _qdrant_runtime_skip_reason(config: AppConfig, exc: Exception) -> str | None:
+def _qdrant_runtime_skip_reason(
+    config: app_config.AppConfig, exc: Exception
+) -> str | None:
     if config.vector_backend != "qdrant":
         return None
 
-    if isinstance(exc, VectorStoreError):
+    if isinstance(exc, exceptions.VectorStoreError):
         if exc.reason_code == "unreachable":
             return "qdrant_unreachable"
         if exc.reason_code == "dependency_missing":
@@ -220,7 +223,9 @@ def _qdrant_runtime_skip_reason(config: AppConfig, exc: Exception) -> str | None
     return None
 
 
-def _build_leaderboard(runs: list[dict[str, object]]) -> list[dict[str, object]]:
+def _build_leaderboard(
+    runs: list[dict[str, object]],
+) -> list[dict[str, object]]:
     leaderboard: list[dict[str, object]] = []
     for run in runs:
         if run.get("status") != "ok":
@@ -231,11 +236,21 @@ def _build_leaderboard(runs: list[dict[str, object]]) -> list[dict[str, object]]
         leaderboard.append(
             {
                 "label": str(run["label"]),
-                "answer_keyword_hit_rate": summary.get("answer_keyword_hit_rate", 0.0),
-                "retrieval_source_hit_rate": summary.get("retrieval_source_hit_rate", 0.0),
-                "retrieval_span_hit_rate": summary.get("retrieval_span_hit_rate", 0.0),
-                "citation_span_hit_rate": summary.get("citation_span_hit_rate", 0.0),
-                "avg_response_time_ms": summary.get("avg_response_time_ms", 0.0),
+                "answer_keyword_hit_rate": summary.get(
+                    "answer_keyword_hit_rate", 0.0
+                ),
+                "retrieval_source_hit_rate": summary.get(
+                    "retrieval_source_hit_rate", 0.0
+                ),
+                "retrieval_span_hit_rate": summary.get(
+                    "retrieval_span_hit_rate", 0.0
+                ),
+                "citation_span_hit_rate": summary.get(
+                    "citation_span_hit_rate", 0.0
+                ),
+                "avg_response_time_ms": summary.get(
+                    "avg_response_time_ms", 0.0
+                ),
             }
         )
     leaderboard.sort(

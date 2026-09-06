@@ -1,29 +1,24 @@
 """Prompt-context formatting and citation assembly shared by runtimes.
 
-Keeping these here is what lets two runtimes produce answers with identical citation
-semantics, so an eval can compare them on answer quality alone. Retrieval itself lives
-in `rag.pipeline`, which both runtimes call directly: it is a retrieval concern, not a
-runtime one, and putting it here would have made the reranking stage look like
-something a runtime could choose to skip.
+Keeping these here is what lets two runtimes produce answers with identical
+citation semantics, so an eval can compare them on answer quality alone.
+Retrieval itself lives in `rag.pipeline`, which both runtimes call directly: it
+is a retrieval concern, not a runtime one, and putting it here would have made
+the reranking stage look like something a runtime could choose to skip.
 
-Both formatters render one labelled block per hit, `[S1]`, `[S2]`, and so on, with the
-multi-line body last. That layout is a contract, not a style choice: the extractive
-fallback in `providers/chat.py` parses these blocks back out when no live model is
-available, and it can only do that if every label starts at column 0 and the body is
-the final field in its block.
+Both formatters render one labelled block per hit, `[S1]`, `[S2]`, and so on,
+with the multi-line body last. That layout is a contract, not a style choice:
+the extractive fallback in `providers/chat.py` parses these blocks back out when
+no live model is available, and it can only do that if every label starts at
+column 0 and the body is the final field in its block.
 """
 
 from __future__ import annotations
 
-from local_docs_rag_agent.models import (
-    AgentAnswer,
-    AnswerDiagnostics,
-    CitationSpan,
-    RetrievalHit,
-)
+from local_docs_rag_agent import models
 
 
-def build_answer_context(hits: list[RetrievalHit]) -> str:
+def build_answer_context(hits: list[models.RetrievalHit]) -> str:
     """Render retrieved hits as the grounding context handed to a chat provider."""
 
     if not hits:
@@ -45,7 +40,7 @@ def build_answer_context(hits: list[RetrievalHit]) -> str:
     )
 
 
-def format_tool_search_results(hits: list[RetrievalHit]) -> str:
+def format_tool_search_results(hits: list[models.RetrievalHit]) -> str:
     """Render retrieved hits as the return value of the agent's search tool."""
 
     if not hits:
@@ -68,7 +63,7 @@ def format_tool_search_results(hits: list[RetrievalHit]) -> str:
     )
 
 
-def collect_citations(hits: list[RetrievalHit]) -> list[str]:
+def collect_citations(hits: list[models.RetrievalHit]) -> list[str]:
     """Return the cited source paths, de-duplicated and in retrieval order."""
 
     seen: set[str] = set()
@@ -81,14 +76,20 @@ def collect_citations(hits: list[RetrievalHit]) -> list[str]:
     return citations
 
 
-def collect_citation_spans(hits: list[RetrievalHit]) -> list[CitationSpan]:
+def collect_citation_spans(
+    hits: list[models.RetrievalHit],
+) -> list[models.CitationSpan]:
     """Return the exact source spans backing each hit, in retrieval order."""
 
     return [hit.citation_span for hit in hits]
 
 
-def merge_hits(existing: list[RetrievalHit], new_hits: list[RetrievalHit]) -> None:
-    """Append hits not already present, so repeated tool searches accumulate evidence."""
+def merge_hits(
+    existing: list[models.RetrievalHit], new_hits: list[models.RetrievalHit]
+) -> None:
+    """Append hits not already present, so repeated tool searches accumulate
+    evidence.
+    """
 
     seen = {hit.chunk.chunk_id for hit in existing}
     for hit in new_hits:
@@ -101,12 +102,14 @@ def merge_hits(existing: list[RetrievalHit], new_hits: list[RetrievalHit]) -> No
 def build_agent_answer(
     question: str,
     answer: str,
-    hits: list[RetrievalHit],
-    diagnostics: AnswerDiagnostics,
-) -> AgentAnswer:
-    """Assemble the final answer with citations derived from the hits that produced it."""
+    hits: list[models.RetrievalHit],
+    diagnostics: models.AnswerDiagnostics,
+) -> models.AgentAnswer:
+    """Assemble the final answer with citations derived from the hits that produced
+    it.
+    """
 
-    return AgentAnswer(
+    return models.AgentAnswer(
         question=question,
         answer=answer,
         citations=collect_citations(hits),
@@ -123,9 +126,10 @@ def _render_hit_block(
     body_label: str,
     body: str,
 ) -> str:
-    # Built by explicit joining rather than an indented template: a chunk body almost
-    # always contains a line starting at column 0, which stops `textwrap.dedent` from
-    # removing the template's indentation and would leave every label indented.
+    # Built by explicit joining rather than an indented template: a chunk body
+    # almost always contains a line starting at column 0, which stops
+    # `textwrap.dedent` from removing the template's indentation and would leave
+    # every label indented.
     lines = [f"[S{index}]"]
     lines.extend(f"{label}: {value}" for label, value in fields)
     lines.append(f"{body_label}: {body}")

@@ -45,7 +45,9 @@ pythonpath = ["backend/src"]
 addopts = "-ra"
 
 [tool.ruff]
-line-length = 100
+# 80 columns, per the Google Python Style Guide (3.2). `ruff format` holds code to it;
+# comments and docstrings are wrapped by hand, which E501 still enforces.
+line-length = 80
 target-version = "py311"
 
 [tool.ruff.lint]
