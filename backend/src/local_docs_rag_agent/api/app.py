@@ -59,6 +59,13 @@ def create_app() -> fastapi.FastAPI:
     def index() -> (
         fastapi_responses.FileResponse | fastapi_responses.JSONResponse
     ):
+        """Serve the built frontend, or say where to find it in dev.
+
+        Returns:
+          The built `index.html` when one exists, otherwise a JSON
+          pointer to the dev server, so hitting the API root during
+          development reads as a hint rather than a 404.
+        """
         if FRONTEND_INDEX_PATH.is_file():
             return fastapi_responses.FileResponse(FRONTEND_INDEX_PATH)
         return fastapi_responses.JSONResponse(
@@ -96,6 +103,17 @@ def _register_error_handlers(app: fastapi.FastAPI) -> None:
         request: fastapi.Request,
         exc: exceptions.LocalDocsError,
     ) -> fastapi_responses.JSONResponse:
+        """Render an expected failure as the documented error payload.
+
+        Args:
+          request: Unused. The status depends on the error, not the
+            route that raised it.
+          exc: The failure to render.
+
+        Returns:
+          The error payload, with the stable code and action hint the
+          exception carries.
+        """
         del request
         status_code = _status_code_for_error(exc)
         return fastapi_responses.JSONResponse(
