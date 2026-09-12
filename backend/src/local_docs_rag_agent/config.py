@@ -165,7 +165,7 @@ class AppConfig:
             embedding_retry_backoff_ms=env.integer(
                 "EMBEDDING_RETRY_BACKOFF_MS", 800
             ),
-            docs_dir=env.path("DOCS_DIR", "docs"),
+            docs_dir=env.path("DOCS_DIR", "docs/sample"),
             docs_exclude_patterns=env.string_list("DOCS_EXCLUDE_PATTERNS"),
             index_path=env.path("INDEX_PATH", "data/index/chunks.jsonl"),
             ingest_manifest_path=env.path(
