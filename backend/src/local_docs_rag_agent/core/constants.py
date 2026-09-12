@@ -4,7 +4,7 @@ Every option that must agree across configuration parsing, HTTP request
 validation, and CLI argument choices is declared once here. Adding a runtime,
 chunk strategy, vector backend, or API style is therefore a single edit in this
 module plus the implementation that handles it, instead of the same literal list
-repeated in ``config.py``, ``api/schemas.py``, ``cli.py``, and the command
+repeated in ``config``, ``api/schemas.py``, ``cli.py``, and the command
 handlers.
 
 The tuples are derived from the ``Literal`` aliases with :func:`typing.get_args`

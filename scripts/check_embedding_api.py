@@ -11,7 +11,7 @@ from __future__ import annotations
 import sys
 
 from local_docs_rag_agent import config as app_config
-from local_docs_rag_agent import exceptions
+from local_docs_rag_agent.core import exceptions
 from local_docs_rag_agent.providers import openai_client
 
 SAMPLE_TEXT = "Local Docs RAG Agent embedding connectivity check."

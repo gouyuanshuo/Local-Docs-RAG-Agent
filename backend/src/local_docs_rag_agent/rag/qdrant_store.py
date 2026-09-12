@@ -14,7 +14,7 @@ import uuid
 from collections.abc import Iterable
 from typing import Any
 
-from local_docs_rag_agent import exceptions, models
+from local_docs_rag_agent.core import exceptions, models
 from local_docs_rag_agent.providers import base as provider_base
 from local_docs_rag_agent.rag import retrieval, scoring
 

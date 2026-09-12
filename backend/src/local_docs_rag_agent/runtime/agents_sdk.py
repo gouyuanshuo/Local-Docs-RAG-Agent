@@ -17,7 +17,8 @@ from typing import Any
 import openai
 
 from local_docs_rag_agent import config as app_config
-from local_docs_rag_agent import models, tools
+from local_docs_rag_agent import tools
+from local_docs_rag_agent.core import models
 from local_docs_rag_agent.providers import openai_client
 from local_docs_rag_agent.runtime import basic as basic_runtime
 from local_docs_rag_agent.runtime import shared as runtime_shared

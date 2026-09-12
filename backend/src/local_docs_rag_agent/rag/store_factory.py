@@ -10,7 +10,7 @@ it exists.
 from __future__ import annotations
 
 from local_docs_rag_agent import config as app_config
-from local_docs_rag_agent import exceptions
+from local_docs_rag_agent.core import exceptions
 from local_docs_rag_agent.providers import base as provider_base
 from local_docs_rag_agent.providers import factory as provider_factory
 from local_docs_rag_agent.rag import base as rag_base

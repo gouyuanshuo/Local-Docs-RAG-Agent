@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from local_docs_rag_agent import config as app_config
-from local_docs_rag_agent import exceptions
+from local_docs_rag_agent.core import exceptions
 
 
 def test_external_http_trust_env_defaults_to_true(

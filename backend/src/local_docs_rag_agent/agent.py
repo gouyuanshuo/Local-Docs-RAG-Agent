@@ -8,7 +8,8 @@ script all enter the system through the same door.
 from __future__ import annotations
 
 from local_docs_rag_agent import config as app_config
-from local_docs_rag_agent import models, runtime
+from local_docs_rag_agent import runtime
+from local_docs_rag_agent.core import models
 
 
 class LocalDocsAgent:

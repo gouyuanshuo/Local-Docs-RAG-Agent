@@ -2,7 +2,7 @@ import pathlib
 
 import pytest
 
-from local_docs_rag_agent import exceptions
+from local_docs_rag_agent.core import exceptions
 from local_docs_rag_agent.rag import chunker
 
 

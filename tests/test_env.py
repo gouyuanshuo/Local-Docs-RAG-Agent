@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from local_docs_rag_agent import constants, env, exceptions
+from local_docs_rag_agent.core import constants, env, exceptions
 
 
 def test_blank_value_falls_back_to_default(

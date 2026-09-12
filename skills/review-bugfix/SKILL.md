@@ -11,10 +11,10 @@ Use this skill after meaningful code changes or when debugging.
 
 Before reviewing or debugging:
 
-1. Read `AGENTS.md`
-2. Read `spec.md`
-3. Read `tasks.md`
-4. Check `docs/development-roadmap.md`
+1. Read root `AGENTS.md` and the module `AGENTS.md` for the code under review
+2. Read `spec.md` only if the bug is a product-requirement mismatch
+3. Skim `tasks.md` current focus
+4. Check `docs/development-roadmap.md` only if phase status is in question
 
 ## Review workflow
 

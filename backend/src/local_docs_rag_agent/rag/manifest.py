@@ -13,8 +13,7 @@ import dataclasses
 import json
 import pathlib
 
-from local_docs_rag_agent import exceptions, models
-from local_docs_rag_agent.rag import file_io
+from local_docs_rag_agent.core import exceptions, file_io, models
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

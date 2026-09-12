@@ -5,7 +5,7 @@ from __future__ import annotations
 import pathlib
 
 from local_docs_rag_agent import config as app_config
-from local_docs_rag_agent import constants
+from local_docs_rag_agent.core import constants
 from local_docs_rag_agent.evals import harness
 from local_docs_rag_agent.providers import factory as provider_factory
 from local_docs_rag_agent.rag import chunker, discovery, retrieval

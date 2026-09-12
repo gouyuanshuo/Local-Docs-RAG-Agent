@@ -8,7 +8,7 @@ it ran or delegated to another runtime.
 from __future__ import annotations
 
 from local_docs_rag_agent import config as app_config
-from local_docs_rag_agent import models
+from local_docs_rag_agent.core import models
 from local_docs_rag_agent.runtime import agents_sdk
 from local_docs_rag_agent.runtime import basic as basic_runtime
 

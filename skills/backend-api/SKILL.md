@@ -11,21 +11,25 @@ Use this skill for backend and retrieval work in this repository.
 
 Before changing code:
 
-1. Read `AGENTS.md`
-2. Read `spec.md`
-3. Read `tasks.md`
-4. Check `docs/development-roadmap.md`
+1. Read root `AGENTS.md` (router only)
+2. Open the **module** `AGENTS.md` for the area you are changing
+   (`core`, `config`, `providers`, `rag`, `runtime`, `evals`, `api`,
+   or `frontend/AGENTS.md`)
+3. Skim `tasks.md` current focus
+4. Check `docs/development-roadmap.md` only if the task changes phase status
 
 ## Default workflow
 
 1. Identify the current phase and active task in `tasks.md`
-2. Confirm the backend area being changed:
-   - `api/`
-   - `commands/`
+2. Confirm the backend area being changed and stay inside that module's
+   file list from its `AGENTS.md`:
+   - `api/` (delivery: also `cli.py`, `commands/`, `presenters.py`)
    - `evals/`
    - `providers/`
    - `rag/`
-   - `runtime/`
+   - `runtime/` (also `agent.py`, `tools.py`)
+   - `config/`
+   - `core/`
 3. Prefer extending the existing module structure before adding new top-level abstractions
 4. Keep request/response payloads explicit through schemas or presenters
 5. Run the smallest meaningful verification path after changes
@@ -34,6 +38,8 @@ Before changing code:
 ## Repository-specific reminders
 
 - Backend package root: `backend/src/local_docs_rag_agent/`
+- Closed option sets: `core/constants.py`
+- Retrieval from outside `rag/`: `from local_docs_rag_agent import rag`
 - Current active architectural priorities:
   - measurable
   - explainable

@@ -4,8 +4,9 @@ import argparse
 
 import pytest
 
-from local_docs_rag_agent import cli, constants, exceptions
+from local_docs_rag_agent import cli
 from local_docs_rag_agent import config as app_config
+from local_docs_rag_agent.core import constants, exceptions
 
 
 @pytest.mark.parametrize(

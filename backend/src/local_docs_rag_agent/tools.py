@@ -11,15 +11,15 @@ from __future__ import annotations
 import datetime
 
 from local_docs_rag_agent import config as app_config
-from local_docs_rag_agent import models
-from local_docs_rag_agent.rag import discovery, pipeline
+from local_docs_rag_agent import rag
+from local_docs_rag_agent.core import models
 
 
 def list_documents(config: app_config.AppConfig) -> list[str]:
     """Return the POSIX paths of every document the agent can currently read."""
     return [
         path.as_posix()
-        for path in discovery.collect_document_paths(
+        for path in rag.collect_document_paths(
             config.docs_dir, config.docs_exclude_patterns
         )
     ]
@@ -37,10 +37,10 @@ def search_documents(
 
     Returns:
       Hits plus embedding and reranker status. Going through
-      :func:`pipeline.retrieve` keeps the tool's ordering and
+      :func:`rag.retrieve` keeps the tool's ordering and
       degradation identical to the answer path.
     """
-    return pipeline.retrieve(config, query, top_k or config.top_k)
+    return rag.retrieve(config, query, top_k or config.top_k)
 
 
 def get_system_time() -> str:

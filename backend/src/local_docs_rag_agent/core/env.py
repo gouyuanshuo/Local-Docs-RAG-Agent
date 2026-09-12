@@ -16,7 +16,7 @@ from typing import TypeVar, cast
 
 import dotenv
 
-from local_docs_rag_agent import exceptions
+from local_docs_rag_agent.core import exceptions
 
 ChoiceT = TypeVar("ChoiceT", bound=str)
 

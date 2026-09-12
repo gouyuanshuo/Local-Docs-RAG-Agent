@@ -13,8 +13,9 @@ from __future__ import annotations
 
 import sys
 
-from local_docs_rag_agent import agent, exceptions, models, presenters, rag
+from local_docs_rag_agent import agent, presenters, rag
 from local_docs_rag_agent import config as app_config
+from local_docs_rag_agent.core import exceptions, models
 from local_docs_rag_agent.evals import harness
 
 

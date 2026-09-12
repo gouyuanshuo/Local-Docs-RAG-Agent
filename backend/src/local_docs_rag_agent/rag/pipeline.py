@@ -22,7 +22,7 @@ issued before this module existed.
 from __future__ import annotations
 
 from local_docs_rag_agent import config as app_config
-from local_docs_rag_agent import models
+from local_docs_rag_agent.core import models
 from local_docs_rag_agent.rag import llm_rerank, rerank, store_factory
 
 

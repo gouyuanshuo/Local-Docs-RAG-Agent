@@ -34,7 +34,7 @@ import textwrap
 
 import openai
 
-from local_docs_rag_agent import models
+from local_docs_rag_agent.core import models
 from local_docs_rag_agent.providers import errors, openai_client
 from local_docs_rag_agent.rag import scoring
 

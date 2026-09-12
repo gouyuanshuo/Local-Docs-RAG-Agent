@@ -13,7 +13,7 @@ import dataclasses
 import pathlib
 from collections.abc import Iterator
 
-from local_docs_rag_agent import constants, exceptions, models
+from local_docs_rag_agent.core import constants, exceptions, models
 
 
 @dataclasses.dataclass(slots=True)

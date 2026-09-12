@@ -20,9 +20,9 @@ from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 
 from local_docs_rag_agent import config as app_config
-from local_docs_rag_agent import constants, exceptions
 from local_docs_rag_agent.commands import ask, eval_compare, ingest
 from local_docs_rag_agent.commands import eval as eval_command
+from local_docs_rag_agent.core import constants, exceptions
 from local_docs_rag_agent.evals import comparison
 
 if TYPE_CHECKING:

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from local_docs_rag_agent import models
+from local_docs_rag_agent.core import models
 
 
 class ChunkStore(Protocol):

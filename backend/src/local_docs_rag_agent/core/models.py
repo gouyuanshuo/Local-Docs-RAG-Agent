@@ -12,7 +12,7 @@ from __future__ import annotations
 import dataclasses
 from typing import Literal
 
-from local_docs_rag_agent import constants, exceptions
+from local_docs_rag_agent.core import constants, exceptions
 
 ProviderMode = Literal["ready", "live", "fallback", "unknown"]
 

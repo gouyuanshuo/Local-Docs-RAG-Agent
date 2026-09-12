@@ -13,7 +13,7 @@ import dataclasses
 import pathlib
 from typing import Any, cast
 
-from local_docs_rag_agent import constants, env, exceptions
+from local_docs_rag_agent.core import constants, env, exceptions
 
 DEFAULT_LLM_MODEL = "gpt-4.1-mini"
 DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"

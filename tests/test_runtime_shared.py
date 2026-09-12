@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from local_docs_rag_agent import models
+from local_docs_rag_agent.core import models
 from local_docs_rag_agent.providers import chat
 from local_docs_rag_agent.rag import scoring
 from local_docs_rag_agent.runtime import shared as runtime_shared

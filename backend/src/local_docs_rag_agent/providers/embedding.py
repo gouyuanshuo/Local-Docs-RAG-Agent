@@ -15,7 +15,7 @@ import time
 
 import openai
 
-from local_docs_rag_agent import models
+from local_docs_rag_agent.core import models
 from local_docs_rag_agent.providers import base as provider_base
 from local_docs_rag_agent.providers import errors, openai_client
 

@@ -13,7 +13,7 @@ from __future__ import annotations
 import math
 import re
 
-from local_docs_rag_agent import models
+from local_docs_rag_agent.core import models
 
 TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
 

@@ -19,8 +19,8 @@ from fastapi import responses as fastapi_responses
 from fastapi import staticfiles as fastapi_staticfiles
 from fastapi.middleware import cors as fastapi_cors
 
-from local_docs_rag_agent import exceptions
 from local_docs_rag_agent.api import routes
+from local_docs_rag_agent.core import exceptions
 
 
 def _repo_root() -> pathlib.Path:

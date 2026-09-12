@@ -10,7 +10,8 @@ from __future__ import annotations
 import sys
 
 from local_docs_rag_agent import config as app_config
-from local_docs_rag_agent import exceptions, rag
+from local_docs_rag_agent import rag
+from local_docs_rag_agent.core import exceptions
 
 
 def main() -> int:

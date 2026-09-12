@@ -16,7 +16,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from local_docs_rag_agent import config as app_config
-from local_docs_rag_agent import models
+from local_docs_rag_agent.core import models
 
 RATE_PRECISION = 4
 MILLISECOND_PRECISION = 2

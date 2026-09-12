@@ -8,9 +8,9 @@ when another runtime handed off to it.
 from __future__ import annotations
 
 from local_docs_rag_agent import config as app_config
-from local_docs_rag_agent import constants, models
+from local_docs_rag_agent import rag
+from local_docs_rag_agent.core import constants, models
 from local_docs_rag_agent.providers import factory as provider_factory
-from local_docs_rag_agent.rag import pipeline
 from local_docs_rag_agent.runtime import shared as runtime_shared
 
 
@@ -34,7 +34,7 @@ def answer_with_basic_runtime(
       The answer, its citations, and the diagnostics behind it.
     """
     provider = provider_factory.build_chat_provider(config)
-    outcome = pipeline.retrieve(config, question)
+    outcome = rag.retrieve(config, question)
     hits = outcome.hits
     context = runtime_shared.build_answer_context(hits)
     answer = provider.answer(question=question, context=context)

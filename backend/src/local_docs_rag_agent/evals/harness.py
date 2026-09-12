@@ -20,8 +20,9 @@ import json
 import pathlib
 import time
 
-from local_docs_rag_agent import agent, exceptions, models
+from local_docs_rag_agent import agent
 from local_docs_rag_agent import config as app_config
+from local_docs_rag_agent.core import exceptions, models
 
 
 def load_eval_cases(eval_path: pathlib.Path) -> list[models.EvalCase]:

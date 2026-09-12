@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import pytest
 
-from local_docs_rag_agent import env
+from local_docs_rag_agent.core import env
 
 APPLICATION_ENVIRONMENT_VARIABLES = (
     "AGENTS_MAX_TURNS",

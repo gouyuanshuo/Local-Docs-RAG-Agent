@@ -12,9 +12,9 @@ from __future__ import annotations
 import json
 import pathlib
 
-from local_docs_rag_agent import exceptions, models
+from local_docs_rag_agent.core import exceptions, file_io, models
 from local_docs_rag_agent.providers import base as provider_base
-from local_docs_rag_agent.rag import file_io, retrieval
+from local_docs_rag_agent.rag import retrieval
 
 
 class LocalJsonlChunkStore:

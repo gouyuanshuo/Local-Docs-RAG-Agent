@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import dataclasses
 
-from local_docs_rag_agent import constants, models
+from local_docs_rag_agent.core import constants, models
 from local_docs_rag_agent.rag import bm25, fusion, scoring
 
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 import fnmatch
 import pathlib
 
-from local_docs_rag_agent import exceptions
+from local_docs_rag_agent.core import exceptions
 
 SUPPORTED_EXTENSIONS = frozenset({".md", ".txt"})
 

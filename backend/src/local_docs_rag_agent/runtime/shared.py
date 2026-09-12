@@ -15,7 +15,7 @@ column 0 and the body is the final field in its block.
 
 from __future__ import annotations
 
-from local_docs_rag_agent import models
+from local_docs_rag_agent.core import models
 
 
 def build_answer_context(hits: list[models.RetrievalHit]) -> str:

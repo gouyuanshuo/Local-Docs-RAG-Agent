@@ -38,7 +38,7 @@ provider policy. Both delegate to the same Python application modules.
   - maps HTTP requests to application operations
 - `api/schemas.py`
   - validates public request and response contracts, using the option types from
-    `constants.py` rather than re-declaring them
+    `core.constants` rather than re-declaring them
 - `cli.py`
   - builds the argument parser; each subcommand registers itself and binds a handler
     with `set_defaults(handler=...)`, so `main` has no per-command branching
@@ -179,25 +179,32 @@ those paths in `needs_reindex` so a later ingest *or* `ensure_index` (Ask/eval)
 with a matching checksum still attempts restore instead of claiming the source
 is already indexed.
 
-### Domain layer
+### Domain layer (`core/`)
 
-- `constants.py`
+Coding-agent contracts live next to the code (`*/AGENTS.md`). Root `AGENTS.md`
+is the router; this file stays the system diagram.
+
+- `core/constants.py`
   - the closed option sets shared by every layer: runtimes, chunk strategies, vector
     backends, API styles, retrieval strategies, and rerankers. The runtime tuples are
     derived from the `Literal` aliases
     with `typing.get_args`, so the static type and the runtime validation cannot drift
-- `env.py`
+- `core/env.py`
   - typed environment readers and value validators
-- `config.py`
-  - immutable validated runtime configuration; declares *what* is configured, while
-    `env.py` owns *how* each value is read and checked
-- `models.py`
+- `core/models.py`
   - chunks, hits, answers, diagnostics, and eval records
-- `exceptions.py`
+- `core/exceptions.py`
   - stable expected-failure taxonomy shared by API, CLI, and eval
+- `core/file_io.py`
+  - atomic text replacement used by the local index, ingest manifest, and
+    compare reports
+- `config/` (`AppConfig`)
+  - immutable validated runtime configuration; declares *what* is configured,
+    while `core/env.py` owns *how* each value is read and checked
 
 These modules are dependency-light and contain no framework-specific response types.
-`constants.py` sits at the very bottom and imports nothing from the project at all.
+`core/constants.py` sits at the very bottom and imports nothing from the project
+at all. `core` must not import `rag`, `runtime`, `evals`, or `api`.
 
 ## Frontend boundary
 

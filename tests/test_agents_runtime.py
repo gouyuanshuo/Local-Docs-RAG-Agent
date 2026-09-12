@@ -7,9 +7,10 @@ from typing import Any, ClassVar
 import pytest
 
 from local_docs_rag_agent import config as app_config
-from local_docs_rag_agent import models, tools
+from local_docs_rag_agent import rag, tools
+from local_docs_rag_agent.core import models
 from local_docs_rag_agent.providers import openai_client
-from local_docs_rag_agent.rag import pipeline, scoring
+from local_docs_rag_agent.rag import scoring
 from local_docs_rag_agent.runtime import agents_sdk
 from local_docs_rag_agent.runtime import basic as basic_runtime
 
@@ -222,9 +223,7 @@ def test_search_documents_returns_pipeline_statuses(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     outcome = _retrieval_outcome()
-    monkeypatch.setattr(
-        pipeline, "retrieve", lambda config, query, top_k: outcome
-    )
+    monkeypatch.setattr(rag, "retrieve", lambda config, query, top_k: outcome)
 
     result = tools.search_documents(_config("responses"), "attention", 1)
 

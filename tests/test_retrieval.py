@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from local_docs_rag_agent import config as app_config
-from local_docs_rag_agent import exceptions, models
+from local_docs_rag_agent.core import exceptions, models
 from local_docs_rag_agent.rag import (
     bm25,
     fusion,

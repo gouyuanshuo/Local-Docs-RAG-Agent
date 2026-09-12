@@ -12,8 +12,8 @@ The dependency direction inside the package runs one way:
     store_factory -> retrieval -> bm25 / fusion / scoring
     pipeline -> rerank -> llm_rerank
 
-`base` and `models` sit at the bottom and import nothing from the layers above
-them. `pipeline` sits at the top: it is the only module that knows both
+`base` sits at the bottom of this package. Domain records live in `core`.
+`pipeline` sits at the top: it is the only module that knows both
 retrieval stages exist, which is what keeps a store unaware of reranking and a
 reranker unaware of backends.
 """

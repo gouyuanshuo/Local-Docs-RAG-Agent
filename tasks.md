@@ -30,6 +30,8 @@ Current theme:
 
 - keep eval/compare honest (no fallback winners; gold is source substrings)
 - make Qdrant indexing lifecycle stable and maintainable
+- module contracts (`*/AGENTS.md`) are the parallel-development entry;
+  root `AGENTS.md` is the router
 - keep module boundaries and commit history legible as the surface grows
 
 ## Active tasks
@@ -185,6 +187,13 @@ Current theme:
       are `degraded`, excluded from the leaderboard; RR sort is tested
 - [ ] Re-run `eval-compare` on a live provider once the set can discriminate,
       and record which strategy actually wins (do not rank fallback cells)
+
+### Agent-native modules
+
+- [x] Root `AGENTS.md` is a module router; each package has `AGENTS.md`
+- [x] Thin `core/` (`constants`, `models`, `exceptions`, `env`, `file_io`)
+- [x] Production code outside `rag/` uses the rag facade
+      (`tests/test_import_graph.py`)
 
 ### Follow-ups
 

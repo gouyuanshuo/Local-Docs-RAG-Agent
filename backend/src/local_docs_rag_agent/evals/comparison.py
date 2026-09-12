@@ -27,9 +27,9 @@ import pathlib
 from collections.abc import Callable, Mapping, Sequence
 
 from local_docs_rag_agent import config as app_config
-from local_docs_rag_agent import constants, exceptions, models, presenters, rag
+from local_docs_rag_agent import presenters, rag
+from local_docs_rag_agent.core import constants, exceptions, file_io, models
 from local_docs_rag_agent.evals import harness
-from local_docs_rag_agent.rag import file_io
 
 # Guards API and CLI input from expanding into an unbounded Cartesian workload.
 MAX_MATRIX_RUNS = 128

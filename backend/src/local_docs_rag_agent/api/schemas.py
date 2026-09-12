@@ -12,7 +12,7 @@ from typing import Annotated, Literal
 
 import pydantic
 
-from local_docs_rag_agent import constants, models
+from local_docs_rag_agent.core import constants, models
 
 NonEmptyString = Annotated[
     str,
