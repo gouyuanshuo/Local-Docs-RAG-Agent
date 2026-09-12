@@ -106,15 +106,24 @@ def ingest_documents(
         _require_live_embeddings(embedding_provider)
 
     is_qdrant = config.vector_backend == "qdrant"
-    store.save(
-        chunks,
-        removed_source_paths=list(plan.removed_sources) if is_qdrant else None,
-        # Include changed-to-empty sources so their stale Qdrant points are
-        # deleted.
-        replaced_source_paths=list(plan.sources_to_index)
-        if is_qdrant
-        else None,
-    )
+    try:
+        store.save(
+            chunks,
+            removed_source_paths=(
+                list(plan.removed_sources) if is_qdrant else None
+            ),
+            # Include changed-to-empty sources so their stale Qdrant
+            # points are deleted.
+            replaced_source_paths=(
+                list(plan.sources_to_index) if is_qdrant else None
+            ),
+        )
+    except Exception:
+        if is_qdrant and plan.sources_to_index:
+            previous_manifest.marked_needs_reindex(plan.sources_to_index).save(
+                config.ingest_manifest_path
+            )
+        raise
     previous_manifest.updated(
         source_checksums=source_checksums,
         indexed_sources=set(plan.sources_to_index),
@@ -186,12 +195,14 @@ def _build_ingest_plan(
     removed_sources = tuple(
         sorted(set(previous_sources) - set(source_checksums))
     )
+    dirty_sources = set(previous_manifest.needs_reindex)
     changed_sources = tuple(
         sorted(
             source_path
             for source_path, checksum in source_checksums.items()
             if source_path not in previous_sources
             or previous_sources[source_path].checksum != checksum
+            or source_path in dirty_sources
         )
     )
     sources_to_index = (

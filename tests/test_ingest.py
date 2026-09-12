@@ -2,13 +2,21 @@ from __future__ import annotations
 
 import json
 import pathlib
+import types
+from typing import Any
 
 import pytest
+import qdrant_client
 
 from local_docs_rag_agent import config as app_config
 from local_docs_rag_agent import exceptions, models
 from local_docs_rag_agent.providers import factory as provider_factory
-from local_docs_rag_agent.rag import ingest, qdrant_store, store_factory
+from local_docs_rag_agent.rag import (
+    ingest,
+    manifest,
+    qdrant_store,
+    store_factory,
+)
 
 
 class FakeEmbeddingProvider:
@@ -266,3 +274,95 @@ def test_ensure_index_rebuilds_when_chunk_configuration_changes(
     ingest.ensure_index(config.with_overrides(chunk_size=30, chunk_overlap=5))
 
     assert len(index_path.read_text(encoding="utf-8").splitlines()) == 3
+
+
+class _RecordingQdrantClient:
+    """In-process Qdrant stand-in that can fail after delete."""
+
+    def __init__(self) -> None:
+        self.exists = False
+        self.fail_upsert = False
+        self.upserts = 0
+        self.deletes = 0
+
+    def collection_exists(self, name: str) -> bool:
+        del name
+        return self.exists
+
+    def create_collection(self, **kwargs: Any) -> None:
+        del kwargs
+        self.exists = True
+
+    def create_payload_index(self, **kwargs: Any) -> None:
+        del kwargs
+
+    def delete(self, **kwargs: Any) -> None:
+        del kwargs
+        self.deletes += 1
+
+    def upsert(self, **kwargs: Any) -> None:
+        del kwargs
+        self.upserts += 1
+        if self.fail_upsert:
+            raise RuntimeError("forced upsert failure")
+        self.exists = True
+
+    def get_collection(self, name: str) -> types.SimpleNamespace:
+        del name
+        return types.SimpleNamespace(
+            config=types.SimpleNamespace(
+                params=types.SimpleNamespace(
+                    vectors=types.SimpleNamespace(size=2)
+                )
+            )
+        )
+
+
+def test_qdrant_upsert_failure_reindexes_unchanged_checksum(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    source_path = docs_dir / "sample.md"
+    source_path.write_text("Attention uses queries and keys.", encoding="utf-8")
+    manifest_path = tmp_path / "manifest.json"
+    client = _RecordingQdrantClient()
+    monkeypatch.setattr(qdrant_client, "QdrantClient", lambda **kwargs: client)
+    monkeypatch.setattr(
+        provider_factory,
+        "build_embedding_provider",
+        lambda config: FakeEmbeddingProvider(),
+    )
+    config = _qdrant_config(tmp_path, docs_dir, manifest_path)
+
+    first = ingest.ingest_documents(config)
+    assert first
+    assert isinstance(
+        store_factory.build_store(config), qdrant_store.QdrantChunkStore
+    )
+    assert client.upserts == 1
+    stored = manifest.IngestManifest.load(manifest_path)
+    assert stored.needs_reindex == ()
+
+    client.exists = False
+    client.fail_upsert = True
+    upserts_before_fail = client.upserts
+    with pytest.raises(exceptions.VectorStoreError):
+        ingest.ingest_documents(config)
+    assert client.upserts == upserts_before_fail + 1
+    dirty = manifest.IngestManifest.load(manifest_path)
+    assert source_path.as_posix() in dirty.needs_reindex
+    assert (
+        dirty.sources[source_path.as_posix()].checksum
+        == stored.sources[source_path.as_posix()].checksum
+    )
+
+    client.exists = True
+    client.fail_upsert = False
+    upserts_before_repair = client.upserts
+    repaired = ingest.ingest_documents(config)
+    assert repaired
+    assert client.upserts == upserts_before_repair + 1
+    clean = manifest.IngestManifest.load(manifest_path)
+    assert clean.needs_reindex == ()

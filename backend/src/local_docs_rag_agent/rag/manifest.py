@@ -74,6 +74,7 @@ class IngestManifest:
 
     sources: dict[str, ManifestEntry] = dataclasses.field(default_factory=dict)
     index_fingerprint: str | None = None
+    needs_reindex: tuple[str, ...] = ()
 
     @classmethod
     def load(cls, path: pathlib.Path) -> IngestManifest:
@@ -110,6 +111,9 @@ class IngestManifest:
             raise exceptions.DataFormatError(
                 f"Ingest manifest {path} has an invalid index_fingerprint"
             )
+        needs_reindex = _string_tuple(
+            payload.get("needs_reindex", []), path, "needs_reindex"
+        )
         return cls(
             sources={
                 str(source_path): ManifestEntry.from_payload(
@@ -119,6 +123,7 @@ class IngestManifest:
                 for source_path, entry_payload in payload["sources"].items()
             },
             index_fingerprint=index_fingerprint,
+            needs_reindex=needs_reindex,
         )
 
     def updated(
@@ -159,15 +164,48 @@ class IngestManifest:
                 checksum=checksum,
                 chunk_ids=chunk_ids,
             )
+        remaining_dirty = tuple(
+            sorted(
+                source_path
+                for source_path in self.needs_reindex
+                if source_path in next_sources
+                and source_path not in indexed_sources
+            )
+        )
         return IngestManifest(
             sources=next_sources,
             index_fingerprint=index_fingerprint,
+            needs_reindex=remaining_dirty,
+        )
+
+    def marked_needs_reindex(
+        self, source_paths: tuple[str, ...]
+    ) -> IngestManifest:
+        """Return a copy that will reindex `source_paths` on the next ingest.
+
+        Used when a store write deleted or failed to upsert those sources,
+        so a matching checksum must not be treated as "already indexed".
+
+        Args:
+          source_paths: Sources whose Qdrant points may be missing.
+
+        Returns:
+          A new manifest. Existing checksums are left in place so the
+          next ingest can still see which file it is repairing.
+        """
+        return IngestManifest(
+            sources=self.sources,
+            index_fingerprint=self.index_fingerprint,
+            needs_reindex=tuple(
+                sorted(set(self.needs_reindex) | set(source_paths))
+            ),
         )
 
     def save(self, path: pathlib.Path) -> None:
         """Write the manifest to `path`, atomically and with sorted keys."""
         payload = {
             "index_fingerprint": self.index_fingerprint,
+            "needs_reindex": list(self.needs_reindex),
             "sources": {
                 source_path: entry.to_payload()
                 for source_path, entry in sorted(self.sources.items())
@@ -177,3 +215,30 @@ class IngestManifest:
             path,
             json.dumps(payload, ensure_ascii=True, indent=2),
         )
+
+
+def _string_tuple(
+    value: object, path: pathlib.Path, field_name: str
+) -> tuple[str, ...]:
+    """Return `value` as a tuple of strings.
+
+    Args:
+      value: Stored JSON value.
+      path: Manifest path, used in the error message.
+      field_name: Field being parsed.
+
+    Returns:
+      The strings, dropping blanks.
+
+    Raises:
+      DataFormatError: If `value` is not a list of strings.
+    """
+    if value is None:
+        return ()
+    if not isinstance(value, list) or not all(
+        isinstance(item, str) for item in value
+    ):
+        raise exceptions.DataFormatError(
+            f"Ingest manifest {path} has an invalid {field_name}"
+        )
+    return tuple(item for item in value if item)
