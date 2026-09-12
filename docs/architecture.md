@@ -175,8 +175,9 @@ If a changed document becomes empty, it is still included in Qdrant replacement
 deletes so old points cannot survive.
 
 If a Qdrant save deletes a source and then fails to upsert, the manifest records
-those paths in `needs_reindex` so a later ingest with a matching checksum still
-attempts restore instead of claiming the source is already indexed.
+those paths in `needs_reindex` so a later ingest *or* `ensure_index` (Ask/eval)
+with a matching checksum still attempts restore instead of claiming the source
+is already indexed.
 
 ### Domain layer
 

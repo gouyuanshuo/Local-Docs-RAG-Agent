@@ -366,3 +366,41 @@ def test_qdrant_upsert_failure_reindexes_unchanged_checksum(
     assert client.upserts == upserts_before_repair + 1
     clean = manifest.IngestManifest.load(manifest_path)
     assert clean.needs_reindex == ()
+
+
+def test_ensure_index_restores_qdrant_after_upsert_failure(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Ask/eval call ensure_index, not ingest_documents. Fingerprint and
+    # checksums still match after a failed upsert, so skipping
+    # needs_reindex would leave the collection empty.
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    source_path = docs_dir / "sample.md"
+    source_path.write_text("Attention uses queries and keys.", encoding="utf-8")
+    manifest_path = tmp_path / "manifest.json"
+    client = _RecordingQdrantClient()
+    monkeypatch.setattr(qdrant_client, "QdrantClient", lambda **kwargs: client)
+    monkeypatch.setattr(
+        provider_factory,
+        "build_embedding_provider",
+        lambda config: FakeEmbeddingProvider(),
+    )
+    config = _qdrant_config(tmp_path, docs_dir, manifest_path)
+
+    ingest.ingest_documents(config)
+    client.exists = False
+    client.fail_upsert = True
+    with pytest.raises(exceptions.VectorStoreError):
+        ingest.ingest_documents(config)
+    dirty = manifest.IngestManifest.load(manifest_path)
+    assert source_path.as_posix() in dirty.needs_reindex
+
+    client.exists = True
+    client.fail_upsert = False
+    upserts_before_ensure = client.upserts
+    ingest.ensure_index(config)
+    assert client.upserts == upserts_before_ensure + 1
+    restored = manifest.IngestManifest.load(manifest_path)
+    assert restored.needs_reindex == ()

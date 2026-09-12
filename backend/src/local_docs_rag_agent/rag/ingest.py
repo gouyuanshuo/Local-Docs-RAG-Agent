@@ -143,17 +143,31 @@ def ingest_documents(
 
 
 def ensure_index(config: app_config.AppConfig) -> None:
-    """Ingest only if the index is missing or built under other settings."""
+    """Ingest only if the index is missing, stale, or marked dirty.
+
+    Ask and eval call this rather than `ingest_documents`. A Qdrant save
+    that deleted points and then failed to upsert records those sources
+    in `needs_reindex`; skipping that flag would leave Ask serving an
+    index the manifest still calls complete.
+
+    Args:
+      config: The settings whose index should be present.
+    """
     stored = manifest.IngestManifest.load(config.ingest_manifest_path)
     configuration_changed = stored.index_fingerprint != index_fingerprint(
         config,
         embedding_mode=_expected_embedding_mode(config),
     )
+    needs_restore = bool(stored.needs_reindex)
     if config.vector_backend == "qdrant":
-        if configuration_changed or _is_qdrant_collection_missing(config):
+        if (
+            configuration_changed
+            or needs_restore
+            or _is_qdrant_collection_missing(config)
+        ):
             ingest_documents(config)
         return
-    if configuration_changed or not config.index_path.exists():
+    if configuration_changed or needs_restore or not config.index_path.exists():
         ingest_documents(config)
 
 
