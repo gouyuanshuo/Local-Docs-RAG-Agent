@@ -187,6 +187,10 @@ Current theme:
       are `degraded`, excluded from the leaderboard; RR sort is tested
 - [ ] Re-run `eval-compare` on a live provider once the set can discriminate,
       and record which strategy actually wins (do not rank fallback cells)
+      - 2026-09-13 probe: embedding **live** (`text-embedding-v4`, 1024-d);
+        chat **not live** (DashScope/compatible `Arrearage` / account not in
+        good standing); Qdrant **skipped** (`WinError 10054` TLS reset).
+        No leaderboard written — fallback cells must not rank.
 
 ### Agent-native modules
 
