@@ -82,7 +82,7 @@ export type CompareLeaderboardRow = {
 
 export type CompareRun = {
   label: string;
-  status: "ok" | "skipped" | "error";
+  status: "ok" | "skipped" | "error" | "degraded";
   reason?: string;
   error?: string;
 };

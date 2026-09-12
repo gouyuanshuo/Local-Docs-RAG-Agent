@@ -2,8 +2,10 @@
 
 Each cell re-ingests and re-evaluates under one `AppConfig` variant so the
 results are comparable. A cell that cannot run is reported as `skipped` with a
-reason, and a cell that fails is reported as `error`; neither is silently
-dropped, because a leaderboard that hides its gaps is worse than no leaderboard.
+reason, a cell that fails is reported as `error`, and a cell whose chat,
+embedding, reranker, or runtime degraded is `degraded`. None of those is
+silently treated as success: a leaderboard that ranks fallback answers is
+worse than no leaderboard.
 
 `AXES` is the single definition of what a comparison can sweep. The Cartesian
 product, the per-cell configuration overrides, the run label, and the report
@@ -25,7 +27,7 @@ import pathlib
 from collections.abc import Callable, Mapping, Sequence
 
 from local_docs_rag_agent import config as app_config
-from local_docs_rag_agent import constants, exceptions, presenters, rag
+from local_docs_rag_agent import constants, exceptions, models, presenters, rag
 from local_docs_rag_agent.evals import harness
 from local_docs_rag_agent.rag import file_io
 
@@ -106,6 +108,9 @@ AXES: tuple[MatrixAxis, ...] = (
         noun="retrieval strategies",
         label_prefix="",
         choices=constants.RETRIEVAL_STRATEGIES,
+        # Sweeping all four is for comparing rankers on one backend. Qdrant
+        # `blended` is dense-only; a local-vs-qdrant backend compare should
+        # pass `dense` and `hybrid_rrf` explicitly, not `blended`.
         default=lambda config: list(constants.RETRIEVAL_STRATEGIES),
     ),
     MatrixAxis(
@@ -256,6 +261,14 @@ def _run_matrix_case(config: app_config.AppConfig) -> dict[str, object]:
             runtime=config.agent_runtime,
             config=config,
         )
+        degraded = cell_degradation_reason(results)
+        if degraded is not None:
+            return {
+                **common,
+                "status": "degraded",
+                "reason": degraded,
+                "summary": summary,
+            }
         return {"label": label, "status": "ok", "summary": summary}
     except Exception as exc:
         skip_reason = _qdrant_runtime_skip_reason(config, exc)
@@ -266,6 +279,40 @@ def _run_matrix_case(config: app_config.AppConfig) -> dict[str, object]:
             "status": "error",
             "error": f"{type(exc).__name__}: {exc}",
         }
+
+
+def cell_degradation_reason(
+    results: list[models.EvalResult],
+) -> str | None:
+    """Return why a finished cell must not enter the leaderboard.
+
+    Chat, embedding, and reranker fallback, and a runtime that did not
+    actually serve the requested name, are visible data on Ask. Ranking
+    those cells as `ok` would treat fallback as success.
+
+    Args:
+      results: Per-case eval outcomes, including diagnostics.
+
+    Returns:
+      A stable comma-separated reason, or None when every case ran live
+      on the requested runtime.
+    """
+    reasons: list[str] = []
+    for result in results:
+        diagnostics = result.diagnostics
+        if diagnostics is None:
+            continue
+        if diagnostics.requested_runtime != diagnostics.actual_runtime:
+            reasons.append("runtime_fallback")
+        if diagnostics.chat_provider.mode == "fallback":
+            reasons.append("chat_fallback")
+        if diagnostics.embedding_provider.mode == "fallback":
+            reasons.append("embedding_fallback")
+        if diagnostics.reranker.mode == "fallback":
+            reasons.append("reranker_fallback")
+    if not reasons:
+        return None
+    return ",".join(dict.fromkeys(reasons))
 
 
 def run_label(config: app_config.AppConfig) -> str:

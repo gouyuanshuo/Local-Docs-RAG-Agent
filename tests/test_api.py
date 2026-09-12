@@ -40,3 +40,11 @@ def test_ask_rejects_blank_question() -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_ask_rejects_oversized_question() -> None:
+    response = fastapi_testclient.TestClient(api_app.create_app()).post(
+        "/api/ask", json={"question": "a" * 4001}
+    )
+
+    assert response.status_code == 422

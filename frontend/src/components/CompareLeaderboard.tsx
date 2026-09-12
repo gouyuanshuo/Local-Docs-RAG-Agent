@@ -18,6 +18,12 @@ export function CompareLeaderboard({ result }: CompareLeaderboardProps) {
       </div>
       {result ? (
         <div className="compare-board">
+          {result.runs.some((run) => run.status === "degraded") ? (
+            <p className="status-chip warn">
+              Degraded cells (chat/embedding/runtime fallback) are excluded
+              from the leaderboard.
+            </p>
+          ) : null}
           {result.leaderboard.length > 0 ? (
             result.leaderboard.map((row, index) => (
               <article key={row.label} className="compare-card">

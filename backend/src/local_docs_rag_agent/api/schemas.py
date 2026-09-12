@@ -15,7 +15,10 @@ import pydantic
 from local_docs_rag_agent import constants, models
 
 NonEmptyString = Annotated[
-    str, pydantic.StringConstraints(strip_whitespace=True, min_length=1)
+    str,
+    pydantic.StringConstraints(
+        strip_whitespace=True, min_length=1, max_length=4000
+    ),
 ]
 RuntimeList = Annotated[
     list[constants.RuntimeName],
@@ -257,13 +260,13 @@ class EvalLeaderboardRowResponse(pydantic.BaseModel):
 class EvalMatrixRunResponse(pydantic.BaseModel):
     """One cell of a comparison matrix.
 
-    A cell that could not run is reported as `skipped` with a reason and a
-    cell that failed as `error`; neither is dropped, because a leaderboard
-    that hides its gaps is worse than no leaderboard.
+    A cell that could not run is reported as `skipped` with a reason, a
+    cell that failed as `error`, and a cell whose providers or runtime
+    degraded as `degraded`. None of those is dropped, and none is ranked.
     """
 
     label: str
-    status: Literal["ok", "skipped", "error"]
+    status: Literal["ok", "skipped", "error", "degraded"]
     reason: str | None = None
     error: str | None = None
     retrieval_config: RetrievalConfigResponse | None = None
