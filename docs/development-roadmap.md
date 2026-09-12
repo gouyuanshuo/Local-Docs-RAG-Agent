@@ -257,9 +257,14 @@ Retrieval engineering is one of the project’s main sources of portfolio value.
   - `top_k`
   - `chunk_size`
   - `chunk_overlap`
-- stronger `local vs qdrant` comparisons have now been run successfully
-- with current sample eval data, both backends are comparable on quality and differ mainly in latency by configuration
-- Phase C baseline objective is now considered complete
+- stronger `local vs qdrant` comparisons have been run as connectivity checks;
+  they are not a quality ranking of `blended` across backends
+- Qdrant `blended` is dense-only (no payload vectors). Backend comparison should
+  sweep `dense` and `hybrid_rrf`, not `blended`
+- Phase C **code** is complete; Phase C **measurement** is not closed. The eval
+  set can separate lexical from dense on hash embeddings, but live-provider
+  strategy winners are not yet recorded. Do not treat Phase C as already able
+  to guide iteration from a leaderboard of fallback cells
 - retrieval ranking is now a selectable, sweepable strategy rather than one fixed
   expression inside the local store:
   - `blended` preserves the original `max(dense, lexical, weighted mix)` ranking and

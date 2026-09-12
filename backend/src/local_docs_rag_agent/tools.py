@@ -1,8 +1,9 @@
 """Capabilities the agent runtimes expose as callable tools.
 
-Each function takes plain arguments and returns plain data so it can be wrapped
-by the Agents SDK or called directly by the basic runtime, and so the same
-capability is testable without an agent in the loop.
+Each function takes plain arguments and returns domain objects or plain data so
+it can be wrapped by the Agents SDK or called directly, and so the same
+capability is testable without an agent in the loop. Search goes through the
+retrieval pipeline and keeps embedding/reranker status.
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from __future__ import annotations
 import datetime
 
 from local_docs_rag_agent import config as app_config
+from local_docs_rag_agent import models
 from local_docs_rag_agent.rag import discovery, pipeline
 
 
@@ -25,8 +27,8 @@ def list_documents(config: app_config.AppConfig) -> list[str]:
 
 def search_documents(
     config: app_config.AppConfig, query: str, top_k: int | None = None
-) -> list[dict[str, str | float]]:
-    """Search the index and return hits as plain data, with their source spans.
+) -> models.RetrievalOutcome:
+    """Search the index through the full retrieval pipeline.
 
     Args:
       config: The settings to search under.
@@ -34,23 +36,11 @@ def search_documents(
       top_k: How many hits to return, or None for `config.top_k`.
 
     Returns:
-      One mapping per hit, with its span. This goes through the full
-      retrieval pipeline, reranking included, so the tool cannot
-      report a different ordering from the one an answer would have
-      been built on.
+      Hits plus embedding and reranker status. Going through
+      :func:`pipeline.retrieve` keeps the tool's ordering and
+      degradation identical to the answer path.
     """
-    hits = pipeline.retrieve(config, query, top_k or config.top_k).hits
-    return [
-        {
-            "source_path": hit.chunk.source_path,
-            "title": hit.chunk.title,
-            "score": round(hit.score, 4),
-            "start_char": hit.citation_span.start_char,
-            "end_char": hit.citation_span.end_char,
-            "text": hit.chunk.text,
-        }
-        for hit in hits
-    ]
+    return pipeline.retrieve(config, query, top_k or config.top_k)
 
 
 def get_system_time() -> str:

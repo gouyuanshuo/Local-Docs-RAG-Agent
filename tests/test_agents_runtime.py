@@ -7,7 +7,7 @@ from typing import Any, ClassVar
 import pytest
 
 from local_docs_rag_agent import config as app_config
-from local_docs_rag_agent import models
+from local_docs_rag_agent import models, tools
 from local_docs_rag_agent.providers import openai_client
 from local_docs_rag_agent.rag import pipeline, scoring
 from local_docs_rag_agent.runtime import agents_sdk
@@ -153,8 +153,8 @@ def test_agents_runtime_uses_fake_runner_and_preserves_diagnostics(
         openai_client, "build_async_openai_client", lambda **kwargs: client
     )
     monkeypatch.setattr(
-        pipeline,
-        "retrieve",
+        tools,
+        "search_documents",
         lambda config, query, top_k: _retrieval_outcome(),
     )
 
@@ -216,3 +216,18 @@ def test_agents_runtime_closes_client_and_exposes_runner_fallback(
         fallback_call["runtime_reason"]
         == "runtime_fallback:agents_sdk_error:RuntimeError"
     )
+
+
+def test_search_documents_returns_pipeline_statuses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    outcome = _retrieval_outcome()
+    monkeypatch.setattr(
+        pipeline, "retrieve", lambda config, query, top_k: outcome
+    )
+
+    result = tools.search_documents(_config("responses"), "attention", 1)
+
+    assert result is outcome
+    assert result.embedding_status.mode == "live"
+    assert result.reranker_status.reason == "reranker_disabled"

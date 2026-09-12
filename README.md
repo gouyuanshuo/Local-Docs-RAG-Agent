@@ -48,7 +48,8 @@ The goal is not model training. The goal is to build a usable AI application wit
 
 The current happy path is:
 
-1. Put docs under `docs/`
+1. Put docs under `docs/sample/` (the default `DOCS_DIR`; keep engineering
+   markdown in `docs/` out of the eval corpus)
 2. Run ingestion
 3. Ask a question
 4. Retrieve relevant chunks
@@ -295,6 +296,19 @@ Scores are only comparable *within* a strategy: an RRF score is a sum of recipro
 ranks and sits near 0.03, while a cosine similarity sits near 1. Compare strategies
 with `eval-compare`, not by reading scores side by side.
 
+On Qdrant, `blended` is the server's dense cosine order (`blended ≡ dense`)
+because the payload has no vectors. When comparing `local` vs `qdrant`, sweep
+`dense` and `hybrid_rrf`, not `blended`:
+
+```bash
+python -m local_docs_rag_agent.cli eval-compare \
+  --vector-backend local --vector-backend qdrant \
+  --retrieval-strategy dense --retrieval-strategy hybrid_rrf
+```
+
+To compare ranking strategies on one backend, name them explicitly. Fallback
+cells are `degraded` and do not enter the leaderboard.
+
 ```bash
 python -m local_docs_rag_agent.cli eval-compare \
   --retrieval-strategy blended --retrieval-strategy hybrid_rrf
@@ -442,7 +456,8 @@ Run the complete deterministic quality gate with:
 
 ```bash
 python -m ruff check backend/src tests scripts
-python -m mypy backend/src
+python -m ruff format --check backend/src tests scripts
+python -m mypy
 python -m pytest
 python -m compileall -q backend/src
 pnpm run build

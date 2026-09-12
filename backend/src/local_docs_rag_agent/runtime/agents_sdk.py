@@ -19,7 +19,6 @@ import openai
 from local_docs_rag_agent import config as app_config
 from local_docs_rag_agent import models, tools
 from local_docs_rag_agent.providers import openai_client
-from local_docs_rag_agent.rag import pipeline
 from local_docs_rag_agent.runtime import basic as basic_runtime
 from local_docs_rag_agent.runtime import shared as runtime_shared
 
@@ -182,7 +181,7 @@ def _build_sdk_agent(
         # The tool's own `top_k` is applied by retrieval rather than by
         # truncating afterwards, so the reranker reorders the window the agent
         # actually asked for.
-        outcome = pipeline.retrieve(ctx.context.config, query, top_k)
+        outcome = tools.search_documents(ctx.context.config, query, top_k)
         ctx.context.embedding_status = outcome.embedding_status
         ctx.context.reranker_status = outcome.reranker_status
         runtime_shared.merge_hits(ctx.context.retrieved_hits, outcome.hits)

@@ -157,6 +157,10 @@ That is what keeps a store unaware that reranking exists and a reranker unaware 
 backend produced its candidates, and it is why the second stage cannot be skipped by
 accident: there is one retrieval entry point, and it returns both stage statuses.
 
+On Qdrant, `blended` is the server's dense cosine order: the payload has no
+vectors to mix with BM25. Compare backends with `dense` and `hybrid_rrf`, not
+`blended`. Local `blended` remains `max(dense, lexical, mix)`.
+
 The ingest order is deliberate:
 
 1. validate and read `DOCS_DIR` before writing anything
@@ -169,6 +173,10 @@ The ingest order is deliberate:
 
 If a changed document becomes empty, it is still included in Qdrant replacement
 deletes so old points cannot survive.
+
+If a Qdrant save deletes a source and then fails to upsert, the manifest records
+those paths in `needs_reindex` so a later ingest with a matching checksum still
+attempts restore instead of claiming the source is already indexed.
 
 ### Domain layer
 
@@ -221,7 +229,9 @@ Expected failures derive from `LocalDocsError`:
 - `ConfigurationError` and `DataFormatError` -> HTTP 400
 - `ProviderUnavailableError` and `VectorStoreError` -> HTTP 503
 - CLI -> concise error and exit code 1
-- eval matrix -> explicit `skipped` or `error` run, never silent success
+- eval matrix -> explicit `skipped`, `error`, or `degraded` run, never silent
+  success. Fallback chat/embedding/runtime cells are `degraded` and stay off
+  the leaderboard
 
 Eval matrix execution is capped at 128 combinations so API or CLI input cannot
 accidentally expand into an unbounded Cartesian workload.
@@ -329,11 +339,16 @@ Run these before merging backend changes:
 
 ```powershell
 python -m ruff check backend/src tests scripts
-python -m mypy backend/src
+python -m ruff format --check backend/src tests scripts
+python -m mypy
 python -m pytest
 python -m compileall -q backend/src
 pnpm run build
 ```
+
+`mypy` is run bare so it uses `[tool.mypy] files` (`backend/src`, `tests`,
+and `scripts`). CI also runs `ruff check --preview --select DOC201` on
+`backend/src` and `scripts`.
 
 Live Qdrant/provider verification is a separate environment-dependent gate and must
 be reported separately from deterministic offline tests.

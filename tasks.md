@@ -23,10 +23,12 @@ After coding:
 
 Current active phase:
 
-- `Phase D: Qdrant engineering`
+- Phase C **code complete, measurement not closed**
+- `Phase D: Qdrant engineering` (lifecycle; not a substitute for eval gold)
 
 Current theme:
 
+- keep eval/compare honest (no fallback winners; gold is source substrings)
 - make Qdrant indexing lifecycle stable and maintainable
 - keep module boundaries and commit history legible as the surface grows
 
@@ -42,7 +44,10 @@ Current theme:
 - [x] Run and analyze a stronger `local vs qdrant` comparison with a stable reachable Qdrant backend
 - [x] Resolve current Qdrant connectivity issue blocking real compare runs (`qdrant_unreachable`)
 - [x] Decide whether Phase C is complete enough to move primary focus to Phase D
-- [ ] Optional: run broader retrieval tuning sweeps (more questions and larger docs) if needed
+  - Decision: **code complete, measurement not closed**. Do not claim local vs
+    qdrant blended quality is comparable (`blended ≡ dense` on Qdrant).
+- [ ] Optional: run broader retrieval tuning sweeps on a live provider once
+      fallback cells stay off the leaderboard
 
 ### Phase D preparation
 
@@ -169,17 +174,17 @@ Current theme:
 - [x] Rank the comparison leaderboard on them, replacing a primary key that
       rose with `top_k` and could not see reranking at all
 - [x] Report "retrieved but not first" separately from "missed entirely"
-- [ ] Grow the eval set beyond two questions against one document. With two
-      cases every rate has three possible values, so no two configurations can
-      be told apart; the four retrieval strategies tie for that reason and not
-      because they are equivalent
-- [ ] Write the cases against `docs/` by failure mode, so the set can separate
-      the strategies: rare exact terms (favours BM25), pure paraphrase with no
-      term overlap (favours dense), evidence that is second on both signals
-      (favours RRF), near-duplicate distractors (favours the reranker), and
-      answers spanning a section boundary (tests chunking and overlap)
+- [x] Grow the eval set beyond two questions against one document (12 cases,
+      multi-doc corpus under `docs/sample/`; default `DOCS_DIR=docs/sample`)
+- [x] Write cases by failure mode (rare exact term, paraphrase, near-duplicate,
+      cross-section, fusion definition). Hash lexical vs dense now disagree on
+      mean RR; live-provider winners are still unrecorded
+- [x] Require every `expected_retrieval_keywords` item to be a contiguous
+      substring of its cited source (`tests/test_eval_gold.py`)
+- [x] Compare aggregation: chat/embedding/runtime fallback and requested≠actual
+      are `degraded`, excluded from the leaderboard; RR sort is tested
 - [ ] Re-run `eval-compare` on a live provider once the set can discriminate,
-      and record which strategy actually wins
+      and record which strategy actually wins (do not rank fallback cells)
 
 ### Follow-ups
 
