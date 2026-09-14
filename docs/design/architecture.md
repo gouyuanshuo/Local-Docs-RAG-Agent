@@ -2,7 +2,7 @@
 
 This document describes the current runtime boundaries and the dependency rules for
 Local Docs RAG Agent. Product requirements remain in `spec.md`; execution priorities
-remain in `tasks.md` and `docs/development-roadmap.md`.
+remain in `tasks.md` and `docs/planning/development-roadmap.md`.
 
 ## System context
 

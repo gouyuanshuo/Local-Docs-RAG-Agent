@@ -138,12 +138,13 @@ The backend is responsible for:
 |   |-- index.html
 |   |-- package.json
 |   `-- vite.config.ts
-|-- docs/
-|   |-- architecture.md
-|   |-- development-roadmap.md
-|   `-- sample/
+|-- docs/                          documentation; start at docs/README.md
+|   |-- design/
+|   |-- planning/
+|   `-- reviews/
 |-- data/
-|   `-- evals/
+|   |-- corpus/sample/             default retrieval and eval corpus
+|   `-- evals/                     gold eval set
 |-- scripts/                       manual, environment-dependent checks
 |-- tests/
 |-- AGENTS.md
@@ -168,26 +169,27 @@ Two conventions keep the backend extensible:
 
 ## Project docs
 
-These files define how the repo is organized and how work should move forward:
+Start with [`docs/README.md`](docs/README.md): it maps each document to the
+question it answers and says where each kind of fact lives.
+
+The files you will reach for most often:
 
 - `AGENTS.md`
-  - project operating rules
+  - routing, engineering rules, code style, and the quality-gate commands
 - `spec.md`
   - system requirements and scope
 - `tasks.md`
   - current task board and short-horizon execution list
-- `docs/development-roadmap.md`
-  - long-horizon roadmap and phase plan
-- `docs/architecture.md`
+- `docs/design/architecture.md`
   - module boundaries, dependency direction, state ownership, and extension rules
-- `docs/code-review-2026-08-29.md`
-  - deep review findings, resolved defects, and remaining risks
+- `docs/planning/development-roadmap.md`
+  - long-horizon roadmap and phase plan
+- `docs/reviews/`
+  - dated review snapshots, not maintained
 - `.codex/config.toml`
   - project-local workflow hints
-- `skills/backend-api/SKILL.md`
-  - reusable backend implementation workflow
-- `skills/review-bugfix/SKILL.md`
-  - reusable review and bugfix workflow
+- `skills/backend-api/SKILL.md` and `skills/review-bugfix/SKILL.md`
+  - reusable implementation and review workflows
 
 ## Quick start
 

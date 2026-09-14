@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Local Docs RAG Agent 全仓审计报告 · 2026-09-13</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --bg-elev: #171a22;
+      --bg-card: #1c202b;
+      --line: #2a3140;
+      --text: #e8e4dc;
+      --muted: #9aa3b2;
+      --accent: #c9a27a;
+      --ok: #6fbf8a;
+      --warn: #e0b15c;
+      --bad: #e07a6a;
+      --p0: #e07a6a;
+      --p1: #e0b15c;
+      --p2: #7aa2e0;
+      --p3: #8b93a3;
+      --mono: "Cascadia Code", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+      --sans: "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code, .mono { font-family: var(--mono); font-size: 0.88em; }
+    .wrap { display: grid; grid-template-columns: 260px 1fr; min-height: 100vh; }
+    nav {
+      position: sticky; top: 0; height: 100vh; overflow: auto;
+      border-right: 1px solid var(--line);
+      background: #12151c;
+      padding: 20px 16px 40px;
+    }
+    nav h1 { font-size: 14px; margin: 0 0 4px; letter-spacing: 0.04em; }
+    nav .sub { color: var(--muted); font-size: 12px; margin-bottom: 18px; }
+    nav a { display: block; color: var(--muted); padding: 5px 8px; border-radius: 6px; font-size: 13px; }
+    nav a:hover { background: var(--bg-elev); color: var(--text); text-decoration: none; }
+    nav .sec { margin-top: 14px; color: var(--accent); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; }
+    main { padding: 32px 40px 80px; max-width: 1080px; }
+    h2 { font-size: 22px; margin: 40px 0 12px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+    h3 { font-size: 17px; margin: 22px 0 8px; }
+    p, li { color: var(--text); }
+    .muted { color: var(--muted); }
+    .hero {
+      background: linear-gradient(180deg, #1d2330, #161a22);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 24px 26px;
+    }
+    .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 16px; }
+    .kpi { background: var(--bg-card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+    .kpi b { display: block; font-size: 18px; }
+    .kpi span { color: var(--muted); font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13.5px; margin: 10px 0 18px; }
+    th, td { border: 1px solid var(--line); padding: 8px 10px; vertical-align: top; text-align: left; }
+    th { background: #1a1f2a; color: var(--muted); font-weight: 600; }
+    tr:nth-child(even) td { background: #161a22; }
+    .chip {
+      display: inline-block; border-radius: 999px; padding: 2px 8px;
+      font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+    }
+    .p0 { background: #3a1d1d; color: var(--p0); }
+    .p1 { background: #3a2f16; color: var(--p1); }
+    .p2 { background: #1b2a3d; color: var(--p2); }
+    .p3 { background: #22252c; color: var(--p3); }
+    .ok { background: #163024; color: var(--ok); }
+    .cat { background: #2a2430; color: #d7c4e8; }
+    .finding {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 16px 18px;
+      margin: 14px 0;
+      background: var(--bg-card);
+    }
+    .finding h3 { margin-top: 0; }
+    .meta { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+    dl.kv { display: grid; grid-template-columns: 92px 1fr; gap: 6px 10px; margin: 0; }
+    dl.kv dt { color: var(--muted); }
+    .callout { border-left: 3px solid var(--accent); padding: 8px 12px; background: #1a1714; margin: 12px 0; }
+    .filters { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+    .filters button {
+      background: var(--bg-elev); color: var(--text); border: 1px solid var(--line);
+      border-radius: 999px; padding: 6px 12px; cursor: pointer;
+    }
+    .filters button.active { border-color: var(--accent); color: var(--accent); }
+    .finding.hidden { display: none; }
+    @media (max-width: 960px) {
+      .wrap { grid-template-columns: 1fr; }
+      nav { position: relative; height: auto; }
+      .kpis { grid-template-columns: 1fr 1fr; }
+      main { padding: 20px; }
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+<nav>
+  <h1>全仓审计</h1>
+  <div class="sub">2026-09-13 · 只读 · 15b7363</div>
+  <div class="sec">报告</div>
+  <a href="#s0">0. 执行摘要</a>
+  <a href="#s1">1. 仓库结构</a>
+  <a href="#s2">2. 状态 vs 文档</a>
+  <a href="#s3">3. 发现列表</a>
+  <a href="#s4">4. 设计债地图</a>
+  <a href="#s5">5. 代码质量</a>
+  <a href="#s6">6. Agent / 检索 / Eval</a>
+  <a href="#s7">7. 前端与契约</a>
+  <a href="#s8">8. 做得好的地方</a>
+  <a href="#s9">9. 建议执行顺序</a>
+  <a href="#s10">10. 未核验项</a>
+  <a href="#known">已知声称裁决</a>
+  <a href="#gates">质量门</a>
+</nav>
+<main>
+<header class="hero" id="top">
+  <p class="muted" style="margin:0 0 6px">Local Docs RAG Agent · 独立只读审计</p>
+  <h1 style="margin:0 0 8px;font-size:28px">全仓审计报告</h1>
+  <p style="margin:0" class="muted">
+    日期：2026-09-13　范围：工作区当前 <code>GYS</code> @ <code>15b7363</code>，
+    相对 <code>origin/GYS</code> ahead 1，工作区干净。
+    未改代码、未开 PR、未改 <code>tasks.md</code>。本 HTML 是唯一新增文件。
+  </p>
+  <div class="kpis">
+    <div class="kpi"><b>P0 = 0</b><span>无数据损坏 / 静默成功的已证实 P0</span></div>
+    <div class="kpi"><b>P1 = 5</b><span>测量失效、fallback 当成功、Qdrant 窗口</span></div>
+    <div class="kpi"><b>144 / 84%</b><span>pytest 通过 / 行覆盖率</span></div>
+    <div class="kpi"><b>质量门全绿</b><span>ruff / mypy / pytest / compileall / frontend build</span></div>
+  </div>
+</header>
+
+<h2 id="gates">质量门结果</h2>
+<table>
+  <thead><tr><th>命令</th><th>退出码</th><th>摘要</th></tr></thead>
+  <tbody>
+    <tr><td><code>python -m ruff check backend/src tests scripts</code></td><td>0</td><td>All checks passed</td></tr>
+    <tr><td><code>python -m ruff format --check backend/src tests scripts</code></td><td>0</td><td>74 files already formatted</td></tr>
+    <tr><td><code>python -m ruff check --preview --select DOC201 backend/src scripts</code></td><td>0</td><td>All checks passed（CI 额外步骤）</td></tr>
+    <tr><td><code>python -m mypy</code></td><td>0</td><td>Success: no issues found in 74 source files</td></tr>
+    <tr><td><code>python -m pytest --cov=local_docs_rag_agent --cov-report=term-missing</code></td><td>0</td><td>144 passed in 6.57s；TOTAL 2155 stmts / 337 miss / <b>84%</b></td></tr>
+    <tr><td><code>python -m compileall -q backend/src</code></td><td>0</td><td>无输出</td></tr>
+    <tr><td><code>pnpm run build</code></td><td>0</td><td><code>tsc -b &amp;&amp; vite build</code> 成功；顺带在本地生成被 gitignore 的 <code>frontend/vite.config.js</code></td></tr>
+  </tbody>
+</table>
+<p class="muted">解释器：<code>.venv\Scripts\python.exe</code> CPython 3.13.7。未跑 live Qdrant / 真模型（会写远程 collection）。未在浏览器点选 UI。</p>
+
+<h2 id="s0">0. 执行摘要</h2>
+<div class="callout">
+  <b>成熟度：不同意把「strong MVP / early product prototype」读成测量已经能指导迭代。</b>
+  作为可运行的本地 RAG 系统，分层、facade、诊断模型和 CI 已经超过早期原型。
+  作为本仓库自己定义的产品（<code>Agent -&gt; Tools -&gt; RAG -&gt; Citation -&gt; Eval</code>，优先级第一是 eval 加固），
+  当前 eval 金标有一条永远匹配不上的关键字，compare 会把 fallback 记成 <code>status=ok</code>，
+  两问一篇讲义无法分开四种检索策略。工程骨架强，测量闭环未合上。
+</div>
+<ul>
+  <li><b>当前真实阶段：</b>Phase C 的代码能力（chunk 策略、BM25/RRF、两段 pipeline、compare API）已落地；Phase A 的测量仍未闭合；Phase D 增量 ingest 的第一版在代码与单测里，live <code>ingest -&gt; ask -&gt; eval</code> 仍被文档记录的 <code>WinError 10054</code> 挡住、本次未复验。文档写「主焦点 Phase D」，按官方优先级应先修测量。</li>
+  <li><b>最重要的 5 个问题：</b>
+    <ol>
+      <li><span class="chip p1">P1</span> eval 金标关键字不是原文连续子串，Q1 的 span/RR 上限被锁在 2/3（<code>bug</code>）。</li>
+      <li><span class="chip p1">P1</span> eval-compare 把 chat/embedding/runtime fallback 记为 <code>ok</code> 并送进 leaderboard（<code>bug</code>）。</li>
+      <li><span class="chip p1">P1</span> 两问 + 讲义金标仍无法分开策略；默认还把 <code>docs/</code> 工程文档编进语料（<code>product-gap</code>）。</li>
+      <li><span class="chip p1">P1</span> Qdrant delete-then-upsert 失败后，下一次增量 ingest 不会自愈（<code>bug</code>，比 2026-08-29 文档更糟）。</li>
+      <li><span class="chip p1">P1</span> Qdrant 上的 <code>blended</code> 实际等于 dense，<code>local vs qdrant</code> 的 blended 对比不是同一排序（<code>design</code>）。</li>
+    </ol>
+  </li>
+  <li><b>不该现在做的事：</b>拆 <code>AppConfig</code>、抽 reporting 模块、上 cross-encoder / query rewrite、做历史上传和配置面板、加 Ollama、写 Docker。那些是 Phase E–H。现在动它们会把测量失效藏到更多表面之下。</li>
+</ul>
+
+<h2 id="s1">1. 仓库结构</h2>
+<table>
+  <thead><tr><th>路径</th><th>职责</th><th>与文档是否一致</th><th>问题</th></tr></thead>
+  <tbody>
+    <tr><td><code>spec.md</code> / <code>tasks.md</code> / <code>AGENTS.md</code></td><td>产品、任务板、操作规则</td><td>一致</td><td>声称需用代码核验（见 §2）</td></tr>
+    <tr><td><code>backend/src/local_docs_rag_agent/</code></td><td>唯一 Python 安装路径</td><td>与 <code>pyproject.toml</code> <code>package-dir</code> 一致</td><td>无第二套包</td></tr>
+    <tr><td><code>frontend/</code></td><td>独立 Vite + React + TS，只打 <code>/api/*</code></td><td>与 architecture 一致</td><td>无 ESLint / 无单测；CI 只 build</td></tr>
+    <tr><td><code>tests/</code>、<code>scripts/</code>、<code>data/</code>、<code>.github/</code></td><td>单测、live 脚本、运行数据、CI</td><td>README 列出；<code>AGENTS.md</code> 结构段未列 tests/scripts/data</td><td>文档略旧，不是错放</td></tr>
+    <tr><td><code>docs/</code></td><td>路线图、架构、上一轮审查、sample 讲义</td><td>一致</td><td>默认 <code>DOCS_DIR=docs</code> 会把架构文档编进检索语料</td></tr>
+    <tr><td><code>skills/</code></td><td>backend-api / review-bugfix</td><td>一致</td><td>无</td></tr>
+    <tr><td><code>frontend/vite.config.ts</code></td><td>Vite 源配置</td><td>README 只提 ts</td><td>build 后本地出现被 ignore 的 <code>vite.config.js</code>，Vite 优先加载 js</td></tr>
+  </tbody>
+</table>
+<h3>卫生</h3>
+<ul>
+  <li>已核验：<code>.gitignore</code> 覆盖 <code>__pycache__</code>、<code>*.egg-info</code>、<code>frontend/dist</code>、<code>*.tsbuildinfo</code>、<code>data/*.log</code>、<code>data/index/</code>、<code>compare_latest.json</code>、<code>node_modules/</code>、<code>.env</code>、<code>frontend/vite.config.js</code>。这些在磁盘上存在，但未入库。</li>
+  <li>已核验：<code>git ls-files</code> 只跟踪 <code>data/evals/sample_eval.jsonl</code> 与 <code>.env.example</code>，无密钥、无 index。</li>
+  <li>已核验：<code>scripts/</code> 源文件已是 <code>check_*</code> / <code>verify_*</code>；pycache 里残留旧名 <code>test_*.pyc</code>，被 ignore。</li>
+  <li>根目录 <code>__pycache__/test_Qdrant.cpython-313.pyc</code> 是历史手工脚本残留，已 ignore。</li>
+  <li>Python 只有 <code>backend/src</code> 一条安装路径。pnpm workspace 只有 <code>frontend</code>。</li>
+</ul>
+<p><b>已核验，未见「构建产物被提交」问题。</b></p>
+
+<h2 id="s2">2. 状态 vs 文档</h2>
+<table>
+  <thead><tr><th>声称</th><th>证据</th><th>裁决</th></tr></thead>
+  <tbody>
+    <tr><td>多 chunk 策略 <code>fixed|paragraph|markdown</code></td><td><code>constants.py:19</code>；<code>chunker.py:41-80</code>；<code>tests/test_chunker.py</code></td><td><b>成立</b></td></tr>
+    <tr><td>local / qdrant 后端</td><td><code>store_factory.py:45-63</code></td><td><b>成立</b>；语义不对称见 F-005</td></tr>
+    <tr><td>引用 span</td><td><code>models.py:101-123</code>；<code>presenters.py:52-61</code>；前端 <code>AnswerResult.tsx:89-107</code></td><td><b>成立</b></td></tr>
+    <tr><td>basic / agents_sdk；requested vs actual</td><td><code>dispatch.py:29-31</code>；<code>basic.py:51-53</code>；<code>agents_sdk.py:121-123</code></td><td><b>成立</b></td></tr>
+    <tr><td>eval 分层指标 + compare + leaderboard 用 RR/precision</td><td><code>harness.py:107-121</code>；<code>comparison.py:347-356</code></td><td><b>代码成立</b>；leaderboard 排序<b>无测试</b>；样本无法分开策略</td></tr>
+    <tr><td>封闭选项集只在 <code>constants.py</code></td><td>CLI/schema/config/AXES 均 <code>import constants</code>；<code>test_eval_comparison.py:55-80</code></td><td><b>Python 成立</b>；前端手写 union</td></tr>
+    <tr><td>包外只从 <code>local_docs_rag_agent.rag</code> 导入</td><td>无 <code>from local_docs_rag_agent.rag.</code> 包外命中；但 <code>tools.py:13</code> / <code>basic.py:13</code> / <code>agents_sdk.py:22</code> 导入子模块；<code>comparison.py:30</code> 导入未进 <code>__all__</code> 的 <code>file_io</code></td><td><b>部分成立</b>（点路径守住了，子模块导入仍在）</td></tr>
+    <tr><td><code>pipeline.retrieve</code> 是检索唯一入口</td><td>生产 <code>store.search</code> 只在 <code>pipeline.py:68</code>；basic/tools/agents_sdk 都走 retrieve</td><td><b>成立</b></td></tr>
+    <tr><td>失败映射 400/503；矩阵失败不静默；上限 128</td><td><code>app.py:129-138</code>；<code>comparison.py:33,207-213,260-268</code></td><td><b>异常路径成立</b>；fallback 答案仍是 <code>ok</code>（F-002）</td></tr>
+    <tr><td>应用层不依赖 FastAPI/Pydantic/argparse</td><td>这三者只出现在 <code>api/*</code> 与 <code>cli.py</code></td><td><b>成立</b></td></tr>
+    <tr><td>Phase C baseline 完成，主焦点 Phase D</td><td>策略/pipeline/compare 代码齐；eval 集 2 题；live Qdrant 未复验</td><td><b>代码完成、测量未完成</b>。主焦点写成 D 与优先级 1 冲突</td></tr>
+    <tr><td>Phase B 诊断贯穿 API/CLI/eval/前端</td><td>Ask UI 渲染 diagnostics；eval 进 per-case；compare leaderboard 不含 provider mode</td><td><b>部分成立</b></td></tr>
+    <tr><td>Phase D 增量 upsert / checksum / stale delete / fallback 拒入 Qdrant</td><td><code>ingest.py</code> + <code>test_ingest.py</code>；search 拒 fallback <code>qdrant_store.py:225-234</code></td><td><b>第一版成立</b>；非事务窗口仍在且更糟（F-003）；live 未复验</td></tr>
+    <tr><td>architecture 质量门 <code>mypy backend/src</code></td><td>CI 与 <code>pyproject.toml</code> 是裸 <code>mypy</code>（含 tests/scripts）</td><td><b>过期</b></td></tr>
+  </tbody>
+</table>
+
+<h2 id="s3">3. 发现列表（P0→P3）</h2>
+<p class="muted">P0：已核验，未见。2026-08-29 已关闭项抽查均未回潮（见文末已知声称表）。</p>
+<div class="filters">
+  <button class="active" data-f="all">全部</button>
+  <button data-f="p1">P1</button>
+  <button data-f="p2">P2</button>
+  <button data-f="p3">P3</button>
+  <button data-f="bug">bug</button>
+  <button data-f="design">design</button>
+  <button data-f="code">code</button>
+  <button data-f="docs-drift">docs-drift</button>
+  <button data-f="product-gap">product-gap</button>
+</div>
+
+<article class="finding" data-sev="p1" data-cat="bug" id="f001">
+  <div class="meta"><span class="chip p1">P1</span><span class="chip cat">bug</span><span class="muted">F-001</span></div>
+  <h3>Eval 金标有一条永远匹配不上的 retrieval 关键字</h3>
+  <dl class="kv">
+    <dt>证据</dt>
+    <dd>
+      <code>data/evals/sample_eval.jsonl:1</code> 期望
+      <code>"lets a model focus on the most relevant tokens"</code>。<br />
+      <code>docs/sample/lecture5_attention.md:3</code> 是 <code>lets a model decide...</code>；
+      <code>:10</code> 是 <code>lets the model focus on the most relevant tokens</code>。
+      全文不存在该连续子串。<code>harness.keyword_match_rate</code> / <code>reciprocal_rank</code> 都是
+      <code>needle in text</code>（<code>harness.py:149,179</code>）。
+    </dd>
+    <dt>现状</dt>
+    <dd>Q1 即使第一名命中整篇讲义，<code>retrieval_span_hit_rate</code> 与 RR 也最多 2/3。
+      两案平均上限约 0.8333。因为 span hit 永远 &lt; 1，
+      <code>failure_reasons</code> 的 <code>elif</code>（<code>harness.py:235-246</code>）让 Q1
+      <b>永远发不出</b> <code>retrieval_ranked_expected_span_below_first</code>。
+      这不是 <code>tasks.md</code> 里写过的「两问打平」，是金标错误。</dd>
+    <dt>为何重要</dt>
+    <dd>测量天花板被金标锁死。任何策略、任何 rerank 都无法在 Q1 上拿到满分 RR。leaderboard 的主键被污染。</dd>
+    <dt>建议</dt>
+    <dd>1. 把关键字改成原文连续子串（例如 line 10 整句，或 line 3 的 <code>lets a model decide</code>）。
+      2. 加一条测试：每条 <code>expected_retrieval_keywords</code> 必须是对应 source 文件的子串。
+      3. 再跑 compare。</dd>
+    <dt>非目标</dt>
+    <dd>不要为此改 RR 公式或放宽成 token 集合匹配。</dd>
+  </dl>
+</article>
+
+<article class="finding" data-sev="p1" data-cat="bug" id="f002">
+  <div class="meta"><span class="chip p1">P1</span><span class="chip cat">bug</span><span class="muted">F-002</span></div>
+  <h3>eval-compare 把 fallback 记成成功并送进 leaderboard</h3>
+  <dl class="kv">
+    <dt>证据</dt>
+    <dd>
+      Chat fallback 不抛（<code>chat.py:89-92,156-167</code>）。
+      Embedding hash fallback 不抛（<code>embedding.py:82-90</code>）。
+      agents_sdk 失败改走 basic 仍返回完整答案（<code>agents_sdk.py:100-110</code>）。
+      矩阵单元只有异常才 <code>error</code>/<code>skipped</code>（<code>comparison.py:251-268</code>）。
+      走完就是 <code>status=ok</code>，leaderboard 只过滤非 ok（<code>:312-313</code>），行内没有 provider mode。
+      <code>scripts/verify_live_qdrant.py</code> 会拒绝 fallback，但 harness/compare 不会。
+    </dd>
+    <dt>现状</dt>
+    <dd>无 key 的 compare 仍产出完整排行榜。agents_sdk 若降级到 basic，两个 runtime 格子可以是同一条 basic 答案、不同 label。
+      Ask 路径 200 + UI 芯片是符合「诊断可见」的；compare 聚合层把诊断丢掉了。</dd>
+    <dt>为何重要</dt>
+    <dd>项目硬规则：不要把 fallback 当成功。这会让 Phase C 的策略对比在离线/降级时看起来「有赢家」。</dd>
+    <dt>建议</dt>
+    <dd>1. 若任一 case 的 chat/embedding/runtime 为 fallback，或 <code>requested_runtime != actual_runtime</code>，格子标 <code>degraded</code> 或直接 <code>error</code>，不进 leaderboard。
+      2. 给这条加测试（当前 <code>test_eval_comparison.py</code> 根本不跑 <code>_run_matrix_case</code>）。</dd>
+    <dt>非目标</dt>
+    <dd>不要让 Ask 在 fallback 时改成 503；Ask 的可见降级是对的。</dd>
+  </dl>
+</article>
+
+<article class="finding" data-sev="p1" data-cat="product-gap" id="f003">
+  <div class="meta"><span class="chip p1">P1</span><span class="chip cat">product-gap</span><span class="muted">F-003</span></div>
+  <h3>Eval 集仍无法分开配置——这是测量失效，不是策略等价</h3>
+  <dl class="kv">
+    <dt>证据</dt>
+    <dd>
+      2 条 JSONL，金标都指向 <code>docs/sample/lecture5_attention.md</code>（675 字节，13 行）。
+      默认 <code>CHUNK_SIZE=800</code> 时讲义基本是一块。
+      默认 <code>DOCS_DIR=docs</code> 还会 ingest <code>architecture.md</code> / roadmap / code-review，
+      金标却只认讲义路径：工程文档一改，eval 噪声跟着变。
+      单元测试能证明策略排序不同（<code>test_retrieval.py:123-185</code>），但没有任何测试证明
+      <code>sample_eval.jsonl</code> 上 RR 会不同。
+    </dd>
+    <dt>现状</dt>
+    <dd><code>tasks.md</code> 这条仍成立，且被 F-001 加重。Roadmap 写 Phase C baseline complete、
+      「both backends are comparable on quality」在这个样本上不可信。</dd>
+    <dt>为何重要</dt>
+    <dd>官方优先级 1 是 eval 加固。没有可区分的金标，BM25/RRF/rerank 都只是可运行代码。</dd>
+    <dt>建议</dt>
+    <dd>按失败模式写 8–15 条、多文档的 case（稀有精确词 / 纯释义 / 双信号都排第二 / 近重复 / 跨 section）。
+      把 sample 语料和 <code>docs/</code> 工程文档分开（<code>DOCS_DIR=docs/sample</code> 或 exclude 架构文件）。</dd>
+    <dt>非目标</dt>
+    <dd>不要先上 cross-encoder 或 query rewrite 来「补偿」这个样本。</dd>
+  </dl>
+</article>
+
+<article class="finding" data-sev="p1" data-cat="bug" id="f004">
+  <div class="meta"><span class="chip p1">P1</span><span class="chip cat">bug</span><span class="muted">F-004</span></div>
+  <h3>Qdrant 源级 delete 后 upsert 失败，下一次增量 ingest 不会把点写回来</h3>
+  <dl class="kv">
+    <dt>证据</dt>
+    <dd>
+      <code>qdrant_store.py:155-169</code>：先 <code>_delete_by_source_paths(replaced)</code> 再 <code>upsert</code>，无事务。
+      异常发生在 <code>ingest.py:109-132</code> 的 <code>save</code> 与 <code>manifest.save</code> 之间则 manifest 不更新。
+      下次 checksum 相同 → <code>changed_sources</code> 为空（<code>ingest.py:189-199</code>）→
+      <code>replaced_source_paths=[]</code> → 不会再 upsert。
+      2026-08-29 审查写「直到下一次 ingest」；增量语义下「下一次」对未改动的源是空操作。
+    </dd>
+    <dt>现状</dt>
+    <dd>该源在 Qdrant 中消失，manifest 仍声称已索引。Ask/eval 静默少一段证据。
+      没有测试覆盖 delete 成功、upsert 失败。ingest 单测用的 <code>FakeQdrantStore</code> 不是
+      <code>QdrantChunkStore</code>，<code>isinstance(..., QdrantChunkStore)</code> 分支从未被打到。</dd>
+    <dt>为何重要</dt>
+    <dd>这是 Phase D 生命周期的正确性漏洞，不是「以后再拆文件」的结构债。</dd>
+    <dt>建议</dt>
+    <dd>1. 失败后把该 <code>source_path</code> 从内存中的计划标成 dirty，或 ingest 开始时对 checksum 匹配的源做存在性抽查。
+      2. 最小修复也可以是：upsert 失败则不要认为 checksum 仍然有效（写一个「needs_reindex」集合进 manifest）。
+      3. 用假 client 测 delete-then-upsert 失败。</dd>
+    <dt>非目标</dt>
+    <dd>不要为了这个上分布式事务或换向量库。不要先拆 <code>qdrant_store.py</code> 当修复。</dd>
+  </dl>
+</article>
+
+<article class="finding" data-sev="p1" data-cat="design" id="f005">
+  <div class="meta"><span class="chip p1">P1</span><span class="chip cat">design</span><span class="muted">F-005</span></div>
+  <h3>Qdrant 上 <code>blended</code> 就是 dense，local vs qdrant 的 blended 对比无效</h3>
+  <dl class="kv">
+    <dt>证据</dt>
+    <dd>
+      <code>retrieval.needs_candidate_window</code> 只对 <code>lexical</code> / <code>hybrid_rrf</code> 为真
+      （<code>retrieval.py:156-168</code>，测试 <code>test_retrieval.py:243-247</code>）。
+      <code>qdrant_store.py:266-270</code> 明确：服务器不回向量，<code>blended</code> 退回服务器 cosine 顺序。
+      本地 <code>blended</code> 是 <code>max(dense, lexical, mix)</code>（<code>retrieval.py:77-89</code>）。
+    </dd>
+    <dt>现状</dt>
+    <dd>Roadmap 写两端质量可比。那次 compare 若扫的是默认 <code>blended</code>，比的是「本地混合 vs 远端纯 dense」。
+      <code>hybrid_rrf</code> 在 Qdrant 上才是「dense 窗 + 窗内 BM25」的融合，仍不是语料级 IDF。</dd>
+    <dt>为何重要</dt>
+    <dd>扩展点会写错：有人以为换 backend 保留 blended 语义。</dd>
+    <dt>建议</dt>
+    <dd>1. 在 compare 的 <code>retrieval_config</code> / 文档里写明 Qdrant blended ≡ dense。
+      2. 真正比 backend 时扫 <code>dense</code> 和 <code>hybrid_rrf</code>，不要扫 blended。
+      3. 不必为了对称去问 Qdrant 要向量——那是成本决策，但必须可见。</dd>
+    <dt>非目标</dt>
+    <dd>不要为「语义对称」加一层 RankingBackend 抽象。</dd>
+  </dl>
+</article>
+
+<article class="finding" data-sev="p2" data-cat="code" id="f006">
+  <div class="meta"><span class="chip p2">P2</span><span class="chip cat">code</span><span class="muted">F-006</span></div>
+  <h3>Leaderboard 排序与矩阵执行几乎没有测试</h3>
+  <dl class="kv">
+    <dt>证据</dt>
+    <dd>
+      coverage：<code>evals/comparison.py</code> 94 stmts / 48 miss / 49%，缺
+      <code>215-233, 241-264, 310-357</code>（就是 product 循环、跑格子、排序）。
+      <code>test_eval_comparison.py</code> 覆盖 AXES 耦合和 128 上限，从不调用 <code>_build_leaderboard</code>。
+      最近提交 <code>15b7363</code> 正是改排序主键。
+    </dd>
+    <dt>现状</dt>
+    <dd>把 sort key 改回 <code>retrieval_span_hit_rate</code>，CI 仍绿。</dd>
+    <dt>建议</dt>
+    <dd>用两条假 summary 断言 RR 高的行排前面；再加一格 fallback/skip 不进榜。不必上 live 模型。</dd>
+    <dt>非目标</dt>
+    <dd>不要为了覆盖率去 mock 整个 ingest 矩阵。</dd>
+  </dl>
+</article>
+
+<article class="finding" data-sev="p2" data-cat="code" id="f007">
+  <div class="meta"><span class="chip p2">P2</span><span class="chip cat">code</span><span class="muted">F-007</span></div>
+  <h3>运行时主路径与 Qdrant 删除过滤器测试缺口</h3>
+  <dl class="kv">
+    <dt>证据</dt>
+    <dd>
+      <code>runtime/basic.py</code> 41%（<code>36-59</code> 整条 retrieve-then-answer 未直接测）；
+      <code>dispatch.py</code> 67%（<code>29-31</code>）；
+      <code>agent.py</code> 75%（<code>24,28</code>）；
+      <code>tools.py</code> 73%，<code>search_documents</code> 无生产调用也无测试；
+      <code>qdrant_store.py</code> 43%，<code>_delete_by_source_paths</code> 无断言；
+      <code>ingest._require_live_embeddings</code> 无测试（<code>ingest.py:252-275</code>）。
+      API 有 400/422，无 503、无 ask-fallback-200。
+    </dd>
+    <dt>现状</dt>
+    <dd>citation 契约和 SDK fake-runner 测得好；「basic 会检索再回答」靠间接路径。</dd>
+    <dt>建议</dt>
+    <dd>补 4 个小测试：dispatch 选 runtime；basic 带 fake retrieve；Qdrant save 调用 delete filter；ingest 在 embedding fallback 时拒 Qdrant。</dd>
+    <dt>非目标</dt>
+    <dd>不要给 <code>pipeline.py</code> 再开一个只 assert 调用顺序的浅测试；<code>test_rerank.py</code> 的 pipeline 测试已经够。</dd>
+  </dl>
+</article>
+
+<article class="finding" data-sev="p2" data-cat="design" id="f008">
+  <div class="meta"><span class="chip p2">P2</span><span class="chip cat">design</span><span class="muted">F-008</span></div>
+  <h3>JSONL 每次全量解析 + 每请求新建 store；qdrant_store 仍是 472 行混合模块</h3>
+  <dl class="kv">
+    <dt>证据</dt>
+    <dd>
+      <code>pipeline.py:66</code> 每次 <code>build_store</code>；
+      <code>local_store.py:125-128</code> <code>search</code> → <code>self.load()</code>。
+      <code>qdrant_store.py</code> 472 行：lifecycle / CRUD / search / error 仍在一起。
+      <code>tasks.md:162-163, 190-194</code> 仍开放，核验后仍成立。
+    </dd>
+    <dt>现状</dt>
+    <dd>当前语料可忍。默认 UI Compare 会扫 3 chunk × 4 strategy = 12 格，每格 ingest + 每问全量读 JSONL。</dd>
+    <dt>建议</dt>
+    <dd>等 eval 集能分开策略后再做。缓存必须先定 chunk 所有权（任务里已写对）。拆 qdrant_store 只在下一轮改生命周期时顺手做。</dd>
+    <dt>非目标</dt>
+    <dd>不要现在加 CacheManager / StoreService。</dd>
+  </dl>
+</article>
+
+<article class="finding" data-sev="p2" data-cat="code" id="f009">
+  <div class="meta"><span class="chip p2">P2</span><span class="chip cat">code</span><span class="muted">F-009</span></div>
+  <h3>本地 <code>pnpm run build</code> 之后 Vite 可能读到过期的 <code>vite.config.js</code></h3>
+  <dl class="kv">
+    <dt>证据</dt>
+    <dd>
+      源是 <code>frontend/vite.config.ts</code>。<code>package.json</code> build = <code>tsc -b &amp;&amp; vite build</code>。
+      <code>tsconfig.node.json</code> composite 会 emit js。
+      <code>.gitignore:24-25</code> ignore js/dts。Vite 默认配置文件顺序 js 在 ts 前。
+      本次 build 后 <code>Test-Path frontend/vite.config.js</code> 为 True。
+    </dd>
+    <dt>现状</dt>
+    <dd>CI 干净（js 不入库）。开发者本地 build 后再 <code>pnpm run dev</code> 可能加载旧 js。</dd>
+    <dt>建议</dt>
+    <dd><code>tsc -b --noEmit</code>，或给 node tsconfig 设 <code>noEmit</code>。</dd>
+    <dt>非目标</dt>
+    <dd>不要为此引入新的 frontend 构建抽象。</dd>
+  </dl>
+</article>
+
+<article class="finding" data-sev="p2" data-cat="docs-drift" id="f010">
+  <div class="meta"><span class="chip p2">P2</span><span class="chip cat">docs-drift</span><span class="muted">F-010</span></div>
+  <h3>质量门文档与 CI 不一致；Phase C「完成」写过头</h3>
+  <dl class="kv">
+    <dt>证据</dt>
+    <dd>
+      <code>docs/architecture.md:326-336</code> 与 <code>README.md:443-448</code>：
+      <code>mypy backend/src</code>，无 format/DOC201。
+      CI：裸 <code>mypy</code> + format + DOC201（<code>.github/workflows/ci.yml:33-53</code>）。
+      Roadmap Phase C current status 写 baseline complete（<code>development-roadmap.md:262-288</code>）。
+    </dd>
+    <dt>建议</dt>
+    <dd>文档命令改成与 CI 相同。Phase C 改成「代码完成，测量未闭合」。主焦点在测量修好前不要从 D 起笔。</dd>
+    <dt>非目标</dt>
+    <dd>不要重写整份 roadmap。</dd>
+  </dl>
+</article>
+
+<article class="finding" data-sev="p2" data-cat="code" id="f011">
+  <div class="meta"><span class="chip p2">P2</span><span class="chip cat">code</span><span class="muted">F-011</span></div>
+  <h3>前端契约手同步且不完整；eval 几乎只在 raw JSON 里</h3>
+  <dl class="kv">
+    <dt>证据</dt>
+    <dd>
+      <code>types/api.ts</code> 重写了 runtime/chunk/retrieval 字面量；
+      <code>CompareResponse</code> 丢掉 <code>top_ks</code> / <code>retrieval_strategies</code> / <code>rerankers</code> 以及 run 的 <code>summary</code>
+      （<code>api.ts:90-97</code> vs <code>schemas.py:274-287</code>）。
+      Eval 结果是 <code>Record&lt;string, unknown&gt;</code>（<code>useRagWorkspace.ts:87</code>）。
+      Ask 的 diagnostics 有渲染（<code>AnswerResult.tsx:24-77</code>）。
+      Compare 按钮只传 runtime，其余轴走默认——即扫全部 chunk + 全部 retrieval 策略
+      （<code>useRagWorkspace.ts:104-106</code> + <code>comparison.py:100-110</code>）。
+    </dd>
+    <dt>现状</dt>
+    <dd>无路由/历史上传是 Phase F product-gap，没有半成品。缺的是 eval 可视化和类型生成。</dd>
+    <dt>建议</dt>
+    <dd>先补 CompareRun.summary 的 diagnostics 展示（降级可见）。类型生成可以等测量稳定。</dd>
+    <dt>非目标</dt>
+    <dd>不要现在做历史上传、配置面板、React Router。</dd>
+  </dl>
+</article>
+
+<article class="finding" data-sev="p3" data-cat="code" id="f012">
+  <div class="meta"><span class="chip p3">P3</span><span class="chip cat">code</span><span class="muted">F-012</span></div>
+  <h3>小裂口：未使用的 search 原语、SDK 成功路径写死 chat=live、Ask 问题无上限</h3>
+  <dl class="kv">
+    <dt>证据</dt>
+    <dd>
+      <code>tools.search_documents</code>（<code>tools.py:26-53</code>）无生产调用；SDK 工具自己调 <code>pipeline.retrieve</code>（<code>agents_sdk.py:185</code>）。删除它测试不会红。<br />
+      SDK 成功时 <code>chat_provider=ProviderStatus(..., mode="live")</code>（<code>agents_sdk.py:125-127</code>），不读 ChatProvider.status。<br />
+      <code>AskRequest.question</code> 只有 <code>min_length=1</code>（<code>schemas.py:17-18,50-54</code>）。2026-08-29「无界字符串」只真正限制了 compare 轴。<br />
+      <code>AGENTS.md</code> 结构段未列 <code>tests/</code> <code>scripts/</code> <code>data/</code>。
+    </dd>
+    <dt>建议</dt>
+    <dd>SDK 工具改走 <code>tools.search_documents</code> 并返回 status；Ask 加一个宽松 max_length（例如 4000）。其余可随手改。</dd>
+    <dt>非目标</dt>
+    <dd>不要为此新建 ToolRegistry。</dd>
+  </dl>
+</article>
+
+<h2 id="s4">4. 设计债地图</h2>
+<table>
+  <thead><tr><th>簇</th><th>深度</th><th>浅 / pass-through</th><th>seam 风险</th><th>现在动？</th></tr></thead>
+  <tbody>
+    <tr><td>Config（constants/env/config/schemas/AXES）</td><td>深：选项集单点，<code>with_overrides</code> 再校验</td><td>AppConfig 36 个字段仍扁平可读</td><td>前端 union 是第二份；HTTP schema 靠测试对齐 AXES 名字</td><td>否。字段再涨再拆 sub-config</td></tr>
+    <tr><td>Delivery（API/CLI/presenters）</td><td>深：routes 薄，presenter 共用</td><td>ingest CLI 自己打印一行，可接受</td><td>422 体不是 <code>ErrorResponse</code></td><td>否</td></tr>
+    <tr><td>Runtime</td><td><code>shared.py</code> 深（citation 契约）</td><td><code>LocalDocsAgent</code> 是一句话 facade，删了四调用方改一行；<code>tools.search_documents</code> 删了不疼</td><td>basic 必检索 vs SDK 可选检索；无 tool trace</td><td>否（Phase E）</td></tr>
+    <tr><td>Provider</td><td>factory 是协议构造点</td><td>LlmReranker 自己建 OpenAI client</td><td>第三处 chat 传输</td><td>加第三 provider 时再收</td></tr>
+    <tr><td>RAG</td><td><code>pipeline</code> 深且值得存在（deletion test：删了 rerank 会被跳过）</td><td>qdrant_store 浅接口、深而杂的实现</td><td>ingest <code>isinstance(QdrantChunkStore)</code>；JSONL 每查全读</td><td>先修 F-004；拆文件排后面</td></tr>
+    <tr><td>Eval</td><td>AXES 派生深</td><td>矩阵执行层几乎无测试</td><td>金标与 fallback 聚合</td><td><b>现在</b></td></tr>
+    <tr><td>Frontend</td><td>App.tsx 只组合布局</td><td>状态全在一个 hook，对这个 app 合适</td><td>手写类型；eval 无视图</td><td>只补降级可见性</td></tr>
+  </tbody>
+</table>
+<p class="callout">Deletion test 结论：<code>pipeline</code>、<code>presenters</code>、<code>AXES</code>、<code>shared._render_hit_block</code> 删了复杂度会扩散到 N 个调用方。
+<code>tools.search_documents</code> 和 <code>LocalDocsAgent</code> 删了复杂度几乎消失（后者只是门面，保留它可以，不必再包一层）。</p>
+
+<h2 id="s5">5. 代码质量</h2>
+<h3>风格门禁 vs 人工审查</h3>
+<p>ruff check / format / DOC201 / mypy strict / 80 列 / module-only import：门禁绿，抽查符合 <code>AGENTS.md</code>。
+故意例外（typing 直接导入、qdrant/agents 函数内导入、facade 再导出、测试免 docstring）仍在。
+<code>config</code> 别名为 <code>app_config</code>，<code>rag.base</code> 为 <code>rag_base</code>。未见局部变量遮蔽模块名。
+未启用 DOC501/DOC502；抽查 <code>Raises:</code> 与真实抛出大体一致（ingest/qdrant/config）。</p>
+<h3>热点文件</h3>
+<table>
+  <thead><tr><th>文件</th><th>行数</th><th>覆盖率线索</th><th>职责</th></tr></thead>
+  <tbody>
+    <tr><td><code>rag/chunker.py</code></td><td>625</td><td>92%</td><td>仍最大；2026-09-07 已拆 grouping；可维持</td></tr>
+    <tr><td><code>rag/qdrant_store.py</code></td><td>472</td><td>43%</td><td>lifecycle+CRUD+search+errors 仍混</td></tr>
+    <tr><td><code>evals/comparison.py</code></td><td>363</td><td>49%</td><td>AXES 深；执行/排序未测</td></tr>
+    <tr><td><code>evals/harness.py</code></td><td>311</td><td>85%</td><td>指标公式清楚；金标是数据问题</td></tr>
+    <tr><td><code>rag/ingest.py</code></td><td>283</td><td>87%</td><td>计划层好；Qdrant 失败窗口在这</td></tr>
+    <tr><td><code>config.py</code></td><td>257</td><td>95%</td><td>扁平仍可读</td></tr>
+    <tr><td><code>rag/llm_rerank.py</code></td><td>269</td><td>94%</td><td>降级契约测得全</td></tr>
+    <tr><td><code>api/schemas.py</code></td><td>295</td><td>100%</td><td>选项来自 constants</td></tr>
+    <tr><td><code>runtime/agents_sdk.py</code></td><td>258</td><td>81%</td><td>fake-runner 在；empty-output 未测</td></tr>
+    <tr><td><code>rag/retrieval.py</code></td><td>242</td><td>98%</td><td>策略排序有真断言</td></tr>
+    <tr><td><code>useRagWorkspace.ts</code></td><td>137</td><td>无前端测</td><td>状态所有权清晰</td></tr>
+  </tbody>
+</table>
+<h3>测试缺口表</h3>
+<table>
+  <thead><tr><th>模块</th><th>现有测试</th><th>缺的行为</th><th>风险</th></tr></thead>
+  <tbody>
+    <tr><td><code>pipeline.py</code></td><td><code>test_rerank.py</code> 三条</td><td>无独立文件，可接受</td><td>低</td></tr>
+    <tr><td><code>discovery.py</code></td><td>经 ingest/api</td><td>symlink / exclude glob</td><td>低（本地工具）</td></tr>
+    <tr><td><code>presenters.py</code></td><td>经 harness</td><td>serialize_answer 无直接测</td><td>低</td></tr>
+    <tr><td><code>tools.py</code></td><td>无</td><td>search/list/time</td><td>中（search 已死码）</td></tr>
+    <tr><td><code>agent.py</code> / <code>dispatch.py</code> / <code>basic.py</code></td><td>间接</td><td>选择与 retrieve-then-answer</td><td>中</td></tr>
+    <tr><td><code>commands/*</code></td><td>handler 绑定</td><td>业务路径</td><td>低（走应用层）</td></tr>
+    <tr><td><code>comparison.py</code> 执行</td><td>AXES / 128</td><td>排序、skip、fallback≠ok</td><td>高</td></tr>
+    <tr><td><code>qdrant_store.save</code> 删除</td><td>无</td><td>filter delete、upsert 失败</td><td>高</td></tr>
+    <tr><td>前端全部</td><td>无；CI 只 build</td><td>diagnostics 渲染、双提交</td><td>中</td></tr>
+  </tbody>
+</table>
+<p>静默 except：无 <code>except: pass</code>。宽捕获都写入 status/error。
+<code>qdrant_store.py:194-198,255-261</code> 丢弃非 dict payload 不报错——当前风险低。</p>
+
+<h2 id="s6">6. Agent / 检索 / Eval 专项</h2>
+<ul>
+  <li><b>工具面：</b>用户能 ingest/ask/eval/compare/list；agent 只有 search/list/time。不对等是有意的交付缺口，不是 bug。不要为 action parity 把 ingest 塞进 tool。</li>
+  <li><b>原语：</b><code>tools.py</code> 是原语。检索走完整 pipeline。SDK 却绕过 <code>search_documents</code> 自己 retrieve——文档真、调用图假。</li>
+  <li><b>弱检索改写/重试：</b>未做。Phase E。pipeline 只有 search+rerank。</li>
+  <li><b>可观测性：</b>只有 <code>AnswerDiagnostics</code>。无 tool trace / turn log。SDK 若不调用 search，citations 为空但模型仍可编 <code>[S1]</code>。</li>
+  <li><b>Citation 契约：</b><code>[S1]</code> 从第 0 列开始，测试锁住，未回潮。不要改成 prompt 里的检索策略。</li>
+  <li><b>basic vs agents_sdk：</b>citation 对象模型共享；编排不同（必检索 vs 可选）。eval 能分开失败仅当 SDK 真的跑起来；fallback 到 basic 时 F-002 会把格子标成 ok。</li>
+  <li><b>指标：</b>RR 能量到排序；precision 能量到宽窗噪声，对重排不敏感。单元测试证明策略能排不一样；<b>样本 eval 证明不了</b>。</li>
+</ul>
+
+<h2 id="s7">7. 前端与 API 契约</h2>
+<ul>
+  <li>Ask diagnostics 在卡片上，不只 raw JSON。requested→actual、chat/embedding/rerank 芯片都在。</li>
+  <li>Eval 只有 raw payload。Compare leaderboard 显示 RR/precision，失败格子有 reason；成功格子没有 fallback 警告。</li>
+  <li>错误：后端有 <code>code/detail/action_hint</code>，前端解析后只显示字符串。422 不是该形状。</li>
+  <li>无路由、无历史、无上传：product-gap，未半实现。</li>
+  <li>无前端测试、无 ESLint、无 error boundary。按钮有 <code>disabled={isAsking|isActing}</code>。</li>
+  <li>无 API key 进 bundle。只暴露 <code>VITE_API_BASE_URL</code>。</li>
+  <li>对比度可用。Ask textarea 无 label——未到有害。</li>
+</ul>
+
+<h2 id="s8">8. 做得好的地方</h2>
+<ol>
+  <li><b>AXES 派生。</b><code>comparison.py:74-150</code> 一张表驱动 product、overrides（<code>zip(..., strict=True)</code>）、label、CLI flags；测试强制 request/response/CLI/label 同名。</li>
+  <li><b>pipeline 单入口。</b><code>pipeline.py:50-78</code> 组合 store+rerank，返回双 status。Store 不知 rerank，rerank 不知 backend。</li>
+  <li><b>Fallback 是数据。</b>Chat/embedding/rerank 都有 <code>ProviderStatus</code>；Ask UI 真的渲染。Live 脚本拒绝降级。</li>
+  <li><b>rag facade + constants 单点。</b>包外无 <code>from local_docs_rag_agent.rag.</code>；Python 选项集不在第二模块再写一份 tuple。</li>
+  <li><b>原子写。</b><code>file_io.py:16-36</code> sibling tmp + fsync + replace；local index 与 manifest 都走它。</li>
+  <li><b>缺失 DOCS_DIR 先读后写。</b><code>discovery.require_docs_directory</code> 在 ingest 写之前；测试 <code>test_ingest.py:222-241</code>。</li>
+  <li><b>overlap 双门。</b>config 与 chunker 都拒 <code>overlap &gt;= size</code>；chunker 前进至少一块。</li>
+  <li><b>Qdrant search 拒 hash 向量。</b><code>qdrant_store.py:225-234</code> + 测试。WinError 10054 归一成 <code>unreachable</code>。</li>
+  <li><b>Agents SDK 不改全局 client。</b>每请求 async client，双 API style，fake-runner 测试关闭 client。</li>
+  <li><b>测试与开发者 .env 隔离。</b><code>conftest.py</code> autouse 抽空应用环境变量并 patch dotenv。</li>
+</ol>
+
+<h2 id="s9">9. 建议执行顺序</h2>
+<table>
+  <thead><tr><th>#</th><th>工作</th><th>量</th><th>依赖</th><th>Phase</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>修正金标关键字；加「关键字必须是 source 子串」测试</td><td>S</td><td>无</td><td>A</td></tr>
+    <tr><td>2</td><td>按失败模式扩 eval 集；sample 语料与 <code>docs/</code> 工程文档分开</td><td>M</td><td>1</td><td>A</td></tr>
+    <tr><td>3</td><td>compare：fallback / runtime 降级不进 leaderboard；补排序测试</td><td>S</td><td>无</td><td>B</td></tr>
+    <tr><td>4</td><td>在能区分的集合上跑 eval-compare，记下谁赢</td><td>M</td><td>1–3，live 或稳定假检索</td><td>A/C</td></tr>
+    <tr><td>5</td><td>Qdrant upsert 失败后源必须 dirty；假 client 测 delete-then-fail</td><td>M</td><td>无</td><td>D</td></tr>
+    <tr><td>6</td><td>文档：质量门命令、Phase C「代码完成/测量未闭合」、Qdrant blended≡dense</td><td>S</td><td>无</td><td>文档</td></tr>
+    <tr><td>7</td><td>复跑 <code>scripts/verify_live_qdrant.py</code></td><td>S</td><td>网络 / cluster</td><td>D</td></tr>
+    <tr><td>8</td><td>顺手：vite noEmit、SDK 走 tools.search_documents、Ask max_length</td><td>S</td><td>无</td><td>工程</td></tr>
+    <tr><td>—</td><td>JSONL 缓存、拆 qdrant_store、cross-encoder、query rewrite、UI 历史/上传、Ollama、Docker</td><td>—</td><td>4 完成之后</td><td>C余/E/F/G/H</td></tr>
+  </tbody>
+</table>
+
+<h2 id="known">已知声称裁决</h2>
+<table>
+  <thead><tr><th>#</th><th>声称</th><th>裁决</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>qdrant_store.py 过大，可按 lifecycle/CRUD/search/error 拆</td><td><b>仍成立</b>（472 行，43% 覆盖）。现在不要为拆而拆。</td></tr>
+    <tr><td>2</td><td>JSONL 每次全量解析；compare 每格每问付一次</td><td><b>仍成立</b>（<code>local_store.py:128</code>，<code>pipeline.py:66</code>）。</td></tr>
+    <tr><td>3</td><td>两问一篇，rate 三档，策略打平是样本问题</td><td><b>仍成立，表述偏粗</b>：3 个 retrieval 关键字不是只有 {0,0.5,1}；F-001 把 Q1 锁在 2/3。打平仍是样本+金标，不是策略等价。</td></tr>
+    <tr><td>4</td><td>需要按失败模式写 docs/ 上的 case</td><td><b>仍成立</b>，且应把工程文档排除出 eval 语料。</td></tr>
+    <tr><td>5</td><td>Qdrant delete 后 upsert 非事务，中途失败暂时丢掉该源</td><td><b>比文档更糟</b>：增量 checksum 匹配时不会重写（F-004）。</td></tr>
+    <tr><td>6</td><td>远端 Qdrant TLS WinError 10054；chat/embedding 可能仍 live</td><td><b>文档仍如此记录</b>。本次未复验 live。代码仍把 10054 标 unreachable（<code>qdrant_store.py:465</code>）。</td></tr>
+    <tr><td>7</td><td>AppConfig 字段继续涨则考虑分 sub-config；当前仍可读</td><td><b>仍成立</b>（约 36 字段）。</td></tr>
+    <tr><td>8</td><td>报告写入 data/ 若格式变多再抽 reporting</td><td><b>仍成立</b>。现在不要抽。</td></tr>
+    <tr><td>9</td><td>无 cross-encoder rerank、无 query rewrite</td><td><b>仍成立</b>。Reranker protocol 已留口。</td></tr>
+    <tr><td>10</td><td>RERANKER 是轴但默认不扫</td><td><b>仍成立</b>，有测试（<code>test_eval_comparison.py:112-114</code>）。</td></tr>
+    <tr><td>11</td><td>Prompt-context 块必须从第 0 列开始</td><td><b>仍成立且未回潮</b>（<code>shared.py:119-126</code>，<code>test_runtime_shared.py</code>）。</td></tr>
+    <tr><td>12</td><td>封闭选项集与 compare 轴从 constants / AXES 派生</td><td><b>Python 成立</b>。HTTP schema 是手写第二份，靠测试锁名字。前端是第三份。</td></tr>
+  </tbody>
+</table>
+<h3>2026-08-29 已修项回潮抽查</h3>
+<table>
+  <thead><tr><th>项</th><th>结果</th></tr></thead>
+  <tbody>
+    <tr><td>overlap ≥ size 死循环</td><td>未回潮。config + chunker + 测试</td></tr>
+    <tr><td>缺 DOCS_DIR 空状态覆盖 index</td><td>未回潮。<code>test_ingest.py:222</code></td></tr>
+    <tr><td>文档变空 Qdrant 旧点残留</td><td>ingest 计划层未回潮；真实 delete filter 仍未测</td></tr>
+    <tr><td>128D hash 打进 live collection</td><td>search 未回潮；save 本身不看 mode（ingest 门仍在，无直接测试）</td></tr>
+    <tr><td>fingerprint 变化仍 ready</td><td>未回潮。<code>test_ingest.py:244</code></td></tr>
+    <tr><td>Qdrant load 截断 10k</td><td>未回潮。scroll 分页测试在</td></tr>
+    <tr><td>非原子 index/manifest 写</td><td>未回潮。file_io 仍在</td></tr>
+    <tr><td>Agents SDK 改全局 client</td><td>未回潮</td></tr>
+    <tr><td>eval 矩阵无界笛卡尔积</td><td>未回潮。128 + 测试</td></tr>
+  </tbody>
+</table>
+
+<h2 id="s10">10. 未核验项</h2>
+<ul>
+  <li>Live Qdrant Cloud（会写 collection；文档记录 10054）。未跑 <code>scripts/verify_live_qdrant.py</code> / <code>check_qdrant.py</code>。</li>
+  <li>真实 chat/embedding 端点。未跑 <code>check_chat_api.py</code> / <code>check_embedding_api.py</code>。</li>
+  <li>浏览器点选：Ask / Ingest / Eval / Compare、降级芯片、双提交、移动视口。</li>
+  <li>已安装的 <code>openai-agents</code> 是否在 <code>Runner.run</code> 无 RunConfig 时仍设置默认 tracing client。</li>
+  <li><code>DOCS_DIR</code> 下目录 symlink 是否能读到目录外（pathlib rglob 行为，HTTP 不接受路径）。</li>
+  <li>Windows 上 <code>Path.replace</code> 跨卷是否仍原子（file_io 要求同目录 sibling）。</li>
+  <li>本地被 ignore 的 <code>data/evals/compare_latest.json</code> 仍是 RR 之前的旧 schema——不要拿来当现行证据。</li>
+</ul>
+
+<p class="muted">审计员未修改 <code>tasks.md</code>、未修代码、未开 PR。HTML 仅供阅读。</p>
+</main>
+</div>
+<script>
+  const buttons = document.querySelectorAll(".filters button");
+  const findings = document.querySelectorAll(".finding");
+  buttons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      buttons.forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      const f = btn.dataset.f;
+      findings.forEach((el) => {
+        const show = f === "all" || el.dataset.sev === f || el.dataset.cat === f;
+        el.classList.toggle("hidden", !show);
+      });
+    });
+  });
+</script>
+</body>
+</html>

@@ -16,7 +16,7 @@ Before changing code:
    (`core`, `config`, `providers`, `rag`, `runtime`, `evals`, `api`,
    or `frontend/AGENTS.md`)
 3. Skim `tasks.md` current focus
-4. Check `docs/development-roadmap.md` only if the task changes phase status
+4. Check `docs/planning/development-roadmap.md` only if the task changes phase status
 
 ## Default workflow
 
@@ -63,4 +63,4 @@ After implementation:
 
 1. Review the changed code for regressions
 2. Confirm task completion in `tasks.md`
-3. If the work advanced the phase meaningfully, update `docs/development-roadmap.md`
+3. If the work advanced the phase meaningfully, update `docs/planning/development-roadmap.md`

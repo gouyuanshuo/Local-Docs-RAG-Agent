@@ -37,65 +37,10 @@ The goal is to let an LLM do useful work around private/local documents:
 
 ## 2. Current architecture
 
-### Frontend
-
-- `frontend/`
-- stack: `Vite + React + TypeScript`
-- responsibilities:
-  - ask questions
-  - trigger ingest/eval
-  - show answer cards
-  - show citation spans
-  - show system/config state
-
-### Backend
-
-- `backend/src/local_docs_rag_agent/`
-- stack: `FastAPI + Python package`
-- responsibilities:
-  - config loading
-  - provider setup
-  - ingestion
-  - retrieval
-  - runtime dispatch
-  - eval execution
-  - API responses
-
-### Main backend modules
-
-- `api/`
-  - application assembly, HTTP routes, typed schemas, and error mapping
-- `commands/`
-  - CLI entrypoints
-- `providers/`
-  - chat provider
-  - embedding provider
-  - provider factory
-- `rag/`
-  - chunking
-  - ingest planning and typed manifest
-  - atomic local store
-  - paginated Qdrant store
-  - local retrieval scoring
-- `runtime/`
-  - `basic`
-  - `agents_sdk`
-  - shared retrieval/answer assembly
-- `evals/`
-  - eval harness
-
-### Current supported capabilities
-
-- local docs ingest
-- local retrieval
-- Qdrant retrieval
-- citation span tracking
-- `basic` runtime
-- `agents_sdk` runtime
-- eval harness
-- OpenAI-compatible providers
-- Qwen via compatible endpoint
-- split frontend/backend dev workflow
+The system's structure is described in
+[the architecture document](../design/architecture.md), which is kept current
+with the code. It is not repeated here: this section used to carry its own
+copy, and that copy went stale.
 
 ---
 
@@ -438,7 +383,7 @@ OpenAI-compatible + Qwen is already enough to validate the current system.
 - Ruff and mypy strict are configured as local quality gates
 - regression coverage now includes configuration invariants, chunk offsets, ingest
   consistency, persisted-data corruption, Qdrant pagination, and API error contracts
-- backend architecture and extension rules are documented in `docs/architecture.md`
+- backend architecture and extension rules are documented in `docs/design/architecture.md`
 - GitHub Actions now enforces backend Ruff/mypy/pytest/compile gates and the frontend build
 - next engineering steps include deployment packaging and resolving the external Qdrant endpoint
 

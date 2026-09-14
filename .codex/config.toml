@@ -6,7 +6,7 @@ name = "Local Docs RAG Agent"
 spec = "spec.md"
 tasks = "tasks.md"
 agents = "AGENTS.md"
-roadmap = "docs/development-roadmap.md"
+roadmap = "docs/planning/development-roadmap.md"
 
 [workflow]
 read_agents_first = true

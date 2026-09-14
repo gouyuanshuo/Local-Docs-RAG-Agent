@@ -91,6 +91,6 @@ The system should support:
 
 ## Near-term engineering direction
 
-Use `docs/development-roadmap.md` for phase order.
+Use `docs/planning/development-roadmap.md` for phase order.
 
 Use `tasks.md` for the current execution queue.

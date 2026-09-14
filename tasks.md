@@ -9,7 +9,7 @@ Before coding:
 - [x] Read `AGENTS.md`
 - [x] Read `spec.md`
 - [x] Read `tasks.md`
-- [x] Check `docs/development-roadmap.md`
+- [x] Check `docs/planning/development-roadmap.md`
 - [x] Open the relevant local skill if needed
 
 After coding:

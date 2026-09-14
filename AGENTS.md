@@ -4,9 +4,10 @@ This is the **router** for contributors and coding agents. Do not read the
 whole repository at the start of a task. Read this file, open the **one**
 module contract the task belongs to, then code.
 
-Product requirements: `spec.md`. Execution queue: `tasks.md`. System diagram
-and extension recipes: `docs/architecture.md`. Long-horizon phases:
-`docs/development-roadmap.md`.
+Product requirements: `spec.md`. Execution queue: `tasks.md`. Documentation
+index: `docs/README.md`. System diagram and extension recipes:
+`docs/design/architecture.md`. Long-horizon phases:
+`docs/planning/development-roadmap.md`.
 
 ## Startup (do this, not a full-repo dump)
 
@@ -73,7 +74,7 @@ in production code. Tests may import internals.
 - Do not treat fallback as success; keep `ProviderStatus` visible.
 - Prefer extending an existing module over a new top-level package.
 - Closed option sets live only in `core/constants.py`.
-- See `docs/architecture.md` to add a provider, store, runtime, CLI command,
+- See `docs/design/architecture.md` to add a provider, store, runtime, CLI command,
   or config field.
 
 ## Code style

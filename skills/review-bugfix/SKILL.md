@@ -14,7 +14,7 @@ Before reviewing or debugging:
 1. Read root `AGENTS.md` and the module `AGENTS.md` for the code under review
 2. Read `spec.md` only if the bug is a product-requirement mismatch
 3. Skim `tasks.md` current focus
-4. Check `docs/development-roadmap.md` only if phase status is in question
+4. Check `docs/planning/development-roadmap.md` only if phase status is in question
 
 ## Review workflow
 
