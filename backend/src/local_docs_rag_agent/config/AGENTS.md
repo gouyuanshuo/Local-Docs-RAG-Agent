@@ -19,8 +19,8 @@ File: `config/__init__.py` (the package *is* the snapshot). Import as
 
 - Frozen + slots. No in-place mutation.
 - `chunk_overlap >= chunk_size` is rejected here and again in the chunker.
-- Default `docs_dir` is `docs/sample` so engineering markdown is not the
-  eval corpus.
+- Default `docs_dir` is `data/corpus/sample`. The corpus lives outside
+  `docs/`, so project documentation can never be indexed by default.
 
 ## May change
 

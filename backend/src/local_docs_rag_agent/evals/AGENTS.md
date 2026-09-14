@@ -9,7 +9,7 @@ Load gold, score one run, sweep a matrix, rank a leaderboard.
 - `comparison.AXES` — single definition of sweepable axes
 - `comparison.run_eval_matrix` / `cell_degradation_reason` / `run_label`
 - Gold: `data/evals/sample_eval.jsonl`
-- Corpus: `docs/sample/` (default `DOCS_DIR`)
+- Corpus: `data/corpus/sample/` (default `DOCS_DIR`)
 
 ## Invariants
 
@@ -47,7 +47,7 @@ Load gold, score one run, sweep a matrix, rank a leaderboard.
 
 ## Parallel ownership
 
-Own: `evals/*`, `data/evals/sample_eval.jsonl`, `docs/sample/*`.
+Own: `evals/*`, `data/evals/sample_eval.jsonl`, `data/corpus/sample/*`.
 `presenters.py` is a shared seam with delivery.
 
 ## New session

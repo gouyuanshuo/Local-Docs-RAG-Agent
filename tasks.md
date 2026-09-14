@@ -177,7 +177,8 @@ Current theme:
       rose with `top_k` and could not see reranking at all
 - [x] Report "retrieved but not first" separately from "missed entirely"
 - [x] Grow the eval set beyond two questions against one document (12 cases,
-      multi-doc corpus under `docs/sample/`; default `DOCS_DIR=docs/sample`)
+      multi-doc corpus under `data/corpus/sample/`; default
+      `DOCS_DIR=data/corpus/sample`)
 - [x] Write cases by failure mode (rare exact term, paraphrase, near-duplicate,
       cross-section, fusion definition). Hash lexical vs dense now disagree on
       mean RR; live-provider winners are still unrecorded

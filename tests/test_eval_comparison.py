@@ -266,7 +266,7 @@ def test_no_key_compare_has_no_leaderboard_winner(
     tmp_path: pathlib.Path,
 ) -> None:
     config = app_config.AppConfig.from_env().with_overrides(
-        docs_dir=REPO_ROOT / "docs" / "sample",
+        docs_dir=REPO_ROOT / "data" / "corpus" / "sample",
         eval_path=REPO_ROOT / "data" / "evals" / "sample_eval.jsonl",
         index_path=tmp_path / "chunks.jsonl",
         ingest_manifest_path=tmp_path / "manifest.json",

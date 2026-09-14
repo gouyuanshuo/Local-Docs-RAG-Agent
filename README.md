@@ -48,8 +48,8 @@ The goal is not model training. The goal is to build a usable AI application wit
 
 The current happy path is:
 
-1. Put docs under `docs/sample/` (the default `DOCS_DIR`; keep engineering
-   markdown in `docs/` out of the eval corpus)
+1. Put docs under `data/corpus/sample/` (the default `DOCS_DIR`). `docs/`
+   holds the project's own documentation and is never the corpus
 2. Run ingestion
 3. Ask a question
 4. Retrieve relevant chunks

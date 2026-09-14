@@ -28,7 +28,7 @@ pipeline -> rerank -> llm_rerank
 - Qdrant ingest/search refuse non-live embeddings.
 - After delete-then-upsert failure, `needs_reindex` is set; `ensure_index`
   must restore even when checksums match.
-- Default corpus is `docs/sample`, not engineering files under `docs/`.
+- Default corpus is `data/corpus/sample`; nothing under `docs/` is indexed.
 
 ## May change
 

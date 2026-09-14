@@ -12,11 +12,7 @@ from local_docs_rag_agent.rag import chunker, discovery, retrieval
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 EVAL_PATH = REPO_ROOT / "data" / "evals" / "sample_eval.jsonl"
-ENGINEERING_DOC_NAMES = (
-    "architecture.md",
-    "development-roadmap.md",
-    "code-review-2026-08-29.md",
-)
+CORPUS_DIR = REPO_ROOT / "data" / "corpus" / "sample"
 
 
 def test_retrieval_keywords_are_contiguous_source_substrings() -> None:
@@ -38,24 +34,36 @@ def test_retrieval_keywords_are_contiguous_source_substrings() -> None:
     assert missing == []
 
 
-def test_default_docs_dir_is_the_sample_corpus_not_engineering_docs() -> None:
+def test_default_corpus_is_the_eval_corpus_and_nothing_else() -> None:
+    # The corpus lives outside `docs/` so no amount of project documentation
+    # can reach the index through the default. A design doc about RRF or
+    # Qdrant payloads would otherwise be a near-duplicate distractor for the
+    # very eval questions written about those topics.
     config = app_config.AppConfig.from_env()
-    assert config.docs_dir == pathlib.Path("docs/sample")
+    assert config.docs_dir == pathlib.Path("data/corpus/sample")
+
     paths = discovery.collect_document_paths(
-        REPO_ROOT / "docs" / "sample", config.docs_exclude_patterns
+        REPO_ROOT / config.docs_dir, config.docs_exclude_patterns
     )
-    names = {path.name for path in paths}
-    for banned in ENGINEERING_DOC_NAMES:
-        assert banned not in names
-    assert "lecture5_attention.md" in names
+
     assert len(paths) >= 2
+    assert all(CORPUS_DIR in path.resolve().parents for path in paths)
+    assert "lecture5_attention.md" in {path.name for path in paths}
+
+
+def test_gold_sources_live_in_the_corpus_not_in_the_documentation() -> None:
+    cases = harness.load_eval_cases(EVAL_PATH)
+    sources = {path for case in cases for path in case.expected_source_paths}
+
+    assert sources
+    assert all(path.startswith("data/corpus/sample/") for path in sources)
 
 
 def test_lexical_and_dense_disagree_on_eval_set_reciprocal_rank() -> None:
     # Hash embeddings are allowed here: this is retrieval scoring, not a
     # compare leaderboard winner. Fallback cells must not enter the board.
     config = app_config.AppConfig.from_env().with_overrides(
-        docs_dir=REPO_ROOT / "docs" / "sample",
+        docs_dir=CORPUS_DIR,
         eval_path=EVAL_PATH,
         vector_backend="local",
         embedding_api_key=None,
