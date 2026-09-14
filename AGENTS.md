@@ -5,8 +5,8 @@ whole repository at the start of a task. Read this file, open the **one**
 module contract the task belongs to, then code.
 
 Product requirements: `spec.md`. Execution queue: `tasks.md`. Documentation
-index: `docs/README.md`. System diagram and extension recipes:
-`docs/design/architecture.md`. Long-horizon phases:
+index: `docs/README.md`. System diagram: `docs/design/architecture.md`.
+Extension recipes: `docs/development/extending.md`. Long-horizon phases:
 `docs/planning/development-roadmap.md`.
 
 ## Startup (do this, not a full-repo dump)
@@ -74,7 +74,7 @@ in production code. Tests may import internals.
 - Do not treat fallback as success; keep `ProviderStatus` visible.
 - Prefer extending an existing module over a new top-level package.
 - Closed option sets live only in `core/constants.py`.
-- See `docs/design/architecture.md` to add a provider, store, runtime, CLI command,
+- See `docs/development/extending.md` to add a provider, store, runtime, CLI command,
   or config field.
 
 ## Code style

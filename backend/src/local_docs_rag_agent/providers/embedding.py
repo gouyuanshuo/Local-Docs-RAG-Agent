@@ -81,8 +81,9 @@ class OpenAICompatibleEmbeddingProvider(provider_base.EmbeddingProvider):
         Returns:
           One vector per input, in input order. If the endpoint cannot be
           reached, deterministic hash vectors are returned and `status`
-          reports `fallback`; ingest refuses to store those, so a degraded
-          run cannot quietly poison the index. Never raises.
+          reports `fallback`. Qdrant ingest refuses to store those, so a
+          degraded run cannot mix them into a collection of live vectors.
+          Never raises.
         """
         if not texts:
             return []

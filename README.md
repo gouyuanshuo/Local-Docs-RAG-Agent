@@ -181,7 +181,9 @@ The files you will reach for most often:
 - `tasks.md`
   - current task board and short-horizon execution list
 - `docs/design/architecture.md`
-  - module boundaries, dependency direction, state ownership, and extension rules
+  - module boundaries, dependency direction, state ownership, and the failure contract
+- `docs/development/`
+  - getting started, workflow, testing, extension recipes, and troubleshooting
 - `docs/planning/development-roadmap.md`
   - long-horizon roadmap and phase plan
 - `docs/reviews/`

@@ -2,8 +2,8 @@
 
 Both interfaces require a `status` property. A provider that degrades must say
 so there rather than raising or silently returning a lesser result, which is
-what allows an ingest to refuse fallback vectors and a live check to reject a
-degraded run.
+what allows Qdrant ingest to refuse fallback vectors and a live check to reject
+a degraded run.
 """
 
 from __future__ import annotations
@@ -51,7 +51,8 @@ class EmbeddingProvider(abc.ABC):
         Returns:
           One vector per input, in input order. An implementation that
           falls back to synthetic vectors must report `fallback` through
-          `status`, because ingest refuses to store them.
+          `status`: Qdrant ingest refuses to store them, and every answer
+          built on them is labelled as degraded.
         """
         raise NotImplementedError
 

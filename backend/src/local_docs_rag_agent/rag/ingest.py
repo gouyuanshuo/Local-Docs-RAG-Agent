@@ -63,9 +63,10 @@ def ingest_documents(
 
     Raises:
       ConfigurationError: If the documents cannot be read.
-      ProviderUnavailableError: If the embedding provider degraded.
-        Fallback vectors are refused rather than stored, because an
-        index built from them answers plausibly and wrongly.
+      ProviderUnavailableError: If the provider returns the wrong number
+        of vectors or an empty one, on any backend; or, on Qdrant, if
+        embeddings degraded to fallback, because hash vectors are not
+        comparable with the live vectors already in the collection.
       VectorStoreError: If the store rejects the write.
     """
     source_texts = discovery.read_source_texts(

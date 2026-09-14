@@ -250,115 +250,14 @@ visible during development.
 Per-case eval results retain the same runtime/provider diagnostics as interactive
 answers, allowing strict live verification to reject degradation anywhere in a run.
 
-## Extension rules
+## Extending and verifying
 
-To add a provider:
+Recipes for adding a provider, vector store, runtime, reranker, retrieval
+strategy, comparison axis, CLI command, or configuration setting are in the
+[extension guide](../development/extending.md). The quality-gate commands
+live in [AGENTS.md](../../AGENTS.md#quality-gates), and the
+[workflow guide](../development/workflow.md) says what each one guards and
+where CI runs it.
 
-1. implement the interface in `providers/base.py`
-2. expose truthful `ProviderStatus`
-3. add construction in `providers/factory.py`
-4. add provider-specific configuration validation and tests
-
-To add a vector store:
-
-1. add the name to `VectorBackendName` in `constants.py`
-2. implement `ChunkStore` from `rag/base.py` in its own module
-3. define replacement/deletion semantics explicitly
-4. normalize operational failures into `VectorStoreError` with a stable `reason_code`
-5. wire construction in `rag/store_factory.py` and export it from `rag/__init__.py`
-6. add lifecycle and retrieval tests
-
-To add a runtime:
-
-1. add the name to `RuntimeName` in `constants.py`; configuration, request validation,
-   and CLI choices pick it up from there
-2. return a complete `AgentAnswer`
-3. preserve requested vs actual runtime diagnostics
-4. use `runtime/shared.py` for citation assembly where possible
-5. wire it into `runtime/dispatch.py`
-
-To add a reranker:
-
-1. add the name to `RerankerName` in `constants.py`; configuration, request validation,
-   CLI choices, and the eval matrix axis pick it up from there
-2. implement the `Reranker` protocol from `rag/rerank.py` in its own module. Take no
-   dependency on which store produced the candidates
-3. report a `fallback` `ProviderStatus` and return the candidates unchanged on every
-   failure. A reranker must not raise: a recoverable provider fault would otherwise
-   turn into a failed answer, and a silent retreat to first-stage order would let a
-   degraded run pass for a reranked one
-4. say in `candidate_depth` how wide a window it is willing to read, and never return
-   less than `top_k`
-5. wire construction in `rag/pipeline.py`
-6. add tests that show it reorders, that a bad reply degrades rather than raises, and
-   that its status reaches the answer diagnostics
-
-To add a retrieval strategy:
-
-1. add the name to `RetrievalStrategyName` in `constants.py`; configuration, request
-   validation, CLI choices, and the eval matrix axis pick it up from there
-2. implement the ranking branch in `rag/retrieval.py`, returning hits built by
-   `build_retrieval_hit` so citation spans stay attached
-3. decide what it means on a remote backend that returns no vectors, and either
-   handle it in `rerank_dense_hits` or say in `needs_candidate_window` that it does
-   not need a wider candidate window
-4. add tests that show it ranks *differently* from an existing strategy, not merely
-   that it runs; a strategy nothing can distinguish is not a strategy
-5. sweep it against `blended` with `eval-compare` before claiming it is better
-
-Every recipe below assumes the code style in `AGENTS.md`: module-only imports,
-80 columns, and a Google docstring on anything public. `ruff check` and
-`ruff format --check` enforce all three, and CI runs both.
-
-To add a comparison axis:
-
-1. add the setting to `constants.py` and `config.py` as usual
-2. add one `MatrixAxis` entry to `AXES` in `evals/comparison.py`, naming the
-   request key, the `AppConfig` field it overrides, its CLI flag, its label
-   prefix, and how it defaults
-3. add the matching field to `EvalCompareRequest` and `EvalCompareResponse` in
-   `api/schemas.py`, under the same name
-
-Nothing else. The Cartesian product, the per-cell overrides, the run label, the
-report keys, and the CLI flag are all derived from the entry, and
-`tests/test_eval_comparison.py` fails if the schema, the CLI, or the label
-falls out of step with it.
-
-That derivation is the point. The axes were once a parameter list, a length
-list, a `product()` call, and an unpacking tuple that had to agree by
-position — and because every axis is a sequence, binding one axis's values to
-another's field type-checked, ran, and produced quietly wrong numbers.
-
-To add a CLI command:
-
-1. write a handler in `commands/`
-2. add a `_register_*` function in `cli.py` that binds it with `set_defaults`
-3. list that function in `COMMAND_REGISTRARS`
-
-To add a configuration setting:
-
-1. add the field to `AppConfig`
-2. read it in `from_env` with the matching helper from `env.py`
-3. validate it in `__post_init__`, which also covers variants built by `with_overrides`
-
-## Quality gates
-
-Run these before merging backend changes:
-
-```powershell
-python -m ruff check backend/src tests scripts
-python -m ruff format --check backend/src tests scripts
-python -m mypy
-python -m pytest
-python -m compileall -q backend/src
-pnpm run build
-```
-
-`mypy` is run bare so it uses `[tool.mypy] files` (`backend/src`, `tests`,
-and `scripts`). CI also runs `ruff check --preview --select DOC201` on
-`backend/src` and `scripts`.
-
-Live Qdrant/provider verification is a separate environment-dependent gate and must
-be reported separately from deterministic offline tests.
-
-GitHub Actions executes the deterministic gates in separate backend and frontend jobs.
+Live Qdrant and provider verification is a separate, environment-dependent
+check, reported separately from the deterministic offline gates.

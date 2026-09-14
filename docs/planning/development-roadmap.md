@@ -383,7 +383,8 @@ OpenAI-compatible + Qwen is already enough to validate the current system.
 - Ruff and mypy strict are configured as local quality gates
 - regression coverage now includes configuration invariants, chunk offsets, ingest
   consistency, persisted-data corruption, Qdrant pagination, and API error contracts
-- backend architecture and extension rules are documented in `docs/design/architecture.md`
+- backend architecture is documented in `docs/design/architecture.md`, and
+  extension recipes in `docs/development/extending.md`
 - GitHub Actions now enforces backend Ruff/mypy/pytest/compile gates and the frontend build
 - next engineering steps include deployment packaging and resolving the external Qdrant endpoint
 
