@@ -11,13 +11,19 @@ repository as it was, so their links and paths are deliberately not checked.
 
 from __future__ import annotations
 
+import ast
 import pathlib
 import re
+
+from local_docs_rag_agent.evals import comparison
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 DOCS_DIR = REPO_ROOT / "docs"
 INDEX = DOCS_DIR / "README.md"
 ARCHIVE_DIR = DOCS_DIR / "reviews"
+REFERENCE_DIR = DOCS_DIR / "reference"
+PACKAGE_DIR = REPO_ROOT / "backend" / "src" / "local_docs_rag_agent"
+HTTP_VERBS = frozenset({"get", "post", "put", "patch", "delete"})
 
 FENCE_RE = re.compile(r"^(```|~~~).*?^\1", re.MULTILINE | re.DOTALL)
 INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
@@ -122,3 +128,127 @@ def test_every_document_is_reachable_from_the_index() -> None:
     ]
 
     assert orphans == []
+
+
+# --- References must cover what the code exposes ----------------------------
+#
+# Each surface is read from the source rather than listed here, so adding a
+# setting, a route, or a flag without documenting it fails a test instead of
+# leaving a reference that silently stopped being complete. Names must appear
+# backticked, so `TOP_K` is not satisfied by `RERANK_TOP_K` and `POST /api/eval`
+# is not satisfied by `POST /api/eval/compare`.
+
+
+def _parse(path: pathlib.Path) -> ast.Module:
+    return ast.parse(path.read_text(encoding="utf-8"))
+
+
+def _reference(name: str) -> str:
+    return (REFERENCE_DIR / name).read_text(encoding="utf-8")
+
+
+def _configured_variables() -> set[str]:
+    names: set[str] = set()
+    for node in ast.walk(_parse(PACKAGE_DIR / "config" / "__init__.py")):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "env"
+            and node.func.attr != "load_project_dotenv"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ):
+            names.add(node.args[0].value)
+        if (
+            isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name)
+                and target.id.endswith("_VARIABLES")
+                for target in node.targets
+            )
+            and isinstance(node.value, ast.Tuple)
+        ):
+            names.update(
+                element.value
+                for element in node.value.elts
+                if isinstance(element, ast.Constant)
+                and isinstance(element.value, str)
+            )
+    return names
+
+
+def _api_routes() -> set[str]:
+    tree = _parse(PACKAGE_DIR / "api" / "routes.py")
+    prefix = ""
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "APIRouter"
+        ):
+            for keyword in node.keywords:
+                if keyword.arg == "prefix" and isinstance(
+                    keyword.value, ast.Constant
+                ):
+                    prefix = str(keyword.value.value)
+    routes: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        for decorator in node.decorator_list:
+            if (
+                isinstance(decorator, ast.Call)
+                and isinstance(decorator.func, ast.Attribute)
+                and decorator.func.attr in HTTP_VERBS
+                and decorator.args
+                and isinstance(decorator.args[0], ast.Constant)
+            ):
+                verb = decorator.func.attr.upper()
+                routes.add(f"{verb} {prefix}{decorator.args[0].value}")
+    return routes
+
+
+def _cli_surface() -> set[str]:
+    names: set[str] = {axis.flag for axis in comparison.AXES}
+    for node in ast.walk(_parse(PACKAGE_DIR / "cli.py")):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ):
+            continue
+        first = node.args[0].value
+        if node.func.attr == "add_parser":
+            names.add(first)
+        elif node.func.attr == "add_argument" and first.startswith("--"):
+            names.add(first)
+    return names
+
+
+def test_configuration_reference_names_every_setting() -> None:
+    variables = _configured_variables()
+    # A broken extractor would otherwise pass by finding nothing to check.
+    assert len(variables) >= 30
+    text = _reference("configuration.md")
+
+    assert sorted(name for name in variables if f"`{name}`" not in text) == []
+
+
+def test_http_api_reference_names_every_route() -> None:
+    routes = _api_routes()
+    assert len(routes) >= 7
+    text = _reference("http-api.md")
+
+    assert sorted(route for route in routes if f"`{route}`" not in text) == []
+
+
+def test_cli_reference_names_every_command_and_flag() -> None:
+    surface = _cli_surface()
+    assert {"ingest", "ask", "eval", "eval-compare"} <= surface
+    text = _reference("cli.md")
+
+    assert sorted(name for name in surface if f"`{name}`" not in text) == []

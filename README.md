@@ -195,286 +195,37 @@ The files you will reach for most often:
 
 ## Quick start
 
-### 1. Create a virtual environment
-
-```bash
+```powershell
 py -3.13 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-```
-
-### 2. Install backend dependencies
-
-```bash
-python -m pip install -e .[agents,qdrant]
-```
-
-### 3. Install frontend dependencies
-
-```bash
+python -m pip install -e ".[agents,qdrant,dev]"
 pnpm install
-```
-
-### 4. Copy environment variables
-
-```bash
 copy .env.example .env
+pnpm run dev:backend   # API on http://127.0.0.1:8000
+pnpm run dev           # UI on http://127.0.0.1:5173
 ```
 
-The app auto-loads a project-local `.env`, so you do not need to export variables manually before each run.
-
-## Development workflow
-
-### Frontend
-
-```bash
-pnpm run dev
-```
-
-Vite runs on `http://127.0.0.1:5173` by default.
-
-### Backend
-
-```bash
-pnpm run dev:backend
-```
-
-FastAPI runs on `http://127.0.0.1:8000`.
-
-### CLI
-
-You can still use the CLI directly:
-
-```bash
-local-docs-rag ingest
-local-docs-rag ask "How is attention explained in lecture 5?"
-local-docs-rag eval
-```
-
-## API
-
-The FastAPI app currently exposes:
-
-- `GET /api/health`
-- `GET /api/info`
-- `GET /api/documents`
-- `POST /api/ingest`
-- `POST /api/ask`
-- `POST /api/eval`
-- `POST /api/eval/compare`
+No API key is needed for a first run: answers are marked `fallback` rather
+than failing. The [getting-started guide](docs/development/getting-started.md)
+walks through each step, including POSIX shells and a first question, and the
+[CLI](docs/reference/cli.md) and [HTTP API](docs/reference/http-api.md)
+references list every command and endpoint.
 
 ## Configuration
 
-The most important settings live in `.env`.
-
-### LLM
-
-- `LLM_PROVIDER`
-- `LLM_API_KEY`
-- `LLM_BASE_URL`
-- `LLM_MODEL`
-- `LLM_API_STYLE`
-
-### Embeddings
-
-- `EMBEDDING_PROVIDER`
-- `EMBEDDING_API_KEY`
-- `EMBEDDING_BASE_URL`
-- `EMBEDDING_MODEL`
-- `EMBEDDING_DIMENSIONS`
-- `EMBEDDING_BATCH_SIZE`
-- `EMBEDDING_MAX_RETRIES`
-- `EMBEDDING_RETRY_BACKOFF_MS`
-
-### Retrieval ranking
-
-- `RETRIEVAL_STRATEGY=blended` — the original `max(dense, lexical, weighted mix)`
-  ranking. Kept as the default so earlier eval numbers stay reproducible.
-- `RETRIEVAL_STRATEGY=dense` — embedding cosine similarity alone
-- `RETRIEVAL_STRATEGY=lexical` — Okapi BM25 alone
-- `RETRIEVAL_STRATEGY=hybrid_rrf` — dense and BM25 fused by reciprocal rank
-- `RETRIEVAL_CANDIDATE_K` — how deep each signal ranks before fusion (default 20).
-  Widened automatically when `TOP_K` exceeds it.
-- `RRF_K` — fusion damping constant (default 60)
-
-Scores are only comparable *within* a strategy: an RRF score is a sum of reciprocal
-ranks and sits near 0.03, while a cosine similarity sits near 1. Compare strategies
-with `eval-compare`, not by reading scores side by side.
-
-On Qdrant, `blended` is the server's dense cosine order (`blended ≡ dense`)
-because the payload has no vectors. When comparing `local` vs `qdrant`, sweep
-`dense` and `hybrid_rrf`, not `blended`:
-
-```bash
-python -m local_docs_rag_agent.cli eval-compare \
-  --vector-backend local --vector-backend qdrant \
-  --retrieval-strategy dense --retrieval-strategy hybrid_rrf
-```
-
-To compare ranking strategies on one backend, name them explicitly. Fallback
-cells are `degraded` and do not enter the leaderboard.
-
-```bash
-python -m local_docs_rag_agent.cli eval-compare \
-  --retrieval-strategy blended --retrieval-strategy hybrid_rrf
-```
-
-### Second-stage reranking
-
-First-stage ranking judges a chunk without reading the question as a question, so
-the right passage often lands third rather than first. Widening `TOP_K` to
-compensate pushes more marginal context into the prompt, which is what degrades the
-answer. A reranker is the other trade: retrieve a wide candidate window, reorder it,
-and answer from a short list.
-
-- `RERANKER=none` — the default. No extra call, and the store is asked for exactly
-  `TOP_K` candidates, so a disabled reranker costs nothing.
-- `RERANKER=llm` — one chat call per question orders the candidates. It reuses the
-  chat credentials, endpoint, and API style.
-- `RERANK_CANDIDATE_K` — how many candidates the reranker reads (default 20).
-  Widened automatically when `TOP_K` exceeds it.
-- `RERANK_MODEL` — rank with a smaller, cheaper model than the one that answers.
-  Defaults to `LLM_MODEL`.
-
-The reranker never raises and never invents a passage: an unreachable provider or an
-unusable reply returns the first-stage candidates unchanged and reports `fallback` in
-the answer's diagnostics, so a degraded run stays visibly degraded. After a
-successful rerank a hit's score is a rank score (`1 / position`), not a similarity.
-
-Reranking is the one `eval-compare` axis that does not sweep by default, because
-every `llm` cell costs a model call per eval case. Ask for it explicitly:
-
-```bash
-python -m local_docs_rag_agent.cli eval-compare \
-  --reranker none --reranker llm
-```
-
-### Reading the eval metrics
-
-`retrieval_span_hit_rate`, `citation_span_hit_rate`, and the keyword rates all
-join the retrieved text together before matching. That answers one question
-well — was the evidence retrieved at all — and is blind to two others:
-
-- reordering the same chunks cannot change them, so a reranker scores exactly
-  the same as no reranker
-- a wider `TOP_K` can only raise them, because there is more text to match
-
-Two metrics answer those:
-
-- `retrieval_reciprocal_rank` — the mean of `1 / position` over the expected
-  keywords, counting a keyword found nowhere as zero. 1.0 means the evidence
-  was in the first result. This is what a second-stage reranker moves, and it
-  is the leaderboard's primary sort key.
-- `retrieval_precision` — the share of retrieved chunks that carry expected
-  text. This is what makes a wider `TOP_K` cost something instead of being
-  free.
-
-A case whose evidence was retrieved but not ranked first is reported as
-`retrieval_ranked_expected_span_below_first`, separately from a case that
-missed it entirely.
-
-### Retrieval backend
-
-- `VECTOR_BACKEND=local`
-- `VECTOR_BACKEND=qdrant`
-- `QDRANT_URL`
-- `QDRANT_API_KEY`
-- `QDRANT_COLLECTION`
-- `QDRANT_TIMEOUT_S`
-
-### External HTTP proxy behavior
-
-OpenAI-compatible chat, embeddings, Agents SDK, and Qdrant clients honor standard
-`HTTP_PROXY`, `HTTPS_PROXY`, and `ALL_PROXY` variables by default. If a stale local
-proxy causes connection-refused errors, set this in `.env` instead of changing the
-machine-wide environment:
-
-```bash
-EXTERNAL_HTTP_TRUST_ENV=false
-```
-
-Keep the default value `true` when the provider is reachable only through a proxy.
-
-`scripts/` holds manual, environment-dependent checks. They are named `check_*` and
-`verify_*` rather than `test_*` precisely because they are not part of the pytest
-suite: they talk to live services and must never run in CI.
-
-Read-only checks, safe against any deployment:
-
-```bash
-python scripts/check_chat_api.py
-python scripts/check_embedding_api.py
-python scripts/check_qdrant.py
-```
-
-The write/read/eval live gate writes to the configured collection, so run it only
-against a disposable or explicitly approved one. It fails if the runtime, chat, or
-embeddings silently degrade to fallback:
-
-```bash
-python scripts/verify_live_qdrant.py
-```
-
-### Runtime
-
-- `AGENT_RUNTIME=basic`
-- `AGENT_RUNTIME=agents_sdk`
-
-## Example provider setups
-
-### OpenAI
-
-```bash
-LLM_PROVIDER=openai
-LLM_API_KEY=your_openai_key
-LLM_BASE_URL=
-LLM_MODEL=gpt-4.1-mini
-LLM_API_STYLE=responses
-```
-
-### Qwen via DashScope-compatible endpoint
-
-```bash
-LLM_PROVIDER=qwen
-LLM_API_KEY=your_dashscope_key
-LLM_BASE_URL=https://dashscope-intl.aliyuncs.com/compatible-mode/v1
-LLM_MODEL=qwen-plus
-LLM_API_STYLE=chat_completions
-EMBEDDING_PROVIDER=qwen
-EMBEDDING_API_KEY=your_dashscope_key
-EMBEDDING_BASE_URL=https://dashscope-intl.aliyuncs.com/compatible-mode/v1
-EMBEDDING_MODEL=text-embedding-v4
-EMBEDDING_DIMENSIONS=1024
-EMBEDDING_BATCH_SIZE=10
-```
+Settings live in `.env`, copied from `.env.example`. The
+[configuration reference](docs/reference/configuration.md) lists every
+variable with its default, its validation, and what it changes, including
+retrieval strategies, reranking, proxy handling, and provider templates for
+OpenAI and Qwen. The [metrics reference](docs/reference/metrics.md) says what
+each eval number measures and what it cannot see.
 
 ## Tests
 
-Install the development extra and run the focused backend suite:
-
-```bash
-python -m pip install -e .[agents,qdrant,dev]
-python -m pytest
-```
-
-Run the complete deterministic quality gate with:
-
-```bash
-python -m ruff check backend/src tests scripts
-python -m ruff format --check backend/src tests scripts
-python -m mypy
-python -m pytest
-python -m compileall -q backend/src
-pnpm run build
-```
-
-The suite covers environment parsing and configuration validation, CLI command
-wiring, provider configuration, embedding batching/retry behavior, Qdrant network
-diagnostics, incremental-ingest lifecycle behavior, prompt-context formatting and the
-extractive fallback, and deterministic Agents SDK tool/runner integration, all without
-calling live model providers.
-
-Pull requests and pushes run the same backend gates plus the strict TypeScript/Vite
-build through `.github/workflows/ci.yml`.
+The suite is offline and deterministic. The quality-gate commands are in
+[AGENTS.md](AGENTS.md#quality-gates), the
+[testing guide](docs/development/testing.md) explains how tests are organized
+and written, and CI runs the same gates.
 
 ## Project highlights
 
@@ -488,33 +239,10 @@ What gives this project portfolio value is not just “calling an API”, but co
 - evaluation-aware iteration
 - full-stack integration with a real frontend and backend split
 
-## Current status
+## Status and plans
 
-Completed or substantially completed:
-
-- stage 1: minimal runnable agent
-- stage 2: tools and runtime paths
-- stage 3: RAG and citations
-- stage 4: initial eval harness
-- stage 5: provider abstraction
-- stage 6: first round of engineering and frontend/backend separation
-
-## Next steps
-
-Planned improvements include:
-
-- richer eval datasets
-- more robust retry and failure handling
-- stronger Agents SDK orchestration
-- better frontend result presentation
-- optional Ollama/local model support
-- deployment polish
-
-## Notes
-
-- On this machine, `py -3` may resolve to the free-threaded interpreter (`3.13t`), which can cause dependency issues with `pydantic-core`.
-- Prefer `py -3.13`.
-- `.env` is intentionally excluded from git.
+What is being worked on now is in [tasks.md](tasks.md); the phase plan is in
+the [roadmap](docs/planning/development-roadmap.md).
 
 ## License
 

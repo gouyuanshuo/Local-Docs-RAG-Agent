@@ -17,6 +17,10 @@ distractors for the eval questions written about the same topics.
 | run tests, write them, or change eval gold | [Testing](development/testing.md) |
 | add a provider, store, runtime, reranker, strategy, axis, command, or setting | [Extending](development/extending.md) |
 | find out why something degraded, skipped, or failed | [Troubleshooting](development/troubleshooting.md) |
+| look up a setting, its default, and what it changes | [Configuration](reference/configuration.md) |
+| call the HTTP API | [HTTP API](reference/http-api.md) |
+| run a CLI command | [CLI](reference/cli.md) |
+| know what an eval number measures, and what it cannot see | [Metrics](reference/metrics.md) |
 | understand the shape of the system | [Architecture](design/architecture.md) |
 | know what is planned, and why in that order | [Roadmap](planning/development-roadmap.md) |
 | know what is being worked on now | [tasks.md](../tasks.md) |
@@ -34,6 +38,7 @@ a copy is the first thing to go stale.
 | Docstrings | why a piece of code is shaped the way it is | cross-module flows |
 | Module `AGENTS.md` | the operating contract: interface, invariants, what may and must not change | explanation; contracts stay short because agents read them on every task |
 | `docs/development/` | how to set up, work, test, extend, and debug | design rationale |
+| `docs/reference/` | exhaustive lookup: settings, endpoints, commands, metrics | design rationale |
 | `docs/design/` | system shape and the decisions behind it | status |
 | `docs/planning/` | phase order and phase status | architecture description |
 | `tasks.md` | the short-horizon task board | long-horizon plans |
@@ -46,6 +51,7 @@ a copy is the first thing to go stale.
 docs/
   README.md      this index
   development/   setting up, working, testing, extending, troubleshooting
+  reference/     settings, HTTP API, CLI, and metric definitions
   design/        system shape and design decisions
   planning/      long-horizon roadmap
   reviews/       dated review snapshots, not maintained
