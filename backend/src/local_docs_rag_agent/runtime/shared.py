@@ -1,63 +1,68 @@
+"""Prompt-context formatting and citation assembly shared by runtimes.
+
+Keeping these here is what lets two runtimes produce answers with identical
+citation semantics, so an eval can compare them on answer quality alone.
+Retrieval itself lives in `rag.pipeline`, which both runtimes call directly: it
+is a retrieval concern, not a runtime one, and putting it here would have made
+the reranking stage look like something a runtime could choose to skip.
+
+Both formatters render one labelled block per hit, `[S1]`, `[S2]`, and so on,
+with the multi-line body last. That layout is a contract, not a style choice:
+the extractive fallback in `providers/chat.py` parses these blocks back out when
+no live model is available, and it can only do that if every label starts at
+column 0 and the body is the final field in its block.
+"""
+
 from __future__ import annotations
 
-from textwrap import dedent
-
-from local_docs_rag_agent.config import AppConfig
-from local_docs_rag_agent.models import AgentAnswer, CitationSpan, RetrievalHit
-from local_docs_rag_agent.rag.ingest import build_store
+from local_docs_rag_agent.core import models
 
 
-def retrieve_hits(config: AppConfig, question: str) -> list[RetrievalHit]:
-    store = build_store(config)
-    return store.search(query=question, top_k=config.top_k)
-
-
-def build_answer_context(hits: list[RetrievalHit]) -> str:
+def build_answer_context(hits: list[models.RetrievalHit]) -> str:
+    """Return hits rendered as the context handed to a chat provider."""
     if not hits:
         return "No supporting documents were retrieved."
-
-    parts: list[str] = []
-    for index, hit in enumerate(hits, start=1):
-        parts.append(
-            dedent(
-                f"""
-                [S{index}]
-                source: {hit.chunk.source_path}
-                title: {hit.chunk.title}
-                chunk_index: {hit.chunk.chunk_index}
-                start_char: {hit.citation_span.start_char}
-                end_char: {hit.citation_span.end_char}
-                content: {hit.chunk.text}
-                """
-            ).strip()
+    return "\n\n".join(
+        _render_hit_block(
+            index,
+            fields=(
+                ("source", hit.chunk.source_path),
+                ("title", hit.chunk.title),
+                ("chunk_index", str(hit.chunk.chunk_index)),
+                ("start_char", str(hit.citation_span.start_char)),
+                ("end_char", str(hit.citation_span.end_char)),
+            ),
+            body_label="content",
+            body=hit.chunk.text,
         )
-    return "\n\n".join(parts)
+        for index, hit in enumerate(hits, start=1)
+    )
 
 
-def format_tool_search_results(hits: list[RetrievalHit]) -> str:
+def format_tool_search_results(hits: list[models.RetrievalHit]) -> str:
+    """Return hits rendered as the agent search tool's result."""
     if not hits:
         return "No relevant chunks were found."
-
-    entries: list[str] = []
-    for index, hit in enumerate(hits, start=1):
-        entries.append(
-            dedent(
-                f"""
-                [S{index}]
-                source_path: {hit.chunk.source_path}
-                title: {hit.chunk.title}
-                chunk_index: {hit.chunk.chunk_index}
-                start_char: {hit.citation_span.start_char}
-                end_char: {hit.citation_span.end_char}
-                score: {hit.score:.4f}
-                text: {hit.chunk.text}
-                """
-            ).strip()
+    return "\n\n".join(
+        _render_hit_block(
+            index,
+            fields=(
+                ("source_path", hit.chunk.source_path),
+                ("title", hit.chunk.title),
+                ("chunk_index", str(hit.chunk.chunk_index)),
+                ("start_char", str(hit.citation_span.start_char)),
+                ("end_char", str(hit.citation_span.end_char)),
+                ("score", f"{hit.score:.4f}"),
+            ),
+            body_label="text",
+            body=hit.chunk.text,
         )
-    return "\n\n".join(entries)
+        for index, hit in enumerate(hits, start=1)
+    )
 
 
-def collect_citations(hits: list[RetrievalHit]) -> list[str]:
+def collect_citations(hits: list[models.RetrievalHit]) -> list[str]:
+    """Return the cited source paths, de-duplicated and in retrieval order."""
     seen: set[str] = set()
     citations: list[str] = []
     for hit in hits:
@@ -68,11 +73,17 @@ def collect_citations(hits: list[RetrievalHit]) -> list[str]:
     return citations
 
 
-def collect_citation_spans(hits: list[RetrievalHit]) -> list[CitationSpan]:
+def collect_citation_spans(
+    hits: list[models.RetrievalHit],
+) -> list[models.CitationSpan]:
+    """Return the exact source spans backing each hit, in retrieval order."""
     return [hit.citation_span for hit in hits]
 
 
-def merge_hits(existing: list[RetrievalHit], new_hits: list[RetrievalHit]) -> None:
+def merge_hits(
+    existing: list[models.RetrievalHit], new_hits: list[models.RetrievalHit]
+) -> None:
+    """Append hits not already present, so tool searches accumulate."""
     seen = {hit.chunk.chunk_id for hit in existing}
     for hit in new_hits:
         if hit.chunk.chunk_id in seen:
@@ -81,11 +92,35 @@ def merge_hits(existing: list[RetrievalHit], new_hits: list[RetrievalHit]) -> No
         existing.append(hit)
 
 
-def build_agent_answer(question: str, answer: str, hits: list[RetrievalHit]) -> AgentAnswer:
-    return AgentAnswer(
+def build_agent_answer(
+    question: str,
+    answer: str,
+    hits: list[models.RetrievalHit],
+    diagnostics: models.AnswerDiagnostics,
+) -> models.AgentAnswer:
+    """Return the final answer, citing the hits that produced it."""
+    return models.AgentAnswer(
         question=question,
         answer=answer,
         citations=collect_citations(hits),
         citation_spans=collect_citation_spans(hits),
         retrieved_chunks=hits,
+        diagnostics=diagnostics,
     )
+
+
+def _render_hit_block(
+    index: int,
+    *,
+    fields: tuple[tuple[str, str], ...],
+    body_label: str,
+    body: str,
+) -> str:
+    # Built by explicit joining rather than an indented template: a chunk body
+    # almost always contains a line starting at column 0, which stops
+    # `textwrap.dedent` from removing the template's indentation and would leave
+    # every label indented.
+    lines = [f"[S{index}]"]
+    lines.extend(f"{label}: {value}" for label, value in fields)
+    lines.append(f"{body_label}: {body}")
+    return "\n".join(lines)

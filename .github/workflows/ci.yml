@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend quality gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install backend dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -e ".[agents,qdrant,dev]"
+
+      - name: Ruff
+        run: python -m ruff check backend/src tests scripts
+
+      - name: Ruff format
+        run: python -m ruff format --check backend/src tests scripts
+
+      # DOC201 (a documented return value) is still a preview rule, so it runs
+      # on its own rather than putting every other rule into preview mode.
+      - name: Ruff docstring returns
+        run: >-
+          python -m ruff check --preview --select DOC201
+          backend/src scripts
+
+      - name: Mypy
+        run: python -m mypy
+
+      - name: Pytest
+        run: python -m pytest
+
+      - name: Compile Python package
+        run: python -m compileall -q backend/src
+
+  frontend:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.18.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        run: pnpm run build

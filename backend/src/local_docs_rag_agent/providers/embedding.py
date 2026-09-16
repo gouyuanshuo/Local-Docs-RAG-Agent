@@ -1,52 +1,160 @@
+"""OpenAI-compatible embeddings with batching, retry, and a fallback.
+
+Requests are batched because hosted endpoints cap inputs per call, and transient
+failures are retried with exponential backoff before the provider gives up. On
+giving up it returns deterministic hash embeddings and reports `fallback`: those
+vectors keep local retrieval working offline, but they are not comparable with
+live vectors, which is why Qdrant ingest refuses them.
+"""
+
 from __future__ import annotations
 
 import hashlib
 import math
+import time
 
-from local_docs_rag_agent.providers.base import EmbeddingProvider
+import openai
+
+from local_docs_rag_agent.core import models
+from local_docs_rag_agent.providers import base as provider_base
+from local_docs_rag_agent.providers import errors, openai_client
 
 
-class OpenAICompatibleEmbeddingProvider(EmbeddingProvider):
+class OpenAICompatibleEmbeddingProvider(provider_base.EmbeddingProvider):
+    """Embeds over an OpenAI-compatible endpoint, with a hash fallback."""
+
     def __init__(
         self,
         api_key: str | None,
         base_url: str | None,
         model: str,
         dimensions: int | None,
+        batch_size: int = 16,
+        max_retries: int = 2,
+        retry_backoff_ms: int = 800,
+        provider_label: str = "embedding",
+        trust_env: bool = True,
     ) -> None:
-        self._client = self._build_client(api_key=api_key, base_url=base_url) if api_key else None
+        """Build an embedding provider over an OpenAI-compatible endpoint.
+
+        Args:
+          api_key: Credential, or None to use the hash fallback.
+          base_url: Endpoint override, or None for the OpenAI default.
+          model: Model that embeds.
+          dimensions: Requested vector width, or None for the model's own.
+          batch_size: Texts per request, since hosted endpoints cap it.
+          max_retries: Extra attempts for a transient failure.
+          retry_backoff_ms: Delay between those attempts.
+          provider_label: Name reported in diagnostics.
+          trust_env: Whether to honour environment proxy variables.
+        """
+        self._provider_label = provider_label.lower()
+        self._trust_env = trust_env
+        self._status = models.ProviderStatus(
+            provider=self._provider_label, mode="ready"
+        )
+        self._client: openai.OpenAI | None = None
+        if api_key:
+            self._client = openai_client.build_sync_openai_client(
+                api_key=api_key,
+                base_url=base_url,
+                trust_env=trust_env,
+            )
         self._model = model
         self._dimensions = dimensions
+        self._batch_size = max(1, batch_size)
+        self._max_retries = max(0, max_retries)
+        self._retry_backoff_ms = max(0, retry_backoff_ms)
+        if not api_key:
+            self._status = models.ProviderStatus(
+                provider=self._provider_label,
+                mode="fallback",
+                reason="missing_api_key",
+            )
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        """Embed every text, batching and retrying as configured.
+
+        Args:
+          texts: The texts to embed.
+
+        Returns:
+          One vector per input, in input order. If the endpoint cannot be
+          reached, deterministic hash vectors are returned and `status`
+          reports `fallback`. Qdrant ingest refuses to store those, so a
+          degraded run cannot mix them into a collection of live vectors.
+          Never raises.
+        """
         if not texts:
             return []
         if not self._client:
             return [_hash_embed(text) for text in texts]
 
-        request: dict[str, object] = {
-            "model": self._model,
-            "input": texts,
-        }
-        if self._dimensions is not None:
-            request["dimensions"] = self._dimensions
+        results: list[list[float]] = []
+        total_attempts = 0
+        for start in range(0, len(texts), self._batch_size):
+            batch = texts[start : start + self._batch_size]
+            attempt = 0
+            while True:
+                try:
+                    if self._dimensions is None:
+                        response = self._client.embeddings.create(
+                            model=self._model,
+                            input=batch,
+                        )
+                    else:
+                        response = self._client.embeddings.create(
+                            model=self._model,
+                            input=batch,
+                            dimensions=self._dimensions,
+                        )
+                    batch_embeddings = [
+                        item.embedding for item in response.data
+                    ]
+                    if len(batch_embeddings) != len(batch):
+                        raise RuntimeError(
+                            "embedding_count_mismatch:"
+                            f"expected={len(batch)}:"
+                            f"received={len(batch_embeddings)}"
+                        )
+                    total_attempts += attempt
+                    results.extend(batch_embeddings)
+                    break
+                except Exception as exc:
+                    if (
+                        errors.is_transient_provider_error(exc)
+                        and attempt < self._max_retries
+                    ):
+                        sleep_ms = self._retry_backoff_ms * (2**attempt)
+                        if sleep_ms > 0:
+                            time.sleep(sleep_ms / 1000.0)
+                        attempt += 1
+                        continue
+                    self._status = models.ProviderStatus(
+                        provider=self._provider_label,
+                        mode="fallback",
+                        reason=_fallback_reason(
+                            exc=exc,
+                            attempts=attempt + 1,
+                            max_retries=self._max_retries,
+                        ),
+                    )
+                    return [_hash_embed(text) for text in texts]
 
-        try:
-            response = self._client.embeddings.create(**request)
-            return [item.embedding for item in response.data]
-        except Exception:
-            return [_hash_embed(text) for text in texts]
+        reason = (
+            f"recovered_after_retry:{total_attempts}"
+            if total_attempts > 0
+            else None
+        )
+        self._status = models.ProviderStatus(
+            provider=self._provider_label, mode="live", reason=reason
+        )
+        return results
 
-    def _build_client(self, api_key: str, base_url: str | None):
-        try:
-            from openai import OpenAI
-        except Exception:
-            return None
-
-        client_kwargs = {"api_key": api_key}
-        if base_url:
-            client_kwargs["base_url"] = base_url
-        return OpenAI(**client_kwargs)
+    @property
+    def status(self) -> models.ProviderStatus:
+        """Report whether the last batch was live or degraded."""
+        return self._status
 
 
 def _hash_embed(text: str, size: int = 128) -> list[float]:
@@ -65,3 +173,13 @@ def _hash_embed(text: str, size: int = 128) -> list[float]:
     if norm == 0:
         return values
     return [value / norm for value in values]
+
+
+def _fallback_reason(exc: Exception, attempts: int, max_retries: int) -> str:
+    class_name = exc.__class__.__name__
+    if errors.is_transient_provider_error(exc):
+        return (
+            f"provider_transient_error:{class_name}:retry_exhausted:{attempts}:"
+            f"max_retries:{max_retries}"
+        )
+    return errors.provider_error_reason(exc)

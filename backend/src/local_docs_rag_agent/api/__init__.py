@@ -1,1 +1,1 @@
-"""FastAPI application package."""
+"""FastAPI application: app factory, routes, and public schemas."""

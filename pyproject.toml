@@ -22,6 +22,12 @@ agents = [
 qdrant = [
     "qdrant-client>=1.9.0",
 ]
+dev = [
+    "mypy>=1.17.0",
+    "pytest>=8.0.0",
+    "pytest-cov>=6.0.0",
+    "ruff>=0.12.0",
+]
 
 [project.scripts]
 local-docs-rag = "local_docs_rag_agent.cli:main"
@@ -32,3 +38,46 @@ package-dir = {"" = "backend/src"}
 
 [tool.setuptools.packages.find]
 where = ["backend/src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["backend/src"]
+addopts = "-ra"
+
+[tool.ruff]
+# 80 columns, per the Google Python Style Guide (3.2). `ruff format` holds code to it;
+# comments and docstrings are wrapped by hand, which E501 still enforces.
+line-length = 80
+target-version = "py311"
+
+[tool.ruff.lint]
+# `D` enforces the Google docstring rules (style guide 3.8): every public module,
+# class, and function is documented, the summary is one line, and every argument is
+# described. `DOC201`, which requires a `Returns:` section, is still a preview rule, so
+# it runs as its own CI step rather than turning preview mode on for every rule here.
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "D"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+# Tests document themselves through their names, and a required one-line summary on
+# each would add noise without adding information. They are still held to every other
+# rule, including the line limit.
+"tests/**" = ["D"]
+
+# DOC501 and DOC502 are deliberately not selected. Both read `raise` statements
+# literally, so they demand a `Raises:` entry for an exception that is raised and
+# caught inside the same function, and reject one for an exception raised by a helper.
+# This codebase does both, so the sections are written and reviewed by hand.
+
+[tool.ruff.lint.isort]
+known-first-party = ["local_docs_rag_agent"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+ignore_missing_imports = true
+# The test and script trees are checked too: they exercise the same interfaces, and an
+# unchecked stub is exactly where a test quietly stops matching what it claims to test.
+files = ["backend/src", "tests", "scripts"]

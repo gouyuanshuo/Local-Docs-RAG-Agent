@@ -1,133 +1,148 @@
+"""Creates the FastAPI app: middleware, static hosting, error handling.
+
+The app serves the built frontend from `frontend/dist` when it exists, and falls
+back to a JSON pointer toward the dev server when it does not, so the same entry
+point works for a built deployment and for local development.
+
+Domain errors are translated here rather than in each route: a `LocalDocsError`
+becomes a response carrying its stable code and action hint, which is what lets
+the frontend show an actionable message instead of a generic failure.
+"""
+
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from pathlib import Path
+import pathlib
 
+import fastapi
 import uvicorn
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi import responses as fastapi_responses
+from fastapi import staticfiles as fastapi_staticfiles
+from fastapi.middleware import cors as fastapi_cors
 
-from local_docs_rag_agent.agent import LocalDocsAgent
-from local_docs_rag_agent.api.schemas import (
-    AppInfoResponse,
-    AskRequest,
-    DocumentsResponse,
-    EvalRequest,
-    HealthResponse,
-    IngestResponse,
-)
-from local_docs_rag_agent.config import AppConfig
-from local_docs_rag_agent.evals.harness import run_eval
-from local_docs_rag_agent.presenters import serialize_answer, serialize_eval_summary
-from local_docs_rag_agent.rag.ingest import ensure_index, ingest_documents
-from local_docs_rag_agent.tools import list_documents
+from local_docs_rag_agent.api import routes
+from local_docs_rag_agent.core import exceptions
 
 
-
-def _repo_root() -> Path:
-    current = Path(__file__).resolve()
+def _repo_root() -> pathlib.Path:
+    current = pathlib.Path(__file__).resolve()
     for parent in current.parents:
         if (parent / "pyproject.toml").exists():
             return parent
     raise RuntimeError("Could not locate repository root from api/app.py")
 
 
-FRONTEND_DIR = _repo_root() / "frontend"
-FRONTEND_DIST_DIR = FRONTEND_DIR / "dist"
+FRONTEND_DIST_DIR = _repo_root() / "frontend" / "dist"
+FRONTEND_ASSETS_DIR = FRONTEND_DIST_DIR / "assets"
+FRONTEND_INDEX_PATH = FRONTEND_DIST_DIR / "index.html"
 
 
-def create_app() -> FastAPI:
-    app = FastAPI(title="Local Docs RAG Agent", version="0.1.0")
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=[
-            "http://127.0.0.1:5173",
-            "http://127.0.0.1:5174",
-            "http://localhost:5173",
-            "http://localhost:5174",
-        ],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+def create_app() -> fastapi.FastAPI:
+    """Build the FastAPI application.
 
-    if FRONTEND_DIST_DIR.exists():
-        app.mount("/assets", StaticFiles(directory=FRONTEND_DIST_DIR / "assets"), name="assets")
+    Returns:
+      An app with CORS, error handlers, and API routes registered, and
+      the built frontend mounted when `frontend/dist` exists.
+    """
+    app = fastapi.FastAPI(title="Local Docs RAG Agent", version="0.1.0")
+    _configure_cors(app)
+    _register_error_handlers(app)
+    app.include_router(routes.router)
 
-    @app.get("/api/health", response_model=HealthResponse)
-    def health() -> HealthResponse:
-        return HealthResponse(
-            status="ok",
-            backend_time_utc=datetime.now(timezone.utc).isoformat(),
+    if FRONTEND_ASSETS_DIR.is_dir():
+        app.mount(
+            "/assets",
+            fastapi_staticfiles.StaticFiles(directory=FRONTEND_ASSETS_DIR),
+            name="assets",
         )
-
-    @app.get("/api/info", response_model=AppInfoResponse)
-    def info() -> AppInfoResponse:
-        config = AppConfig.from_env()
-        documents = list_documents(config)
-        return AppInfoResponse(
-            name="Local Docs RAG Agent",
-            runtime=config.agent_runtime,
-            vector_backend=config.vector_backend,
-            docs_dir=str(config.docs_dir),
-            docs_count=len(documents),
-            llm_provider=config.llm_provider,
-            llm_model=config.llm_model,
-            embedding_provider=config.embedding_provider,
-            embedding_model=config.embedding_model,
-            top_k=config.top_k,
-            chunk_size=config.chunk_size,
-            chunk_overlap=config.chunk_overlap,
-            qdrant_collection=config.qdrant_collection,
-        )
-
-    @app.get("/api/documents", response_model=DocumentsResponse)
-    def documents() -> DocumentsResponse:
-        config = AppConfig.from_env()
-        docs = list_documents(config)
-        return DocumentsResponse(count=len(docs), documents=docs)
-
-    @app.post("/api/ingest", response_model=IngestResponse)
-    def ingest() -> IngestResponse:
-        config = AppConfig.from_env()
-        chunks = ingest_documents(config)
-        return IngestResponse(num_chunks=len(chunks), vector_backend=config.vector_backend)
-
-    @app.post("/api/ask")
-    def ask(payload: AskRequest) -> dict[str, object]:
-        config = AppConfig.from_env().with_runtime(payload.runtime)
-        ensure_index(config)
-        agent = LocalDocsAgent(config)
-        answer = agent.answer(payload.question)
-        return serialize_answer(answer, runtime=config.agent_runtime)
-
-    @app.post("/api/eval")
-    def evaluate(payload: EvalRequest) -> dict[str, object]:
-        config = AppConfig.from_env().with_runtime(payload.runtime)
-        ensure_index(config)
-        results = run_eval(config)
-        return serialize_eval_summary(results, runtime=config.agent_runtime)
 
     @app.get("/", response_model=None)
-    def index() -> FileResponse | JSONResponse:
-        if FRONTEND_DIST_DIR.exists():
-            return FileResponse(FRONTEND_DIST_DIR / "index.html")
-        return JSONResponse(
+    def index() -> (
+        fastapi_responses.FileResponse | fastapi_responses.JSONResponse
+    ):
+        """Serve the built frontend, or say where to find it in dev.
+
+        Returns:
+          The built `index.html` when one exists, otherwise a JSON
+          pointer to the dev server, so hitting the API root during
+          development reads as a hint rather than a 404.
+        """
+        if FRONTEND_INDEX_PATH.is_file():
+            return fastapi_responses.FileResponse(FRONTEND_INDEX_PATH)
+        return fastapi_responses.JSONResponse(
             {
                 "name": "Local Docs RAG Agent API",
-                "message": "Frontend dev server not running. Start it with `pnpm run dev`.",
+                "message": (
+                    "Frontend dev server not running. "
+                    "Start it with `pnpm run dev`."
+                ),
             }
         )
 
     return app
 
 
+def _configure_cors(app: fastapi.FastAPI) -> None:
+    app.add_middleware(
+        fastapi_cors.CORSMiddleware,
+        allow_origins=[
+            "http://127.0.0.1:5173",
+            "http://127.0.0.1:5174",
+            "http://localhost:5173",
+            "http://localhost:5174",
+        ],
+        allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+
+def _register_error_handlers(app: fastapi.FastAPI) -> None:
+    @app.exception_handler(exceptions.LocalDocsError)
+    async def handle_local_docs_error(
+        request: fastapi.Request,
+        exc: exceptions.LocalDocsError,
+    ) -> fastapi_responses.JSONResponse:
+        """Render an expected failure as the documented error payload.
+
+        Args:
+          request: Unused. The status depends on the error, not the
+            route that raised it.
+          exc: The failure to render.
+
+        Returns:
+          The error payload, with the stable code and action hint the
+          exception carries.
+        """
+        del request
+        status_code = _status_code_for_error(exc)
+        return fastapi_responses.JSONResponse(
+            status_code=status_code,
+            content={
+                "code": exc.code,
+                "detail": exc.message,
+                "action_hint": exc.action_hint,
+            },
+        )
+
+
+def _status_code_for_error(exc: exceptions.LocalDocsError) -> int:
+    if isinstance(
+        exc, (exceptions.ConfigurationError, exceptions.DataFormatError)
+    ):
+        return 400
+    if isinstance(
+        exc, (exceptions.ProviderUnavailableError, exceptions.VectorStoreError)
+    ):
+        return 503
+    return 500
+
+
 app = create_app()
 
 
 def run() -> None:
+    """Serve the application on localhost:8000, for the console script."""
     uvicorn.run(
         "local_docs_rag_agent.api.app:app",
         host="127.0.0.1",

@@ -1,58 +1,312 @@
+"""Loads eval cases and scores one run of the agent against them.
+
+The harness measures five things separately, because they fail for different
+reasons and a single blended score would hide which part broke:
+
+* `retrieval_source_hit_rate` — did retrieval find the right documents at all?
+* `retrieval_span_hit_rate` — did the retrieved text contain the expected
+  evidence?
+* `answer_keyword_hit_rate` — did the answer say what it should?
+* `citation_source_hit_rate` — did the answer cite the right documents?
+* `citation_span_hit_rate` — did the cited spans contain the expected evidence?
+
+An expectation left empty scores 1.0 rather than 0.0, so a case can assert on
+citation quality without being forced to also assert on answer wording.
+"""
+
 from __future__ import annotations
 
 import json
+import pathlib
 import time
-from pathlib import Path
 
-from local_docs_rag_agent.agent import LocalDocsAgent
-from local_docs_rag_agent.config import AppConfig
-from local_docs_rag_agent.models import EvalCase, EvalResult
+from local_docs_rag_agent import agent
+from local_docs_rag_agent import config as app_config
+from local_docs_rag_agent.core import exceptions, models
 
 
-def load_eval_cases(eval_path: Path) -> list[EvalCase]:
-    cases: list[EvalCase] = []
-    with eval_path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
-            if not line:
-                continue
-            payload = json.loads(line)
-            cases.append(EvalCase(**payload))
+def load_eval_cases(eval_path: pathlib.Path) -> list[models.EvalCase]:
+    """Read a JSONL eval file, reporting the first bad case's line.
+
+    Args:
+      eval_path: The JSONL file to read.
+
+    Returns:
+      Every case in file order.
+
+    Raises:
+      DataFormatError: If the file cannot be read or a line is not
+        a valid case. The message names the line number, so a bad
+        eval file can be repaired without bisecting it.
+    """
+    cases: list[models.EvalCase] = []
+    line_number: int | str = "unknown"
+    try:
+        with eval_path.open("r", encoding="utf-8") as handle:
+            for current_line_number, line in enumerate(handle, start=1):
+                line_number = current_line_number
+                if not line.strip():
+                    continue
+                payload = json.loads(line)
+                if not isinstance(payload, dict):
+                    raise exceptions.DataFormatError(
+                        "Eval case must be a JSON object"
+                    )
+                cases.append(_normalize_eval_case(payload))
+    except exceptions.DataFormatError as exc:
+        raise exceptions.DataFormatError(
+            f"Invalid eval file {eval_path} at line {line_number}: {exc}"
+        ) from exc
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise exceptions.DataFormatError(
+            f"Could not read eval file {eval_path} at line {line_number}: {exc}"
+        ) from exc
     return cases
 
 
-def run_eval(config: AppConfig) -> list[EvalResult]:
-    agent = LocalDocsAgent(config)
-    cases = load_eval_cases(config.eval_path)
-    results: list[EvalResult] = []
+def run_eval(config: app_config.AppConfig) -> list[models.EvalResult]:
+    """Answer every eval case under `config` and score the results.
 
-    for case in cases:
+    Args:
+      config: The settings to evaluate under.
+
+    Returns:
+      One result per case, each carrying the diagnostics of the run
+      that produced it, so a degraded run is visible per case.
+    """
+    docs_agent = agent.LocalDocsAgent(config)
+    results: list[models.EvalResult] = []
+
+    for case in load_eval_cases(config.eval_path):
         started_at = time.perf_counter()
-        response = agent.answer(case.question)
+        response = docs_agent.answer(case.question)
         response_time_ms = round((time.perf_counter() - started_at) * 1000, 2)
-        answer_lower = response.answer.lower()
-        span_text = " ".join(span.text for span in response.citation_spans).lower()
 
-        keyword_hits = sum(1 for keyword in case.expected_keywords if keyword.lower() in answer_lower)
-        keyword_hit_rate = keyword_hits / len(case.expected_keywords) if case.expected_keywords else 0.0
-        source_hit = any(source in response.citations for source in case.expected_sources)
-        span_hits = sum(
-            1 for keyword in case.expected_span_keywords if keyword.lower() in span_text
-        )
-        citation_span_hit_rate = (
-            span_hits / len(case.expected_span_keywords) if case.expected_span_keywords else 0.0
-        )
-
-        results.append(
-            EvalResult(
-                question=case.question,
-                answer=response.answer,
-                citations=response.citations,
-                keyword_hit_rate=keyword_hit_rate,
-                source_hit=source_hit,
-                citation_span_hit_rate=citation_span_hit_rate,
-                response_time_ms=response_time_ms,
+        answer_text = response.answer.lower()
+        citation_text = " ".join(
+            span.text for span in response.citation_spans
+        ).lower()
+        retrieved_text = " ".join(
+            hit.chunk.text for hit in response.retrieved_chunks
+        ).lower()
+        # Kept as a ranked list as well as a blob: the blob answers "was it
+        # retrieved at all", and only the list answers "how far down".
+        ranked_texts = [
+            hit.chunk.text.lower() for hit in response.retrieved_chunks
+        ]
+        retrieved_sources = list(
+            dict.fromkeys(
+                hit.chunk.source_path for hit in response.retrieved_chunks
             )
         )
 
+        result = models.EvalResult(
+            question=case.question,
+            answer=response.answer,
+            citations=response.citations,
+            retrieved_sources=retrieved_sources,
+            answer_keyword_hit_rate=keyword_match_rate(
+                case.expected_answer_keywords, answer_text
+            ),
+            retrieval_source_hit_rate=source_match_rate(
+                case.expected_source_paths, retrieved_sources
+            ),
+            retrieval_span_hit_rate=keyword_match_rate(
+                case.expected_retrieval_keywords, retrieved_text
+            ),
+            retrieval_reciprocal_rank=reciprocal_rank(
+                case.expected_retrieval_keywords, ranked_texts
+            ),
+            retrieval_precision=retrieval_precision(
+                case.expected_retrieval_keywords, ranked_texts
+            ),
+            citation_source_hit_rate=source_match_rate(
+                case.expected_source_paths, response.citations
+            ),
+            citation_span_hit_rate=keyword_match_rate(
+                case.expected_span_keywords, citation_text
+            ),
+            response_time_ms=response_time_ms,
+            diagnostics=response.diagnostics,
+            expected_source_paths=case.expected_source_paths,
+            expected_answer_keywords=case.expected_answer_keywords,
+            expected_span_keywords=case.expected_span_keywords,
+            expected_retrieval_keywords=case.expected_retrieval_keywords,
+        )
+        result.failure_reasons = failure_reasons(result)
+        results.append(result)
+
     return results
+
+
+def keyword_match_rate(expected_items: list[str], observed_text: str) -> float:
+    """Return the fraction of expected keywords present in `observed_text`.
+
+    An empty expectation is neutral success, so a case may assert on some
+    dimensions without being penalised for the ones it leaves unspecified.
+    """
+    if not expected_items:
+        return 1.0
+    hits = sum(1 for item in expected_items if item.lower() in observed_text)
+    return hits / len(expected_items)
+
+
+def reciprocal_rank(
+    expected_items: list[str], ranked_texts: list[str]
+) -> float:
+    """Return how near the top of the results the expected text was found.
+
+    This is the metric a reranker moves. `keyword_match_rate` joins every
+    retrieved chunk into one string before matching, so it answers only
+    whether the evidence was retrieved at all: reordering the same chunks
+    cannot change it, and widening `top_k` can only raise it. Reciprocal rank
+    reads the results as the ordered list they are.
+
+    Args:
+      expected_items: Keywords the retrieved evidence should contain.
+      ranked_texts: Lowercased chunk texts, best first.
+
+    Returns:
+      The mean of `1 / position` over the expected keywords, counting a
+      keyword that appears nowhere as zero. 1.0 means every keyword was in
+      the first result; an empty expectation is neutral success.
+    """
+    if not expected_items:
+        return 1.0
+    total = 0.0
+    for item in expected_items:
+        needle = item.lower()
+        for position, text in enumerate(ranked_texts, start=1):
+            if needle in text:
+                total += 1.0 / position
+                break
+    return total / len(expected_items)
+
+
+def retrieval_precision(
+    expected_items: list[str], ranked_texts: list[str]
+) -> float:
+    """Return the fraction of retrieved chunks that carry expected text.
+
+    Recall alone rewards retrieving more, which is the opposite of what a
+    second-stage reranker is for. Precision is what makes a wider `top_k`
+    cost something in the leaderboard rather than being free.
+
+    Args:
+      expected_items: Keywords that make a chunk relevant to the case.
+      ranked_texts: Lowercased chunk texts, best first.
+
+    Returns:
+      The share of results containing at least one expected keyword. An
+      empty expectation is neutral success; retrieving nothing when
+      something was expected scores zero.
+    """
+    if not expected_items:
+        return 1.0
+    if not ranked_texts:
+        return 0.0
+    relevant = sum(
+        1
+        for text in ranked_texts
+        if any(item.lower() in text for item in expected_items)
+    )
+    return relevant / len(ranked_texts)
+
+
+def source_match_rate(
+    expected_sources: list[str], observed_sources: list[str]
+) -> float:
+    """Return the fraction of expected sources that were observed."""
+    if not expected_sources:
+        return 1.0
+    observed = set(observed_sources)
+    hits = sum(1 for source in expected_sources if source in observed)
+    return hits / len(expected_sources)
+
+
+def failure_reasons(result: models.EvalResult) -> list[str]:
+    """Name every dimension the case fell short on, for later triage.
+
+    Returns:
+      One reason per failed dimension, empty when the case passed.
+    """
+    reasons: list[str] = []
+    if result.retrieval_source_hit_rate < 1.0:
+        reasons.append("retrieval_missed_expected_source")
+    if (
+        result.retrieval_span_hit_rate < 1.0
+        and result.expected_retrieval_keywords
+    ):
+        reasons.append("retrieval_missed_expected_span")
+    elif (
+        result.retrieval_reciprocal_rank < 1.0
+        and result.expected_retrieval_keywords
+    ):
+        # Retrieved, but not first. This is precisely the case a reranker
+        # exists to fix, and the blob metric above cannot see it.
+        reasons.append("retrieval_ranked_expected_span_below_first")
+    if result.answer_keyword_hit_rate < 1.0 and result.expected_answer_keywords:
+        reasons.append("answer_missing_expected_keywords")
+    if result.citation_source_hit_rate < 1.0:
+        reasons.append("citation_missed_expected_source")
+    if result.citation_span_hit_rate < 1.0 and result.expected_span_keywords:
+        reasons.append("citation_missed_expected_span")
+    return reasons
+
+
+def _normalize_eval_case(payload: dict[str, object]) -> models.EvalCase:
+    question = payload.get("question")
+    if not isinstance(question, str) or not question.strip():
+        raise exceptions.DataFormatError(
+            "Eval case question must be a non-empty string"
+        )
+    # The shorter key names are the original field names, still accepted for old
+    # files.
+    answer_keywords = _string_list(
+        payload.get(
+            "expected_answer_keywords", payload.get("expected_keywords", [])
+        ),
+        "expected_answer_keywords",
+    )
+    source_paths = _string_list(
+        payload.get(
+            "expected_source_paths", payload.get("expected_sources", [])
+        ),
+        "expected_source_paths",
+    )
+    span_keywords = _string_list(
+        payload.get("expected_span_keywords", []),
+        "expected_span_keywords",
+    )
+    # Retrieval expectations default to the citation expectations, because
+    # evidence that must appear in a citation must first have been retrieved.
+    retrieval_keywords = _string_list(
+        payload.get("expected_retrieval_keywords", span_keywords),
+        "expected_retrieval_keywords",
+    )
+    notes = payload.get("notes")
+    if notes is not None and not isinstance(notes, str):
+        raise exceptions.DataFormatError(
+            "Eval case notes must be a string or null"
+        )
+
+    return models.EvalCase(
+        question=question.strip(),
+        expected_answer_keywords=answer_keywords,
+        expected_source_paths=source_paths,
+        expected_span_keywords=span_keywords,
+        expected_retrieval_keywords=retrieval_keywords,
+        notes=notes,
+    )
+
+
+def _string_list(value: object, field_name: str) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list) or not all(
+        isinstance(item, str) for item in value
+    ):
+        raise exceptions.DataFormatError(
+            f"Eval case {field_name} must be a list of strings"
+        )
+    return [item for item in value if item]

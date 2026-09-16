@@ -1,61 +1,183 @@
+"""Converts internal dataclasses into JSON-ready payloads.
+
+This is the one place that knows the shape of an outgoing payload. The API
+validates those payloads against `api/schemas.py`, the CLI prints them, and the
+eval comparison report embeds them, so keeping the conversion here is what stops
+three delivery paths from describing the same answer three slightly different
+ways.
+
+The serializers are deliberately small and composable: `serialize_answer` and
+`serialize_eval_result` both reuse `serialize_diagnostics`, which is why an
+added diagnostic field appears everywhere at once.
+"""
+
 from __future__ import annotations
 
-from local_docs_rag_agent.models import AgentAnswer, EvalResult
+from collections.abc import Iterable
+
+from local_docs_rag_agent import config as app_config
+from local_docs_rag_agent.core import models
+
+RATE_PRECISION = 4
+MILLISECOND_PRECISION = 2
 
 
-def serialize_answer(answer: AgentAnswer, runtime: str) -> dict[str, object]:
+def serialize_provider_status(
+    status: models.ProviderStatus,
+) -> dict[str, object]:
+    """Return one provider's health, including why it degraded."""
+    return {
+        "provider": status.provider,
+        "mode": status.mode,
+        "reason": status.reason,
+    }
+
+
+def serialize_diagnostics(
+    diagnostics: models.AnswerDiagnostics,
+) -> dict[str, object]:
+    """Return the runtime pair and every provider status."""
+    return {
+        "requested_runtime": diagnostics.requested_runtime,
+        "actual_runtime": diagnostics.actual_runtime,
+        "vector_backend": diagnostics.vector_backend,
+        "chat_provider": serialize_provider_status(diagnostics.chat_provider),
+        "embedding_provider": serialize_provider_status(
+            diagnostics.embedding_provider
+        ),
+        "reranker": serialize_provider_status(diagnostics.reranker),
+    }
+
+
+def serialize_citation_span(span: models.CitationSpan) -> dict[str, object]:
+    """Return a cited span with the source offsets it came from."""
+    return {
+        "source_path": span.source_path,
+        "chunk_id": span.chunk_id,
+        "chunk_index": span.chunk_index,
+        "start_char": span.start_char,
+        "end_char": span.end_char,
+        "text": span.text,
+    }
+
+
+def serialize_retrieval_config(
+    config: app_config.AppConfig,
+) -> dict[str, object]:
+    """Return the retrieval settings a result was produced under.
+
+    Attaching this to eval output is what makes two runs comparable after the
+    fact, instead of leaving the reader to guess which settings produced which
+    numbers.
+    """
+    return {
+        "vector_backend": config.vector_backend,
+        "chunk_strategy": config.chunk_strategy,
+        "chunk_size": config.chunk_size,
+        "chunk_overlap": config.chunk_overlap,
+        "top_k": config.top_k,
+        "retrieval_strategy": config.retrieval_strategy,
+        "retrieval_candidate_k": config.retrieval_candidate_k,
+        "rrf_k": config.rrf_k,
+        "reranker": config.reranker,
+        "rerank_candidate_k": config.rerank_candidate_k,
+        "docs_dir": str(config.docs_dir),
+        "docs_exclude_patterns": list(config.docs_exclude_patterns),
+    }
+
+
+def serialize_answer(answer: models.AgentAnswer) -> dict[str, object]:
+    """Return one answered question with its citations and diagnostics."""
     return {
         "question": answer.question,
         "answer": answer.answer,
         "citations": answer.citations,
         "citation_spans": [
-            {
-                "source_path": span.source_path,
-                "chunk_id": span.chunk_id,
-                "chunk_index": span.chunk_index,
-                "start_char": span.start_char,
-                "end_char": span.end_char,
-                "text": span.text,
-            }
-            for span in answer.citation_spans
+            serialize_citation_span(span) for span in answer.citation_spans
         ],
-        "runtime": runtime,
+        "runtime": answer.diagnostics.actual_runtime,
+        "diagnostics": serialize_diagnostics(answer.diagnostics),
     }
 
 
-def serialize_eval_summary(results: list[EvalResult], runtime: str) -> dict[str, object]:
+def serialize_eval_result(result: models.EvalResult) -> dict[str, object]:
+    """Return one eval case: metrics, expectations, and failures."""
+    return {
+        "question": result.question,
+        "answer": result.answer,
+        "citations": result.citations,
+        "retrieved_sources": result.retrieved_sources,
+        "answer_keyword_hit_rate": result.answer_keyword_hit_rate,
+        "retrieval_source_hit_rate": result.retrieval_source_hit_rate,
+        "retrieval_span_hit_rate": result.retrieval_span_hit_rate,
+        "retrieval_reciprocal_rank": result.retrieval_reciprocal_rank,
+        "retrieval_precision": result.retrieval_precision,
+        "citation_source_hit_rate": result.citation_source_hit_rate,
+        "citation_span_hit_rate": result.citation_span_hit_rate,
+        "response_time_ms": result.response_time_ms,
+        "diagnostics": (
+            serialize_diagnostics(result.diagnostics)
+            if result.diagnostics
+            else None
+        ),
+        "expected_source_paths": result.expected_source_paths,
+        "expected_answer_keywords": result.expected_answer_keywords,
+        "expected_span_keywords": result.expected_span_keywords,
+        "expected_retrieval_keywords": result.expected_retrieval_keywords,
+        "failure_reasons": result.failure_reasons,
+    }
+
+
+def serialize_eval_summary(
+    results: list[models.EvalResult],
+    runtime: str,
+    config: app_config.AppConfig | None = None,
+) -> dict[str, object]:
+    """Return per-case eval results aggregated into one summary."""
+    answer_keyword_hit_rate = _average(
+        result.answer_keyword_hit_rate for result in results
+    )
+    citation_source_hit_rate = _average(
+        result.citation_source_hit_rate for result in results
+    )
+    citation_span_hit_rate = _average(
+        result.citation_span_hit_rate for result in results
+    )
     return {
         "num_cases": len(results),
         "runtime": runtime,
-        "avg_keyword_hit_rate": round(
-            sum(result.keyword_hit_rate for result in results) / len(results), 4
-        )
-        if results
-        else 0.0,
-        "source_hit_rate": round(
-            sum(1 for result in results if result.source_hit) / len(results), 4
-        )
-        if results
-        else 0.0,
-        "avg_citation_span_hit_rate": round(
-            sum(result.citation_span_hit_rate for result in results) / len(results), 4
-        )
-        if results
-        else 0.0,
-        "avg_response_time_ms": round(
-            sum(result.response_time_ms for result in results) / len(results), 2
-        )
-        if results
-        else 0.0,
-        "results": [
-            {
-                "question": result.question,
-                "keyword_hit_rate": result.keyword_hit_rate,
-                "source_hit": result.source_hit,
-                "citation_span_hit_rate": result.citation_span_hit_rate,
-                "response_time_ms": result.response_time_ms,
-                "citations": result.citations,
-            }
-            for result in results
-        ],
+        "retrieval_config": serialize_retrieval_config(config)
+        if config
+        else None,
+        "answer_keyword_hit_rate": answer_keyword_hit_rate,
+        "retrieval_source_hit_rate": _average(
+            result.retrieval_source_hit_rate for result in results
+        ),
+        "retrieval_span_hit_rate": _average(
+            result.retrieval_span_hit_rate for result in results
+        ),
+        "retrieval_reciprocal_rank": _average(
+            result.retrieval_reciprocal_rank for result in results
+        ),
+        "retrieval_precision": _average(
+            result.retrieval_precision for result in results
+        ),
+        "citation_source_hit_rate": citation_source_hit_rate,
+        "citation_span_hit_rate": citation_span_hit_rate,
+        "avg_response_time_ms": _average(
+            (result.response_time_ms for result in results),
+            precision=MILLISECOND_PRECISION,
+        ),
+        # Backward-compatible aliases for older UI and report consumers.
+        "avg_keyword_hit_rate": answer_keyword_hit_rate,
+        "source_hit_rate": citation_source_hit_rate,
+        "avg_citation_span_hit_rate": citation_span_hit_rate,
+        "results": [serialize_eval_result(result) for result in results],
     }
+
+
+def _average(values: Iterable[float], precision: int = RATE_PRECISION) -> float:
+    materialized = list(values)
+    if not materialized:
+        return 0.0
+    return round(sum(materialized) / len(materialized), precision)

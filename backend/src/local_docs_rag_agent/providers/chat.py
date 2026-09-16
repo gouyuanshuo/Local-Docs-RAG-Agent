@@ -1,11 +1,36 @@
+"""OpenAI-compatible chat provider with an explicit extractive fallback.
+
+When no key is configured, or a request fails or returns nothing, the provider
+answers by quoting the retrieved context instead of raising. The answer is
+prefixed with the reason and the status is set to `fallback`, so a degraded
+answer is always labelled as one rather than passing for a live model response.
+"""
+
 from __future__ import annotations
 
-from textwrap import dedent
+import re
+import textwrap
 
-from local_docs_rag_agent.providers.base import ChatProvider
+import openai
+
+from local_docs_rag_agent.core import models
+from local_docs_rag_agent.providers import base as provider_base
+from local_docs_rag_agent.providers import errors, openai_client
+
+SYSTEM_INSTRUCTIONS = (
+    "You are a local-document QA agent. "
+    "Answer using only the provided context. "
+    "If the context is insufficient, say what is missing instead of guessing. "
+    "Keep the answer concise and cite source ids inline like [S1], [S2]."
+)
+CONTEXT_CONTENT_PATTERN = re.compile(
+    r"(?ms)^content:\s*(.*?)(?=^\[S\d+\]\s*$|\Z)"
+)
 
 
-class OpenAICompatibleChatProvider(ChatProvider):
+class OpenAICompatibleChatProvider(provider_base.ChatProvider):
+    """Answers over an OpenAI-compatible endpoint, or extractively."""
+
     def __init__(
         self,
         api_key: str | None,
@@ -13,21 +38,65 @@ class OpenAICompatibleChatProvider(ChatProvider):
         base_url: str | None = None,
         api_style: str = "responses",
         provider_label: str = "LLM",
+        trust_env: bool = True,
     ) -> None:
+        """Build a chat provider over an OpenAI-compatible endpoint.
+
+        A missing key is not an error: the provider answers extractively
+        from the retrieved context and reports `fallback`, so a run
+        without credentials still produces something inspectable.
+
+        Args:
+          api_key: Credential, or None to answer extractively.
+          model: Model that answers.
+          base_url: Endpoint override, or None for the OpenAI default.
+          api_style: `responses` or `chat_completions`.
+          provider_label: Name reported in diagnostics.
+          trust_env: Whether to honour environment proxy variables.
+        """
         self._model = model
         self._api_style = api_style
-        self._provider_label = provider_label
-        self._client = self._build_client(api_key, base_url) if api_key else None
+        self._provider_label = provider_label.lower()
+        self._trust_env = trust_env
+        self._status = models.ProviderStatus(
+            provider=self._provider_label, mode="ready"
+        )
+        self._client: openai.OpenAI | None = None
+        if api_key:
+            self._client = openai_client.build_sync_openai_client(
+                api_key=api_key,
+                base_url=base_url,
+                trust_env=trust_env,
+            )
+        if not api_key:
+            self._status = models.ProviderStatus(
+                provider=self._provider_label,
+                mode="fallback",
+                reason="missing_api_key",
+            )
 
     def answer(self, question: str, context: str) -> str:
+        """Answer `question` from `context`.
+
+        Args:
+          question: The user's question.
+          context: Retrieved evidence, rendered as `[S1]` blocks.
+
+        Returns:
+          The model's answer, or an extractive one quoting the context
+          when no live model is reachable. A degraded answer is prefixed
+          with its reason and `status` reports `fallback`, so it can never
+          pass for a live response. Never raises.
+        """
         if not self._client:
             return self._fallback_answer(question=question, context=context)
 
-        prompt = dedent(
+        prompt = textwrap.dedent(
             f"""
             You are a local-document QA agent.
             Answer the user's question using only the provided context.
-            If the context is insufficient, say what is missing instead of guessing.
+            If the context is insufficient, say what is missing
+            instead of guessing.
             Keep the answer concise and cite source ids inline like [S1], [S2].
 
             Question:
@@ -39,58 +108,60 @@ class OpenAICompatibleChatProvider(ChatProvider):
         ).strip()
 
         try:
-            if self._api_style == "chat_completions":
-                response = self._client.chat.completions.create(
-                    model=self._model,
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": (
-                                "You are a local-document QA agent. "
-                                "Answer using only the provided context. "
-                                "If the context is insufficient, say what is missing instead of guessing. "
-                                "Keep the answer concise and cite source ids inline like [S1], [S2]."
-                            ),
-                        },
-                        {"role": "user", "content": prompt},
-                    ],
-                )
-                message = response.choices[0].message.content
-                return (
-                    message.strip()
-                    if message
-                    else self._fallback_answer(question=question, context=context)
-                )
-
-            response = self._client.responses.create(model=self._model, input=prompt)
-            return response.output_text.strip()
-        except Exception:
+            output_text = self._request_answer(prompt)
+        except Exception as exc:
+            self._status = models.ProviderStatus(
+                provider=self._provider_label,
+                mode="fallback",
+                reason=errors.provider_error_reason(exc),
+            )
             return self._fallback_answer(question=question, context=context)
 
-    def _build_client(self, api_key: str, base_url: str | None):
-        try:
-            from openai import OpenAI
-        except Exception:
-            return None
-        client_kwargs = {"api_key": api_key}
-        if base_url:
-            client_kwargs["base_url"] = base_url
-        return OpenAI(**client_kwargs)
+        if output_text:
+            self._status = models.ProviderStatus(
+                provider=self._provider_label, mode="live"
+            )
+            return output_text
+
+        self._status = models.ProviderStatus(
+            provider=self._provider_label,
+            mode="fallback",
+            reason="empty_provider_output",
+        )
+        return self._fallback_answer(question=question, context=context)
+
+    @property
+    def status(self) -> models.ProviderStatus:
+        """Report whether the last answer was live or degraded."""
+        return self._status
+
+    def _request_answer(self, prompt: str) -> str:
+        if self._client is None:
+            return ""
+        if self._api_style == "chat_completions":
+            completion = self._client.chat.completions.create(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": SYSTEM_INSTRUCTIONS},
+                    {"role": "user", "content": prompt},
+                ],
+            )
+            return (completion.choices[0].message.content or "").strip()
+
+        response = self._client.responses.create(
+            model=self._model, input=prompt
+        )
+        return str(response.output_text).strip()
 
     def _fallback_answer(self, question: str, context: str) -> str:
-        snippets: list[str] = []
-        for raw_line in context.splitlines():
-            line = raw_line.strip()
-            if not line.startswith("content:"):
-                continue
-            snippet = line.removeprefix("content:").strip()
-            if snippet:
-                snippets.append(snippet)
+        snippets = [
+            match.group(1).strip()
+            for match in CONTEXT_CONTENT_PATTERN.finditer(context)
+            if match.group(1).strip()
+        ]
 
         if not snippets:
             return f"I could not find supporting context for: {question}"
         excerpt = " ".join(snippets[:2])
-        return (
-            f"{self._provider_label} API key is not configured or the provider client is unavailable, "
-            f"so here is an extractive fallback: {excerpt}"
-        )
+        reason = self._status.reason or "live_provider_unavailable"
+        return f"Provider fallback ({reason}); extractive answer: {excerpt}"
