@@ -75,7 +75,7 @@ convention = "google"
 known-first-party = ["local_docs_rag_agent"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.13"
 strict = true
 ignore_missing_imports = true
 # The test and script trees are checked too: they exercise the same interfaces, and an
