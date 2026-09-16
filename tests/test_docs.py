@@ -204,6 +204,7 @@ def _api_routes() -> set[str]:
                 and decorator.func.attr in HTTP_VERBS
                 and decorator.args
                 and isinstance(decorator.args[0], ast.Constant)
+                and isinstance(decorator.args[0].value, str)
             ):
                 verb = decorator.func.attr.upper()
                 routes.add(f"{verb} {prefix}{decorator.args[0].value}")
@@ -222,9 +223,9 @@ def _cli_surface() -> set[str]:
         ):
             continue
         first = node.args[0].value
-        if node.func.attr == "add_parser":
-            names.add(first)
-        elif node.func.attr == "add_argument" and first.startswith("--"):
+        if node.func.attr == "add_parser" or (
+            node.func.attr == "add_argument" and first.startswith("--")
+        ):
             names.add(first)
     return names
 
