@@ -260,6 +260,55 @@ def test_qdrant_save_rejects_chunk_without_embedding(
     assert error.value.reason_code == "invalid_vectors"
 
 
+def test_qdrant_save_preserves_trusted_vector_size_diagnostic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeQdrantClient:
+        def __init__(self, **kwargs: Any) -> None:
+            del kwargs
+
+        def collection_exists(self, collection_name: str) -> bool:
+            del collection_name
+            return True
+
+        def get_collection(self, collection_name: str) -> object:
+            del collection_name
+            vectors = types.SimpleNamespace(size=1536)
+            params = types.SimpleNamespace(vectors=vectors)
+            config = types.SimpleNamespace(params=params)
+            return types.SimpleNamespace(config=config)
+
+    monkeypatch.setattr(qdrant_client, "QdrantClient", FakeQdrantClient)
+    store = qdrant_store.QdrantChunkStore(
+        url="https://qdrant.example",
+        api_key=None,
+        collection_name="dimension-test",
+        timeout_s=10,
+        embedding_provider=StubEmbeddingProvider(),
+    )
+    chunk = models.DocumentChunk(
+        chunk_id="one",
+        source_path="doc.md",
+        title="Doc",
+        text="content",
+        chunk_index=0,
+        start_char=0,
+        end_char=7,
+        embedding=[0.0] * 3072,
+    )
+
+    with pytest.raises(exceptions.VectorStoreError) as exc_info:
+        store.save([chunk])
+
+    assert exc_info.value.reason_code == "vector_size_mismatch"
+    assert exc_info.value.message == (
+        "Qdrant collection vector size does not match incoming embeddings"
+    )
+    assert exc_info.value.action_hint is not None
+    assert "1536" in exc_info.value.action_hint
+    assert "3072" in exc_info.value.action_hint
+
+
 def test_qdrant_delete_collection_normalizes_client_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -13,8 +13,8 @@ package, import **only** `local_docs_rag_agent.rag` (the facade).
   first-ingest and fail-closed cleanup for disposable Qdrant collections
 - `qdrant_orphaned_collection` — structured exact-name recovery signal on an
   exception escaping interrupted Qdrant initialization
-- `validate_storage_target` — pure, side-effect-free target validation; a
-  missing Qdrant URL is invalid to this seam
+- `validate_storage_target` — pure target-name/URL validation with no
+  filesystem inspection; a missing Qdrant URL is invalid to this seam
 - `build_store` / `retrieval_settings`
 - `chunk_text`, `collect_document_paths`, `read_source_texts`
 - `rank_chunks`, `RetrievalSettings`, `ChunkStore`, store types, `Reranker`
@@ -51,6 +51,8 @@ index_lock -> config, core (and lazy storage identity lookup)
 - After `fork`, child lock/ownership registries are reset and inherited lock
   descriptors are closed without unlocking the parent's guard. Contention on
   one target does not serialize an unrelated target.
+- An interruption between thread/OS lock acquisition and bookkeeping rolls
+  back the unpublished acquisition without replacing the active exception.
 - Manifest and local-store lock artifacts live beside their resolved files.
   Qdrant store artifacts live in the per-user cache and contain only a hashed,
   credential-free identity. Persistent lock files are harmless.
@@ -72,6 +74,8 @@ index_lock -> config, core (and lazy storage identity lookup)
 - Qdrant operation errors omit raw URLs and exception messages and suppress
   unsafe chaining while retaining operation, collection, exception class,
   reason code, and recovery hints.
+- Explicitly marked internal Qdrant validation diagnostics bypass raw-client
+  normalization unchanged; arbitrary client/domain exceptions do not.
 - The local store resolves its bound index path once before I/O, matching the
   identity path and preserving a final-component symlink during atomic writes.
 - The manifest target is likewise resolved before locking and I/O, preserving

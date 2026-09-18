@@ -99,6 +99,8 @@ The normalized failure intentionally omits the raw configured URL and raw
 client message, including from exception chaining, because both can repeat URL
 credentials or sensitive path/query data. It retains the operation,
 collection, exception class, `reason_code`, and actionable network/proxy hint.
+Internally detected collection-shape errors remain exact, so a trusted vector
+dimension mismatch still reports both stored and incoming dimensions.
 
 **A stale proxy.** Provider and Qdrant clients honour `HTTP_PROXY`,
 `HTTPS_PROXY`, and `ALL_PROXY` by default. If a leftover proxy produces
@@ -226,9 +228,11 @@ it performs first ingest and returns the only token accepted by
 `delete_owned_qdrant_index`. Do not pre-create the collection separately.
 
 Use `rag.validate_storage_target(config)` when a caller needs pure preflight
-validation without locks, writes, provider/client construction, or service
-contact. It treats a missing `QDRANT_URL` as invalid; comparison planning that
-wants `missing_qdrant_url` to be a skipped cell must classify that case first.
+validation without filesystem inspection, locks, writes, provider/client
+construction, or service contact. Local canonical alias checks happen when a
+lifecycle guard is entered. The pure validator treats a missing `QDRANT_URL`
+as invalid; comparison planning that wants `missing_qdrant_url` to be a skipped
+cell must classify that case first.
 
 **`DOCS_DIR does not exist`.** The directory is resolved relative to where the
 process starts. Run from the repository root, or use an absolute path.

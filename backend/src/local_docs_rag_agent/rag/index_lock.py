@@ -118,6 +118,15 @@ def _lock_resources(
     manifest_resource = _local_resource("manifest", manifest_path)
     if config.vector_backend == "local":
         index_path = config.index_path.resolve()
+        if _paths_alias(index_path, manifest_path):
+            raise exceptions.ConfigurationError(
+                "INDEX_PATH and INGEST_MANIFEST_PATH must identify different "
+                "files",
+                action_hint=(
+                    "Choose separate canonical paths for chunk storage and "
+                    "the ingest manifest, then retry."
+                ),
+            )
         storage_resource = _local_resource("local-store", index_path)
     else:
         storage_key = _resource_key(
@@ -133,6 +142,15 @@ def _lock_resources(
         ),
         manifest_path,
     )
+
+
+def _paths_alias(first: pathlib.Path, second: pathlib.Path) -> bool:
+    if first == second:
+        return True
+    try:
+        return first.samefile(second)
+    except OSError:
+        return False
 
 
 def _local_resource(kind: str, target: pathlib.Path) -> _LockResource:
@@ -153,9 +171,16 @@ def _acquire_resource(
     deadline: float,
 ) -> None:
     remaining = deadline - time.monotonic()
-    if remaining <= 0 or not frame.state.thread_lock.acquire(timeout=remaining):
+    if remaining <= 0:
         raise _timeout_error()
-    frame.thread_lock_acquired = True
+    try:
+        if not frame.state.thread_lock.acquire(timeout=remaining):
+            raise _timeout_error()
+        frame.thread_lock_acquired = True
+    except BaseException:
+        if not frame.thread_lock_acquired:
+            _release_unpublished_thread_lock(frame)
+        raise
     depths = _thread_depths()
     key = frame.resource.key
     if depths.get(key, 0) == 0:
@@ -190,14 +215,51 @@ def _acquire_file_lock(
                     check_interval=0.05,
                     fail_when_locked=True,
                 )
+                frame.file_lock_acquired = True
                 _ACTIVE_FILE_LOCKS[id(frame.file_lock)] = frame.file_lock
         except portalocker.exceptions.LockException:
+            _rollback_file_lock_acquisition(frame)
             time.sleep(min(0.05, remaining))
             continue
         except OSError as exc:
+            _rollback_file_lock_acquisition(frame)
             raise _lock_io_error() from exc
-        frame.file_lock_acquired = True
+        except BaseException:
+            _rollback_file_lock_acquisition(frame)
+            raise
         return
+
+
+def _release_unpublished_thread_lock(frame: _AcquiredResource) -> None:
+    with contextlib.suppress(BaseException):
+        frame.state.thread_lock.release()
+
+
+def _rollback_file_lock_acquisition(frame: _AcquiredResource) -> None:
+    file_lock = frame.file_lock
+    if file_lock is None:
+        return
+    registered = False
+    try:
+        with _ACTIVE_LOCKS_GUARD:
+            registered = id(file_lock) in _ACTIVE_FILE_LOCKS
+            _ACTIVE_FILE_LOCKS.pop(id(file_lock), None)
+    except BaseException:
+        pass
+    file_handle = getattr(file_lock, "fh", None)
+    if frame.file_lock_acquired or registered or file_handle is not None:
+        try:
+            file_lock.release()
+        except BaseException:
+            file_handle = getattr(file_lock, "fh", None)
+            if file_handle is None:
+                frame.file_lock_acquired = False
+                return
+            with contextlib.suppress(BaseException):
+                file_handle.close()
+            with contextlib.suppress(BaseException):
+                file_lock.fh = None
+    frame.file_lock_acquired = False
 
 
 def _release_resource(

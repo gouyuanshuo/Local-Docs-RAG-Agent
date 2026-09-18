@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import json
 import pathlib
 import traceback
@@ -932,6 +933,49 @@ def test_validate_storage_target_is_side_effect_free(
     assert not docs.exists()
     assert not config.index_path.exists()
     assert not config.ingest_manifest_path.exists()
+
+
+def test_validate_local_storage_target_performs_no_filesystem_io(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = app_config.AppConfig.from_env().with_overrides(
+        index_path=tmp_path / "index.jsonl",
+        ingest_manifest_path=tmp_path / "manifest.json",
+        vector_backend="local",
+    )
+
+    def unexpected_call(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise AssertionError("pure validation performed filesystem I/O")
+
+    failure: BaseException | None = None
+    with monkeypatch.context() as guarded:
+        for name in (
+            "resolve",
+            "samefile",
+            "stat",
+            "open",
+            "write_text",
+            "write_bytes",
+            "mkdir",
+        ):
+            guarded.setattr(pathlib.Path, name, unexpected_call)
+        guarded.setattr(builtins, "open", unexpected_call)
+        guarded.setattr(qdrant_client, "QdrantClient", unexpected_call)
+        guarded.setattr(
+            provider_factory,
+            "build_embedding_provider",
+            unexpected_call,
+        )
+        guarded.setattr(store_factory, "build_store", unexpected_call)
+        guarded.setattr(index_lock, "index_guard", unexpected_call)
+        try:
+            rag.validate_storage_target(config)
+        except BaseException as exc:
+            failure = exc
+
+    assert failure is None
 
 
 def test_validate_storage_target_rejects_missing_qdrant_url(

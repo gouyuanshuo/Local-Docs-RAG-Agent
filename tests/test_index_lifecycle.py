@@ -17,6 +17,7 @@ from local_docs_rag_agent import rag
 from local_docs_rag_agent.core import exceptions, models
 from local_docs_rag_agent.providers import factory as provider_factory
 from local_docs_rag_agent.rag import (
+    index_ownership,
     ingest,
     manifest,
     pipeline,
@@ -746,6 +747,90 @@ def test_index_guard_releases_first_resource_when_second_acquisition_fails(
     assert locks[1].released is False
 
 
+def test_index_guard_cleans_interrupted_file_lock_publication(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _local_config(tmp_path)
+    index_lock = importlib.import_module("local_docs_rag_agent.rag.index_lock")
+    interruption = KeyboardInterrupt("post-acquire registry interruption")
+    created_locks: list[Any] = []
+    original_lock = index_lock.portalocker.Lock
+
+    class _InterruptingRegistry(dict[int, Any]):
+        armed = True
+
+        def __setitem__(self, key: int, value: Any) -> None:
+            super().__setitem__(key, value)
+            if self.armed:
+                self.armed = False
+                raise interruption
+
+    registry = _InterruptingRegistry()
+
+    def tracked_lock(*args: Any, **kwargs: Any) -> Any:
+        lock = original_lock(*args, **kwargs)
+        created_locks.append(lock)
+        return lock
+
+    monkeypatch.setattr(index_lock, "_ACTIVE_FILE_LOCKS", registry)
+    monkeypatch.setattr(index_lock.portalocker, "Lock", tracked_lock)
+
+    with (
+        pytest.raises(KeyboardInterrupt) as exc_info,
+        rag.index_guard(config),
+    ):
+        pytest.fail("interrupted guard unexpectedly entered")
+
+    assert exc_info.value is interruption
+    assert registry == {}
+    assert created_locks[0].fh is None
+    with rag.index_guard(config):
+        pass
+    assert registry == {}
+
+
+def test_index_guard_cleans_interrupted_thread_lock_publication(
+    tmp_path: pathlib.Path,
+) -> None:
+    config = _local_config(tmp_path)
+    index_lock = importlib.import_module("local_docs_rag_agent.rag.index_lock")
+    resources, _ = index_lock._lock_resources(config)
+    interruption = KeyboardInterrupt("post-thread-acquire interruption")
+
+    class _InterruptAfterAcquire:
+        def __init__(self) -> None:
+            self.lock = threading.Lock()
+            self.armed = True
+
+        def acquire(self, *, timeout: float) -> bool:
+            acquired = self.lock.acquire(timeout=timeout)
+            if acquired and self.armed:
+                self.armed = False
+                raise interruption
+            return acquired
+
+        def release(self) -> None:
+            self.lock.release()
+
+    interrupting_lock = _InterruptAfterAcquire()
+    state = index_lock._LockState(thread_lock=interrupting_lock)
+    index_lock._LOCK_STATES[resources[1].key] = state
+
+    with (
+        pytest.raises(KeyboardInterrupt) as exc_info,
+        rag.index_guard(config),
+    ):
+        pytest.fail("interrupted guard unexpectedly entered")
+
+    assert exc_info.value is interruption
+    assert interrupting_lock.lock.acquire(blocking=False) is True
+    interrupting_lock.lock.release()
+    assert index_lock._ACTIVE_FILE_LOCKS == {}
+    with rag.index_guard(config):
+        pass
+
+
 def test_index_guard_attempts_every_release_after_one_release_fails(
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -986,6 +1071,102 @@ def test_qdrant_ownership_initializer_cleans_partial_failed_creation(
     assert store.exists() is False
     assert store.delete_calls == 1
     store.save_error = None
+    ownership = rag.initialize_owned_qdrant_index(config)
+    rag.delete_owned_qdrant_index(config, ownership)
+
+
+def test_qdrant_initializer_clears_claim_if_token_construction_is_interrupted(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _qdrant_config(tmp_path).with_overrides(
+        qdrant_collection="token-interruption"
+    )
+    (config.docs_dir / "sample.md").write_text("Evidence", encoding="utf-8")
+    store = _OwnershipStore(exists=False)
+    monkeypatch.setattr(qdrant_store, "QdrantChunkStore", _OwnershipStore)
+    monkeypatch.setattr(
+        store_factory,
+        "build_store",
+        lambda config, embedding_provider=None: store,
+    )
+    monkeypatch.setattr(
+        provider_factory,
+        "build_embedding_provider",
+        lambda config: _FakeEmbeddingProvider(),
+    )
+    original_token_type = index_ownership.QdrantIndexOwnership
+    interruption = KeyboardInterrupt("token construction interrupted")
+
+    def interrupt_token(*args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+        raise interruption
+
+    monkeypatch.setattr(
+        index_ownership,
+        "QdrantIndexOwnership",
+        interrupt_token,
+    )
+
+    with pytest.raises(KeyboardInterrupt) as exc_info:
+        rag.initialize_owned_qdrant_index(config)
+
+    assert exc_info.value is interruption
+    assert store.save_calls == 0
+    assert store.delete_calls == 0
+    assert index_ownership._CLAIMS == {}
+
+    monkeypatch.setattr(
+        index_ownership,
+        "QdrantIndexOwnership",
+        original_token_type,
+    )
+    ownership = rag.initialize_owned_qdrant_index(config)
+    rag.delete_owned_qdrant_index(config, ownership)
+
+
+def test_qdrant_initializer_clears_partially_registered_claim_on_interrupt(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _qdrant_config(tmp_path).with_overrides(
+        qdrant_collection="registration-interruption"
+    )
+    (config.docs_dir / "sample.md").write_text("Evidence", encoding="utf-8")
+    store = _OwnershipStore(exists=False)
+    monkeypatch.setattr(qdrant_store, "QdrantChunkStore", _OwnershipStore)
+    monkeypatch.setattr(
+        store_factory,
+        "build_store",
+        lambda config, embedding_provider=None: store,
+    )
+    monkeypatch.setattr(
+        provider_factory,
+        "build_embedding_provider",
+        lambda config: _FakeEmbeddingProvider(),
+    )
+    interruption = KeyboardInterrupt("claim registration interrupted")
+
+    class _InterruptingClaims(dict[str, tuple[str, str]]):
+        armed = True
+
+        def __setitem__(self, key: str, value: tuple[str, str]) -> None:
+            super().__setitem__(key, value)
+            if self.armed:
+                self.armed = False
+                raise interruption
+
+    claims = _InterruptingClaims()
+    monkeypatch.setattr(index_ownership, "_CLAIMS", claims)
+
+    with pytest.raises(KeyboardInterrupt) as exc_info:
+        rag.initialize_owned_qdrant_index(config)
+
+    assert exc_info.value is interruption
+    assert store.save_calls == 0
+    assert store.delete_calls == 0
+    assert claims == {}
+
     ownership = rag.initialize_owned_qdrant_index(config)
     rag.delete_owned_qdrant_index(config, ownership)
 

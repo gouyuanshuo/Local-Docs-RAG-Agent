@@ -68,19 +68,15 @@ def initialize_owned_qdrant_index(
             )
         storage_identity = ingest.storage_identity(config)
         collection_name = config.qdrant_collection
-        with _CLAIMS_GUARD:
-            if (storage_identity, collection_name) in _CLAIMS.values():
-                raise exceptions.ConfigurationError(
-                    "Qdrant index ownership is already claimed in this process"
-                )
-            nonce = uuid.uuid4().hex
-            _CLAIMS[nonce] = (storage_identity, collection_name)
         ownership = QdrantIndexOwnership(
-            _nonce=nonce,
+            _nonce=uuid.uuid4().hex,
             _storage_identity=storage_identity,
             _collection_name=collection_name,
         )
+        initialization_started = False
         try:
+            _register_claim(ownership)
+            initialization_started = True
             ingest.ingest_documents(config)
             if not store.collection_exists():
                 raise exceptions.ConfigurationError(
@@ -90,10 +86,11 @@ def initialize_owned_qdrant_index(
                         "new unique collection name."
                     ),
                 )
+            return ownership
         except BaseException as exc:
             cleanup_failed = False
             try:
-                if store.collection_exists():
+                if initialization_started and store.collection_exists():
                     try:
                         store.delete_collection()
                     except BaseException:
@@ -105,7 +102,6 @@ def initialize_owned_qdrant_index(
             if cleanup_failed:
                 _mark_orphaned_collection(exc, collection_name)
             raise
-        return ownership
 
 
 def qdrant_orphaned_collection(exc: BaseException) -> str | None:
@@ -167,6 +163,16 @@ def delete_owned_qdrant_index(
 def _discard_claim(ownership: QdrantIndexOwnership) -> None:
     with _CLAIMS_GUARD:
         _CLAIMS.pop(ownership._nonce, None)
+
+
+def _register_claim(ownership: QdrantIndexOwnership) -> None:
+    target = (ownership._storage_identity, ownership._collection_name)
+    with _CLAIMS_GUARD:
+        if target in _CLAIMS.values():
+            raise exceptions.ConfigurationError(
+                "Qdrant index ownership is already claimed in this process"
+            )
+        _CLAIMS[ownership._nonce] = target
 
 
 def _mark_orphaned_collection(

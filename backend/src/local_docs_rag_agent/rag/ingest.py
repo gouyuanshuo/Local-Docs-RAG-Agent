@@ -240,8 +240,7 @@ def storage_identity(config: app_config.AppConfig) -> str:
 
     Raises:
       ConfigurationError: If target semantics are invalid, including an
-        unsupported backend, aliased local index/manifest files, or a Qdrant
-        URL that is missing or malformed.
+        unsupported backend or a Qdrant URL that is missing or malformed.
     """
     payload = _storage_target_payload(config)
     serialized = json.dumps(payload, ensure_ascii=True, sort_keys=True)
@@ -251,36 +250,38 @@ def storage_identity(config: app_config.AppConfig) -> str:
 def validate_storage_target(config: app_config.AppConfig) -> None:
     """Validate storage semantics without mutation or client construction.
 
-    The check is side-effect free: it does not acquire lifecycle locks, create
-    providers or stores, contact Qdrant, or write local paths. A missing Qdrant
-    URL is invalid here; callers that classify that configuration as skipped
-    must make that decision before invoking this validator.
+    The check performs no filesystem inspection and does not acquire lifecycle
+    locks, create providers or stores, contact Qdrant, or write local paths. A
+    missing Qdrant URL is invalid here; callers that classify that
+    configuration as skipped must decide before invoking this validator.
 
     Args:
       config: Settings selecting the storage and manifest targets.
 
     Raises:
-      ConfigurationError: If the backend is unsupported, a Qdrant URL is
-        missing or malformed, or local index and manifest paths alias.
+      ConfigurationError: If the backend is unsupported or a Qdrant URL is
+        missing or malformed.
     """
-    _storage_target_payload(config)
+    if config.vector_backend == "local":
+        return
+    if config.vector_backend == "qdrant":
+        if not config.qdrant_url:
+            raise exceptions.ConfigurationError(
+                "QDRANT_URL must be set when VECTOR_BACKEND=qdrant"
+            )
+        _canonical_qdrant_url(config.qdrant_url)
+        return
+    raise exceptions.ConfigurationError(
+        f"VECTOR_BACKEND is unsupported: {config.vector_backend!r}"
+    )
 
 
 def _storage_target_payload(
     config: app_config.AppConfig,
 ) -> dict[str, str]:
+    validate_storage_target(config)
     if config.vector_backend == "local":
         index_path = config.index_path.resolve()
-        manifest_path = manifest.canonical_path(config.ingest_manifest_path)
-        if _paths_alias(index_path, manifest_path):
-            raise exceptions.ConfigurationError(
-                "INDEX_PATH and INGEST_MANIFEST_PATH must identify different "
-                "files",
-                action_hint=(
-                    "Choose separate canonical paths for chunk storage and "
-                    "the ingest manifest, then retry."
-                ),
-            )
         return {
             "vector_backend": "local",
             "index_path": str(index_path),
@@ -298,15 +299,6 @@ def _storage_target_payload(
     raise exceptions.ConfigurationError(
         f"VECTOR_BACKEND is unsupported: {config.vector_backend!r}"
     )
-
-
-def _paths_alias(first: pathlib.Path, second: pathlib.Path) -> bool:
-    if first == second:
-        return True
-    try:
-        return first.samefile(second)
-    except OSError:
-        return False
 
 
 def _canonical_qdrant_url(url: str) -> str:

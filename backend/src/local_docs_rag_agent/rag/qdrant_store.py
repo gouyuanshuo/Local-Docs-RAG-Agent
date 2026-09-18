@@ -19,6 +19,10 @@ from local_docs_rag_agent.providers import base as provider_base
 from local_docs_rag_agent.rag import retrieval, scoring
 
 
+class _TrustedQdrantDiagnostic(exceptions.VectorStoreError):
+    pass
+
+
 class QdrantChunkStore:
     """Qdrant-backed chunk storage with normalized operational failures."""
 
@@ -165,7 +169,7 @@ class QdrantChunkStore:
                     self._collection_name,
                 )
                 if existing_size != vector_size:
-                    raise exceptions.VectorStoreError(
+                    raise _TrustedQdrantDiagnostic(
                         "Qdrant collection vector size does not match "
                         "incoming embeddings",
                         reason_code="vector_size_mismatch",
@@ -201,6 +205,8 @@ class QdrantChunkStore:
                         for chunk in chunks
                     ],
                 )
+        except _TrustedQdrantDiagnostic:
+            raise
         except Exception as exc:
             raise self._operation_error("save", exc) from None
 
@@ -410,13 +416,13 @@ def _collection_vector_size(client: Any, collection_name: str) -> int:
     if hasattr(vectors, "size"):
         return int(vectors.size)
     if isinstance(vectors, dict):
-        raise exceptions.VectorStoreError(
+        raise _TrustedQdrantDiagnostic(
             "Configured Qdrant collection uses named vectors, which are "
             "not supported",
             reason_code="invalid_collection",
             action_hint="Use a collection with one unnamed dense vector.",
         )
-    raise exceptions.VectorStoreError(
+    raise _TrustedQdrantDiagnostic(
         "Unable to determine Qdrant collection vector size",
         reason_code="invalid_collection",
     )

@@ -187,7 +187,10 @@ readiness and query under one critical section. A shared manifest serializes
 even when storage differs, and shared storage serializes even when manifests
 differ; configurations sharing neither resource remain concurrent. Partial
 acquisition unwinds every resource already acquired, and release failures do
-not prevent attempts to release the remaining resources.
+not prevent attempts to release the remaining resources. Thread-lock and
+operating-system-lock ownership are rolled back if an interruption lands
+between acquisition and bookkeeping publication; cleanup failures do not
+replace the active interruption.
 
 Manifest and local-store lock artifacts live beside their respective resolved
 files. A Qdrant store artifact lives in the current user's cache and is named
@@ -266,12 +269,14 @@ requires a dedicated manifest or an explicit operator decision to clear and
 adopt a confirmed-owned target. Legacy local manifests rebuild safely; legacy
 Qdrant manifests cannot be adopted without that ownership decision.
 
-`validate_storage_target` exposes target validation without acquiring a lock,
-constructing a provider/client/store, contacting a service, or writing a path.
-It deliberately treats a missing Qdrant URL as invalid; a caller such as an
-evaluation planner that classifies missing Qdrant configuration as skipped
-must do so before invoking this seam. Malformed endpoint diagnostics are fixed
-and credential-free.
+`validate_storage_target` exposes pure backend and Qdrant URL syntax validation
+without filesystem inspection, lock acquisition, provider/client/store
+construction, service contact, or writes. It deliberately treats a missing
+Qdrant URL as invalid; a caller such as an evaluation planner that classifies
+missing Qdrant configuration as skipped must do so before invoking this seam.
+Malformed endpoint diagnostics are fixed and credential-free. Local canonical
+resolution and alias inspection remain lifecycle preflight work immediately
+before lock-resource construction.
 
 If a changed document becomes empty, it is still included in an incremental
 store's replacement deletes so old records cannot survive.
@@ -310,7 +315,10 @@ described above.
 Normalized Qdrant failures never expose the raw configured URL, raw client
 message, or unsafe exception cause/context. They retain the operation,
 collection, exception class, stable reason code, reachability classification,
-and actionable proxy/network hints.
+and actionable proxy/network hints. Safe diagnostics created by explicit
+internal collection validation, such as exact vector-dimension mismatches,
+bypass raw-client normalization unchanged; externally supplied errors never
+gain that trust solely from their public exception type.
 
 ### Domain layer (`core/`)
 
