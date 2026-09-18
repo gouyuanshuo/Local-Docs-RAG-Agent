@@ -5,6 +5,7 @@ __pycache__/
 backend/src/*.egg-info/
 
 # Tooling caches and coverage output
+.worktrees/
 .ruff_cache/
 .mypy_cache/
 .pytest_cache/
