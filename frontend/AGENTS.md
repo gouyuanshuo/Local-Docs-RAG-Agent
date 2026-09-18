@@ -8,7 +8,9 @@ citations and diagnostics. No retrieval policy in the browser.
 - `src/App.tsx` — layout composition
 - `src/hooks/useRagWorkspace.ts` — all client state
 - `src/lib/api.ts` — `fetch` to `/api/*` (`VITE_API_BASE_URL`)
-- `src/types/api.ts` — hand-synced wire types
+- `src/types/api.ts` — hand-synced wire types, including comparison axes,
+  dataset/configuration identities, nullable Qdrant run metadata, retrieval
+  snapshots, and complete eval summaries/results
 - Panels under `src/components/`
 
 ## Invariants
