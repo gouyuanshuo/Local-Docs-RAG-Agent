@@ -60,6 +60,12 @@ class _AcquiredResource:
     file_lock_acquired: bool = False
 
 
+@dataclasses.dataclass(eq=False, slots=True)
+class _MutexObligation:
+    lock: Any
+    phase: str = "acquiring"
+
+
 _LOCK_STATES: dict[str, _LockState] = {}
 _ACTIVE_FILE_LOCKS: dict[int, portalocker.Lock] = {}
 
@@ -302,17 +308,20 @@ def _restore_thread_depth(frame: _AcquiredResource) -> None:
 
 
 def _release_file_lock(frame: _AcquiredResource) -> None:
+    if not _thread_depth_restored(frame):
+        return
     file_lock = frame.file_lock
     if file_lock is None:
         return
-    registered = id(file_lock) in _ACTIVE_FILE_LOCKS
+    with _active_locks_section():
+        registered = id(file_lock) in _ACTIVE_FILE_LOCKS
     if not frame.file_lock_acquired and not registered:
         return
     try:
         with _active_locks_section():
             file_lock.release()
-            frame.file_lock_acquired = False
             _ACTIVE_FILE_LOCKS.pop(id(file_lock), None)
+            frame.file_lock_acquired = False
     except (OSError, portalocker.exceptions.LockException) as exc:
         _force_release_file_lock(frame)
         raise _lock_io_error() from exc
@@ -326,21 +335,31 @@ def _force_release_file_lock(frame: _AcquiredResource) -> None:
     if file_lock is None:
         return
     with contextlib.suppress(BaseException), _active_locks_section():
+        released = False
         try:
             file_lock.release()
         except BaseException:
             file_handle = getattr(file_lock, "fh", None)
-            if file_handle is not None:
-                with contextlib.suppress(BaseException):
+            if file_handle is None:
+                released = True
+            else:
+                try:
                     file_handle.close()
-                with contextlib.suppress(BaseException):
-                    file_lock.fh = None
-        frame.file_lock_acquired = False
-        _ACTIVE_FILE_LOCKS.pop(id(file_lock), None)
+                except BaseException:
+                    pass
+                else:
+                    released = True
+                    with contextlib.suppress(BaseException):
+                        file_lock.fh = None
+        else:
+            released = True
+        if released:
+            _ACTIVE_FILE_LOCKS.pop(id(file_lock), None)
+            frame.file_lock_acquired = False
 
 
 def _release_thread_lock(frame: _AcquiredResource) -> None:
-    if not frame.thread_lock_acquired:
+    if not _thread_depth_restored(frame) or not frame.thread_lock_acquired:
         return
     assert frame.state is not None
     try:
@@ -386,6 +405,12 @@ def _retain_lock_state(frame: _AcquiredResource) -> None:
 
 
 def _release_lock_state(frame: _AcquiredResource) -> None:
+    if (
+        not _thread_depth_restored(frame)
+        or frame.thread_lock_acquired
+        or frame.file_lock_acquired
+    ):
+        return
     key = frame.resource.key
     state = frame.state
     if state is None:
@@ -412,21 +437,111 @@ def _active_locks_section() -> Iterator[None]:
 
 @contextlib.contextmanager
 def _mutex_section(lock: Any) -> Iterator[None]:
-    try:
-        with lock:
+    key = id(lock)
+    depths = _mutex_depths()
+    depth_before = depths.get(key, 0)
+    if depth_before:
+        depths[key] = depth_before + 1
+        try:
             yield
-    except BaseException:
-        with contextlib.suppress(BaseException):
-            _retry_ambiguous_lock_release(lock)
-        raise
+        finally:
+            _restore_mutex_depth(key, depth_before)
+        return
 
-
-def _retry_ambiguous_lock_release(lock: Any) -> None:
+    _drain_mutex_obligations(lock)
+    obligation = _MutexObligation(lock=lock)
+    body_error: BaseException | None = None
     try:
-        lock.release()
-    except RuntimeError as exc:
-        if not _already_released_error(exc):
+        _mutex_obligations().append(obligation)
+        body_error = None
+        try:
+            if not lock.acquire():
+                raise RuntimeError("internal lifecycle mutex was not acquired")
+            obligation.phase = "active"
+        except BaseException:
+            obligation.phase = "cleanup"
             raise
+        depths[key] = 1
+        body_error = None
+        try:
+            yield
+        except BaseException as exc:
+            body_error = exc
+            raise
+    finally:
+        active_error = sys.exception()
+        _restore_mutex_depth(key, depth_before)
+        obligation.phase = "cleanup"
+        try:
+            _release_mutex_obligation(obligation)
+        except BaseException:
+            if active_error is None and body_error is None:
+                raise
+
+
+def _release_mutex_obligation(obligation: _MutexObligation) -> None:
+    if not _mutex_obligation_pending(obligation):
+        return
+    first_error: BaseException | None = None
+    for _ in range(2):
+        try:
+            obligation.lock.release()
+        except RuntimeError as exc:
+            if _already_released_error(exc):
+                _resolve_mutex_obligation(obligation)
+                break
+            if first_error is None:
+                first_error = exc
+        except BaseException as exc:
+            if first_error is None:
+                first_error = exc
+        else:
+            _resolve_mutex_obligation(obligation)
+            break
+    if first_error is not None:
+        raise first_error
+
+
+def _drain_mutex_obligations(lock: Any) -> None:
+    for obligation in tuple(_mutex_obligations()):
+        if obligation.lock is lock and obligation.phase == "cleanup":
+            _release_mutex_obligation(obligation)
+
+
+def _resolve_mutex_obligation(obligation: _MutexObligation) -> None:
+    obligations = _mutex_obligations()
+    for index, pending in enumerate(obligations):
+        if pending is obligation:
+            obligations.pop(index)
+            return
+
+
+def _mutex_obligation_pending(obligation: _MutexObligation) -> bool:
+    return any(pending is obligation for pending in _mutex_obligations())
+
+
+def _mutex_obligations() -> list[_MutexObligation]:
+    obligations = getattr(_THREAD_STATE, "mutex_obligations", None)
+    if obligations is None:
+        obligations = []
+        _THREAD_STATE.mutex_obligations = obligations
+    return obligations
+
+
+def _mutex_depths() -> dict[int, int]:
+    depths = getattr(_THREAD_STATE, "mutex_depths", None)
+    if depths is None:
+        depths = {}
+        _THREAD_STATE.mutex_depths = depths
+    return depths
+
+
+def _restore_mutex_depth(key: int, depth_before: int) -> None:
+    depths = _mutex_depths()
+    if depth_before:
+        depths[key] = depth_before
+    else:
+        depths.pop(key, None)
 
 
 def _validate_nested_order(resources: tuple[_LockResource, ...]) -> None:
@@ -461,6 +576,13 @@ def _thread_depths() -> dict[str, int]:
         depths = {}
         _THREAD_STATE.depths = depths
     return depths
+
+
+def _thread_depth_restored(frame: _AcquiredResource) -> bool:
+    depth_before = frame.thread_depth_before
+    if depth_before is None:
+        return True
+    return _thread_depths().get(frame.resource.key, 0) <= depth_before
 
 
 def _timeout_error() -> exceptions.ConfigurationError:

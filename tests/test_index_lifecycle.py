@@ -301,6 +301,15 @@ def _enter_guard_from_thread(
         errors.append(exc)
 
 
+def _acquire_mutex_from_thread(
+    mutex: Any,
+    acquired: threading.Event,
+) -> None:
+    if mutex.acquire(timeout=0.2):
+        acquired.set()
+        mutex.release()
+
+
 def test_index_guard_is_public_reentrant_and_excludes_second_thread(
     tmp_path: pathlib.Path,
 ) -> None:
@@ -1029,6 +1038,94 @@ def test_depth_release_interruption_restores_exact_state(
     assert errors == []
 
 
+def test_unresolved_depth_restore_retains_physical_ownership_until_retry(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _local_config(tmp_path)
+    shared_root = tmp_path / "shared"
+    shared_root.mkdir()
+    shared = _local_config(shared_root).with_overrides(
+        index_path=config.index_path
+    )
+    index_lock = importlib.import_module("local_docs_rag_agent.rag.index_lock")
+    resources, _ = index_lock._lock_resources(config)
+    target = next(
+        resource
+        for resource in resources
+        if "local-store" in resource.path.name
+    )
+    restore_error = KeyboardInterrupt("logical depth restore interrupted")
+    body_error = SystemExit("active lifecycle interruption")
+
+    class _InterruptingDepths(dict[str, int]):
+        armed = True
+
+        def pop(self, key: str, *args: Any) -> int:
+            if key == target.key and self.armed:
+                self.armed = False
+                raise restore_error
+            return super().pop(key, *args)
+
+    original_release = index_lock._release_resource
+    first_cleanup_paused = threading.Event()
+    allow_outer_retry = threading.Event()
+    paused = False
+
+    def pause_after_unresolved_release(frame: Any) -> None:
+        nonlocal paused
+        try:
+            original_release(frame)
+        finally:
+            if frame.resource.key == target.key and not paused:
+                paused = True
+                first_cleanup_paused.set()
+                allow_outer_retry.wait(timeout=5.0)
+
+    monkeypatch.setattr(
+        index_lock,
+        "_release_resource",
+        pause_after_unresolved_release,
+    )
+    escaped: list[BaseException] = []
+
+    def interrupt_guard_body() -> None:
+        try:
+            with rag.index_guard(config):
+                current = dict(index_lock._thread_depths())
+                index_lock._THREAD_STATE.depths = _InterruptingDepths(current)
+                raise body_error
+        except BaseException as exc:
+            escaped.append(exc)
+
+    owner = threading.Thread(target=interrupt_guard_body)
+    owner.start()
+    contender_entered = threading.Event()
+    contender_errors: list[BaseException] = []
+    contender = threading.Thread(
+        target=_enter_guard_from_thread,
+        args=(shared, contender_entered, contender_errors),
+    )
+    try:
+        assert first_cleanup_paused.wait(timeout=2.0) is True
+        state = index_lock._LOCK_STATES[target.key]
+        assert state.retainers
+        contender.start()
+        assert contender_entered.wait(timeout=0.3) is False
+    finally:
+        allow_outer_retry.set()
+        owner.join(timeout=5.0)
+        if contender.ident is not None:
+            contender.join(timeout=5.0)
+
+    assert not owner.is_alive()
+    assert not contender.is_alive()
+    assert escaped == [body_error]
+    assert contender_entered.is_set()
+    assert contender_errors == []
+    assert index_lock._LOCK_STATES == {}
+
+
 @pytest.mark.parametrize("phase", ["before_release", "after_release"])
 def test_file_release_interruption_frees_os_lock(
     tmp_path: pathlib.Path,
@@ -1087,6 +1184,59 @@ def test_file_release_interruption_frees_os_lock(
     contender.join(timeout=5.0)
     assert contender.exitcode == 0
     assert results.get(timeout=1.0) == "acquired"
+
+
+def test_unresolved_file_close_retains_state_until_retry(
+    tmp_path: pathlib.Path,
+) -> None:
+    config = _local_config(tmp_path)
+    index_lock = importlib.import_module("local_docs_rag_agent.rag.index_lock")
+    resource = index_lock._lock_resources(config)[0][0]
+    primary = RuntimeError("file release failed before unlock")
+    fallback = KeyboardInterrupt("file close fallback interrupted")
+
+    class _InterruptingHandle:
+        close_calls = 0
+
+        def close(self) -> None:
+            self.close_calls += 1
+            if self.close_calls == 1:
+                raise fallback
+
+    class _InterruptedFileLock:
+        def __init__(self) -> None:
+            self.fh: Any = _InterruptingHandle()
+            self.release_calls = 0
+
+        def release(self) -> None:
+            self.release_calls += 1
+            if self.release_calls <= 2:
+                raise primary
+            self.fh = None
+
+    file_lock = _InterruptedFileLock()
+    frame = index_lock._AcquiredResource(resource=resource)
+    state = index_lock._LockState()
+    frame.state = state
+    frame.file_lock = file_lock
+    frame.file_lock_acquired = True
+    state.retainers.add(frame.retention_token)
+    index_lock._LOCK_STATES[resource.key] = state
+    index_lock._ACTIVE_FILE_LOCKS[id(file_lock)] = file_lock
+
+    with pytest.raises(RuntimeError) as exc_info:
+        index_lock._release_resource(frame)
+
+    assert exc_info.value is primary
+    assert frame.file_lock_acquired is True
+    assert index_lock._LOCK_STATES.get(resource.key) is state
+    assert frame.retention_token in state.retainers
+
+    index_lock._release_resource(frame)
+
+    assert frame.file_lock_acquired is False
+    assert resource.key not in index_lock._LOCK_STATES
+    assert id(file_lock) not in index_lock._ACTIVE_FILE_LOCKS
 
 
 @pytest.mark.parametrize("phase", ["before_release", "after_release"])
@@ -1154,6 +1304,103 @@ def test_thread_release_interruption_cleans_state_and_unlocks(
     assert errors == []
 
 
+def test_unresolved_thread_release_retains_state_until_outer_retry(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _local_config(tmp_path)
+    shared_root = tmp_path / "shared"
+    shared_root.mkdir()
+    shared = _local_config(shared_root).with_overrides(
+        index_path=config.index_path
+    )
+    index_lock = importlib.import_module("local_docs_rag_agent.rag.index_lock")
+    resources, _ = index_lock._lock_resources(config)
+    target = next(
+        resource
+        for resource in resources
+        if "local-store" in resource.path.name
+    )
+    primary = RuntimeError("thread release failed before unlock")
+    fallback = KeyboardInterrupt("thread release fallback interrupted")
+    body_error = SystemExit("active lifecycle interruption")
+
+    class _TwiceInterruptedThreadLock:
+        def __init__(self) -> None:
+            self.inner = threading.RLock()
+            self.release_calls = 0
+
+        def acquire(self, *, timeout: float) -> bool:
+            return self.inner.acquire(timeout=timeout)
+
+        def release(self) -> None:
+            self.release_calls += 1
+            if self.release_calls == 1:
+                raise primary
+            if self.release_calls == 2:
+                raise fallback
+            self.inner.release()
+
+    lock = _TwiceInterruptedThreadLock()
+    state = index_lock._LockState(thread_lock=lock)
+    index_lock._LOCK_STATES[target.key] = state
+    original_release = index_lock._release_resource
+    first_cleanup_paused = threading.Event()
+    allow_outer_retry = threading.Event()
+    paused = False
+
+    def pause_after_unresolved_release(frame: Any) -> None:
+        nonlocal paused
+        try:
+            original_release(frame)
+        finally:
+            if frame.resource.key == target.key and not paused:
+                paused = True
+                first_cleanup_paused.set()
+                allow_outer_retry.wait(timeout=5.0)
+
+    monkeypatch.setattr(
+        index_lock,
+        "_release_resource",
+        pause_after_unresolved_release,
+    )
+    escaped: list[BaseException] = []
+
+    def interrupt_guard_body() -> None:
+        try:
+            with rag.index_guard(config):
+                raise body_error
+        except BaseException as exc:
+            escaped.append(exc)
+
+    owner = threading.Thread(target=interrupt_guard_body)
+    owner.start()
+    contender_entered = threading.Event()
+    contender_errors: list[BaseException] = []
+    contender = threading.Thread(
+        target=_enter_guard_from_thread,
+        args=(shared, contender_entered, contender_errors),
+    )
+    try:
+        assert first_cleanup_paused.wait(timeout=2.0) is True
+        assert index_lock._LOCK_STATES.get(target.key) is state
+        assert state.retainers
+        contender.start()
+        assert contender_entered.wait(timeout=0.3) is False
+    finally:
+        allow_outer_retry.set()
+        owner.join(timeout=5.0)
+        if contender.ident is not None:
+            contender.join(timeout=5.0)
+
+    assert not owner.is_alive()
+    assert not contender.is_alive()
+    assert escaped == [body_error]
+    assert contender_entered.is_set()
+    assert contender_errors == []
+    assert index_lock._LOCK_STATES == {}
+
+
 @pytest.mark.parametrize("phase", ["before_release", "after_release"])
 def test_registry_release_interruption_is_retried(
     tmp_path: pathlib.Path,
@@ -1214,7 +1461,223 @@ def test_registry_release_interruption_is_retried(
     assert index_lock._LOCK_STATES == {}
 
 
-@pytest.mark.parametrize("phase", ["before_retain", "after_retain"])
+@pytest.mark.parametrize(
+    ("mutex_name", "section_name"),
+    [
+        ("_REGISTRY_GUARD", "_registry_section"),
+        ("_ACTIVE_LOCKS_GUARD", "_active_locks_section"),
+    ],
+)
+def test_internal_mutex_body_interruption_preserves_outer_recursion(
+    mutex_name: str,
+    section_name: str,
+) -> None:
+    index_lock = importlib.import_module("local_docs_rag_agent.rag.index_lock")
+    mutex = getattr(index_lock, mutex_name)
+    section = getattr(index_lock, section_name)
+    interruption = KeyboardInterrupt(f"{mutex_name} protected body")
+    contender_acquired = threading.Event()
+    outer_release_error: BaseException | None = None
+
+    mutex.acquire()
+    try:
+        with pytest.raises(KeyboardInterrupt) as exc_info, section():
+            raise interruption
+        assert exc_info.value is interruption
+        contender = threading.Thread(
+            target=_acquire_mutex_from_thread,
+            args=(mutex, contender_acquired),
+        )
+        contender.start()
+        assert contender_acquired.wait(timeout=0.3) is False
+        contender.join(timeout=5.0)
+        assert not contender.is_alive()
+    finally:
+        try:
+            mutex.release()
+        except BaseException as exc:
+            outer_release_error = exc
+
+    assert outer_release_error is None
+    after_release = threading.Thread(
+        target=_acquire_mutex_from_thread,
+        args=(mutex, contender_acquired),
+    )
+    contender_acquired.clear()
+    after_release.start()
+    assert contender_acquired.wait(timeout=2.0) is True
+    after_release.join(timeout=5.0)
+    assert not after_release.is_alive()
+
+
+@pytest.mark.parametrize(
+    ("mutex_name", "section_name"),
+    [
+        ("_REGISTRY_GUARD", "_registry_section"),
+        ("_ACTIVE_LOCKS_GUARD", "_active_locks_section"),
+    ],
+)
+def test_internal_mutex_pending_release_is_drained_before_reentry(
+    monkeypatch: pytest.MonkeyPatch,
+    mutex_name: str,
+    section_name: str,
+) -> None:
+    index_lock = importlib.import_module("local_docs_rag_agent.rag.index_lock")
+    inner = getattr(index_lock, mutex_name)
+    section = getattr(index_lock, section_name)
+    primary = RuntimeError(f"{mutex_name} primary release failure")
+    fallback = KeyboardInterrupt(f"{mutex_name} fallback interruption")
+
+    class _TwiceInterruptedMutex:
+        release_calls = 0
+
+        def acquire(self, *args: Any, **kwargs: Any) -> Any:
+            return inner.acquire(*args, **kwargs)
+
+        def release(self) -> None:
+            self.release_calls += 1
+            if self.release_calls == 1:
+                raise primary
+            if self.release_calls == 2:
+                raise fallback
+            inner.release()
+
+        def __enter__(self) -> _TwiceInterruptedMutex:
+            self.acquire()
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            del args
+            self.release()
+
+    interrupted = _TwiceInterruptedMutex()
+    monkeypatch.setattr(index_lock, mutex_name, interrupted)
+
+    with pytest.raises(RuntimeError) as exc_info, section():
+        pass
+    assert exc_info.value is primary
+
+    with section():
+        pass
+
+    contender_acquired = threading.Event()
+    contender = threading.Thread(
+        target=_acquire_mutex_from_thread,
+        args=(inner, contender_acquired),
+    )
+    contender.start()
+    assert contender_acquired.wait(timeout=2.0) is True
+    contender.join(timeout=5.0)
+    assert not contender.is_alive()
+
+
+@pytest.mark.parametrize("marker", ["depths[key] = 1", "body_error = None"])
+def test_internal_mutex_pre_yield_interruption_releases_acquisition(
+    marker: str,
+) -> None:
+    index_lock = importlib.import_module("local_docs_rag_agent.rag.index_lock")
+    mutex = threading.RLock()
+    source_lines, first_line = inspect.getsourcelines(index_lock._mutex_section)
+    depth_offset = next(
+        offset
+        for offset, source_line in enumerate(source_lines)
+        if "depths[key] = 1" in source_line
+    )
+    target_line = next(
+        first_line + offset
+        for offset, source_line in enumerate(source_lines)
+        if marker in source_line
+        and (marker != "body_error = None" or offset > depth_offset)
+    )
+    interruption = KeyboardInterrupt(f"pre-yield interruption at {marker}")
+
+    def interrupt_pre_yield(frame: Any, event: str, arg: Any) -> Any:
+        del arg
+        if (
+            frame.f_code is index_lock._mutex_section.__wrapped__.__code__
+            and event == "line"
+            and frame.f_lineno == target_line
+        ):
+            sys.settrace(None)
+            raise interruption
+        return interrupt_pre_yield
+
+    sys.settrace(interrupt_pre_yield)
+    try:
+        with (
+            pytest.raises(KeyboardInterrupt) as exc_info,
+            index_lock._mutex_section(mutex),
+        ):
+            pytest.fail("interrupted mutex section unexpectedly entered")
+    finally:
+        sys.settrace(None)
+
+    assert exc_info.value is interruption
+    contender_acquired = threading.Event()
+    contender = threading.Thread(
+        target=_acquire_mutex_from_thread,
+        args=(mutex, contender_acquired),
+    )
+    contender.start()
+    try:
+        assert contender_acquired.wait(timeout=2.0) is True
+        contender.join(timeout=5.0)
+        assert not contender.is_alive()
+        assert index_lock._mutex_depths() == {}
+        assert index_lock._mutex_obligations() == []
+    finally:
+        with contextlib.suppress(RuntimeError):
+            mutex.release()
+
+
+def test_internal_mutex_obligation_publication_is_transactional() -> None:
+    index_lock = importlib.import_module("local_docs_rag_agent.rag.index_lock")
+    mutex = threading.RLock()
+    source_lines, first_line = inspect.getsourcelines(index_lock._mutex_section)
+    append_offset = next(
+        offset
+        for offset, source_line in enumerate(source_lines)
+        if "append(obligation)" in source_line
+    )
+    target_line = next(
+        first_line + offset
+        for offset, source_line in enumerate(source_lines)
+        if offset > append_offset and "body_error" in source_line
+    )
+    interruption = KeyboardInterrupt("post-obligation publication interruption")
+
+    def interrupt_publication(frame: Any, event: str, arg: Any) -> Any:
+        del arg
+        if (
+            frame.f_code is index_lock._mutex_section.__wrapped__.__code__
+            and event == "line"
+            and frame.f_lineno == target_line
+        ):
+            sys.settrace(None)
+            raise interruption
+        return interrupt_publication
+
+    sys.settrace(interrupt_publication)
+    try:
+        with (
+            pytest.raises(KeyboardInterrupt) as exc_info,
+            index_lock._mutex_section(mutex),
+        ):
+            pytest.fail("interrupted mutex section unexpectedly entered")
+    finally:
+        sys.settrace(None)
+
+    assert exc_info.value is interruption
+    assert index_lock._mutex_depths() == {}
+    assert index_lock._mutex_obligations() == []
+    with index_lock._mutex_section(mutex):
+        pass
+
+
+@pytest.mark.parametrize(
+    "phase",
+    ["before_state", "after_state", "after_token", "after_registry"],
+)
 def test_retention_interruption_is_transactional(
     tmp_path: pathlib.Path,
     phase: str,
@@ -1225,8 +1688,10 @@ def test_retention_interruption_is_transactional(
         index_lock._retain_lock_state
     )
     markers = {
-        "before_retain": ("state.users += 1", "state.retainers.add"),
-        "after_retain": ("return state", "return"),
+        "before_state": ("frame.state = state",),
+        "after_state": ("state.retainers.add",),
+        "after_token": ("_LOCK_STATES[key] = state",),
+        "after_registry": ("return",),
     }
     target_line = next(
         first_line + offset
@@ -1247,6 +1712,59 @@ def test_retention_interruption_is_transactional(
         return interrupt_retain
 
     sys.settrace(interrupt_retain)
+    try:
+        with (
+            pytest.raises(KeyboardInterrupt) as exc_info,
+            rag.index_guard(config),
+        ):
+            pytest.fail("interrupted guard unexpectedly entered")
+    finally:
+        sys.settrace(None)
+
+    assert exc_info.value is interruption
+    assert index_lock._LOCK_STATES == {}
+    assert index_lock._ACTIVE_FILE_LOCKS == {}
+    with rag.index_guard(config):
+        pass
+
+
+@pytest.mark.parametrize("phase", ["before_frame", "after_frame"])
+def test_frame_publication_interruption_is_transactional(
+    tmp_path: pathlib.Path,
+    phase: str,
+) -> None:
+    config = _local_config(tmp_path)
+    index_lock = importlib.import_module("local_docs_rag_agent.rag.index_lock")
+    guard_body = index_lock.index_guard.__wrapped__
+    source_lines, first_line = inspect.getsourcelines(guard_body)
+    append_offset = next(
+        offset
+        for offset, source_line in enumerate(source_lines)
+        if "acquired.append(frame)" in source_line
+    )
+    target_offset = append_offset
+    if phase == "after_frame":
+        target_offset = next(
+            offset
+            for offset, source_line in enumerate(source_lines)
+            if offset > append_offset
+            and "_retain_lock_state(frame)" in source_line
+        )
+    target_line = first_line + target_offset
+    interruption = KeyboardInterrupt(f"{phase} cleanup frame publication")
+
+    def interrupt_frame(frame: Any, event: str, arg: Any) -> Any:
+        del arg
+        if (
+            frame.f_code is guard_body.__code__
+            and event == "line"
+            and frame.f_lineno == target_line
+        ):
+            sys.settrace(None)
+            raise interruption
+        return interrupt_frame
+
+    sys.settrace(interrupt_frame)
     try:
         with (
             pytest.raises(KeyboardInterrupt) as exc_info,
@@ -1351,6 +1869,80 @@ def test_monotonic_disjoint_nested_guards_remain_allowed(
 
     with rag.index_guard(outer), rag.index_guard(inner):
         assert set(index_lock._thread_depths()) == {"a", "b", "c", "d"}
+
+    assert index_lock._LOCK_STATES == {}
+    assert index_lock._ACTIVE_FILE_LOCKS == {}
+
+
+def test_nested_subset_of_held_resources_remains_allowed(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    outer = _local_config(tmp_path)
+    inner_root = tmp_path / "inner"
+    inner_root.mkdir()
+    inner = _local_config(inner_root)
+    index_lock = importlib.import_module("local_docs_rag_agent.rag.index_lock")
+    outer_resources = (
+        index_lock._LockResource("a", tmp_path / "a.lock"),
+        index_lock._LockResource("b", tmp_path / "b.lock"),
+    )
+    inner_resources = (outer_resources[1],)
+
+    def resources_for(
+        config: app_config.AppConfig,
+    ) -> tuple[tuple[Any, ...], pathlib.Path]:
+        if config is outer:
+            return outer_resources, config.ingest_manifest_path
+        assert config is inner
+        return inner_resources, config.ingest_manifest_path
+
+    monkeypatch.setattr(index_lock, "_lock_resources", resources_for)
+
+    with rag.index_guard(outer), rag.index_guard(inner):
+        assert index_lock._thread_depths() == {"a": 1, "b": 2}
+
+    assert index_lock._LOCK_STATES == {}
+    assert index_lock._ACTIVE_FILE_LOCKS == {}
+
+
+def test_reverse_order_disjoint_nested_guard_fails_before_retention(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    outer = _local_config(tmp_path)
+    inner_root = tmp_path / "inner"
+    inner_root.mkdir()
+    inner = _local_config(inner_root)
+    index_lock = importlib.import_module("local_docs_rag_agent.rag.index_lock")
+    outer_resources = (
+        index_lock._LockResource("c", tmp_path / "c.lock"),
+        index_lock._LockResource("d", tmp_path / "d.lock"),
+    )
+    inner_resources = (
+        index_lock._LockResource("a", tmp_path / "a.lock"),
+        index_lock._LockResource("b", tmp_path / "b.lock"),
+    )
+
+    def resources_for(
+        config: app_config.AppConfig,
+    ) -> tuple[tuple[Any, ...], pathlib.Path]:
+        if config is outer:
+            return outer_resources, config.ingest_manifest_path
+        assert config is inner
+        return inner_resources, config.ingest_manifest_path
+
+    monkeypatch.setattr(index_lock, "_lock_resources", resources_for)
+
+    with rag.index_guard(outer):
+        retained = dict(index_lock._LOCK_STATES)
+        with (
+            pytest.raises(exceptions.ConfigurationError) as exc_info,
+            rag.index_guard(inner),
+        ):
+            pytest.fail("reverse-order nested guard unexpectedly entered")
+        assert "unsafe nested" in str(exc_info.value).lower()
+        assert retained == index_lock._LOCK_STATES
 
     assert index_lock._LOCK_STATES == {}
     assert index_lock._ACTIVE_FILE_LOCKS == {}

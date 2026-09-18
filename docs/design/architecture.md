@@ -196,7 +196,15 @@ interruption before that nested depth publication therefore leaves the outer
 guard's physical ownership untouched. Release restores each frame's exact
 prior logical depth and retries ambiguous physical cleanup while preserving the
 original exception. Unique retention tokens make registry cleanup idempotent,
-so a retry cannot release another frame's ownership.
+so a retry cannot release another frame's ownership. A frame keeps its
+physical locks and token until logical depth reaches the exact prior value,
+then keeps the token while either physical cleanup obligation remains
+unresolved. The short internal registry mutex sections separately track
+acquisition, protected body, and release phases. A protected-body exception
+receives one normal release only; an ambiguous release keeps its exact
+acquisition obligation for the surrounding cleanup retry, before any new
+recursion may be acquired. The cleanup scope starts before mutex acquisition
+and covers depth publication through the first protected-body yield.
 
 Reentry of the same resource set is supported. A nested guard that partially
 overlaps the current thread's resources is rejected before retaining anything,

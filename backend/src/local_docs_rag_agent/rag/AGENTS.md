@@ -59,6 +59,11 @@ index_lock -> config, core (and lazy storage identity lookup)
 - Logical depth, thread locks, file locks, and registry retention are restored
   idempotently after release interruptions. Per-frame retention tokens prevent
   a cleanup retry from decrementing another guard's ownership.
+- A resource frame retains physical locks and its token until exact logical
+  depth restoration, then retains the token until file- and thread-lock
+  cleanup obligations are conclusively discharged. Internal registry mutexes
+  likewise retain per-acquisition cleanup obligations across a failed
+  fallback; a protected-body exception never triggers an extra mutex release.
 - Nested guards may reenter the same resource set. Partial overlap is rejected
   before retention, and disjoint nested sets must preserve global resource
   order; callers should normally exit one configuration's guard before
