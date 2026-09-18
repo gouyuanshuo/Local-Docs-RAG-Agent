@@ -330,19 +330,19 @@ def cell_degradation_reason(
 ) -> str | None:
     """Return why a finished cell must not enter the leaderboard.
 
-    Chat, embedding, and reranker fallback, and a runtime that did not
-    actually serve the requested name, are visible data on Ask. A disabled
-    reranker reports `ready`, which is valid because that stage did not run;
-    missing diagnostics are not equivalent evidence of a live run. Ranking
-    either fallback or unmeasured cells as `ok` would misstate the result.
+    Chat and embedding must provide live execution evidence, and a selected
+    reranker must do the same. A disabled reranker alone may report `ready`
+    with `reranker_disabled`; missing or unknown diagnostics are not evidence
+    of a live run. Ranking fallback or unmeasured cells as `ok` would misstate
+    the result.
 
     Args:
       results: Per-case eval outcomes, including diagnostics.
 
     Returns:
-      A stable comma-separated reason, or None when every case supplied
-      live diagnostics for the requested runtime. A disabled reranker may
-      report `ready` because it was not selected.
+      A stable comma-separated reason, or None when every case supplied live
+      diagnostics for the requested runtime. A disabled reranker may instead
+      report `ready` with `reranker_disabled`.
     """
     if not results:
         return "no_eval_cases"
@@ -355,13 +355,26 @@ def cell_degradation_reason(
             reasons.append("runtime_fallback")
         if diagnostics.chat_provider.mode == "fallback":
             reasons.append("chat_fallback")
+        elif diagnostics.chat_provider.mode != "live":
+            reasons.append("chat_not_live")
         if diagnostics.embedding_provider.mode == "fallback":
             reasons.append("embedding_fallback")
+        elif diagnostics.embedding_provider.mode != "live":
+            reasons.append("embedding_not_live")
         if diagnostics.reranker.mode == "fallback":
             reasons.append("reranker_fallback")
+        elif not _reranker_is_live_or_disabled(diagnostics.reranker):
+            reasons.append("reranker_not_live")
     if not reasons:
         return None
     return ",".join(dict.fromkeys(reasons))
+
+
+def _reranker_is_live_or_disabled(status: models.ProviderStatus) -> bool:
+    """Return whether reranking was live or intentionally not selected."""
+    return status.mode == "live" or (
+        status.mode == "ready" and status.reason == "reranker_disabled"
+    )
 
 
 def run_label(config: app_config.AppConfig) -> str:

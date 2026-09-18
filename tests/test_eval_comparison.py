@@ -383,7 +383,44 @@ def test_runtime_mismatch_is_degraded_not_ok(
     assert comparison._build_leaderboard([run]) == []
 
 
-def test_live_cell_stays_ok(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unknown_search_diagnostics_are_degraded_and_not_ranked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(rag, "ingest_documents", lambda config: [])
+    no_search = _eval_result(
+        models.AnswerDiagnostics(
+            requested_runtime="agents_sdk",
+            actual_runtime="agents_sdk",
+            vector_backend="local",
+            chat_provider=models.ProviderStatus(provider="chat", mode="live"),
+            embedding_provider=models.ProviderStatus(
+                provider="embedding",
+                mode="unknown",
+                reason="search_not_run",
+            ),
+            reranker=models.ProviderStatus(
+                provider="reranker",
+                mode="unknown",
+                reason="search_not_run",
+            ),
+        )
+    )
+    monkeypatch.setattr(harness, "run_eval", lambda config: [no_search])
+
+    run = comparison._run_matrix_case(
+        app_config.AppConfig.from_env().with_overrides(
+            agent_runtime="agents_sdk"
+        )
+    )
+
+    assert run["status"] == "degraded"
+    assert run["reason"] == "embedding_not_live,reranker_not_live"
+    assert comparison._build_leaderboard([run]) == []
+
+
+def test_live_cell_with_disabled_reranker_stays_ok(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(rag, "ingest_documents", lambda config: [])
     live = _eval_result(_live_diagnostics())
     monkeypatch.setattr(harness, "run_eval", lambda config: [live])

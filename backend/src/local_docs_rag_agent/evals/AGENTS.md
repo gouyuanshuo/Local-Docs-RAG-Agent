@@ -29,6 +29,8 @@ Load gold, score one run, sweep a matrix, rank a leaderboard.
 - Empty result lists and results without diagnostics are `degraded`, never
   leaderboard evidence. A disabled reranker may report `ready`; that means it
   was not selected, not that reranking ran live.
+- Chat and embedding diagnostics must be `live` to rank. A selected reranker
+  must also be `live`; only `ready` with `reranker_disabled` is rankable.
 - Matrix cap 128; empty axis is an error; Qdrant unreachable is `skipped`.
 - Matrix planning resolves every axis and validates every `AppConfig` variant
   before a cell can ingest. Defaults plan 12 local cells, or 24 with Qdrant.

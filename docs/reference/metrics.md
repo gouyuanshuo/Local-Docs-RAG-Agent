@@ -125,7 +125,8 @@ An empty result list or a result without diagnostics is likewise reported as
 `degraded`, not ranked. Gold itself must contain at least one case; an empty
 gold file is rejected before comparison ingestion begins. A disabled reranker
 may report `ready`, which means the stage was not selected rather than verified
-live execution.
+live execution. Chat and embedding must report `live`, as must a selected
+reranker; otherwise the cell is degraded rather than ranked.
 
 Each row repeats the cell's `label`, `retrieval_reciprocal_rank`,
 `retrieval_precision`, `retrieval_span_hit_rate`, `retrieval_source_hit_rate`,
