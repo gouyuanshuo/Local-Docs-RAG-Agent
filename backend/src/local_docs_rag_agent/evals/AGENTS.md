@@ -34,6 +34,12 @@ Load gold, score one run, sweep a matrix, rank a leaderboard.
 - Matrix cap 128; empty axis is an error; Qdrant unreachable is `skipped`.
 - Matrix planning resolves every axis and validates every `AppConfig` variant
   before a cell can ingest. Defaults plan 12 local cells, or 24 with Qdrant.
+- Every local matrix cell uses a fresh temporary index and manifest. Qdrant
+  cells use an owned UUID-derived collection and temporary manifest; cleanup
+  failures retain the exact disposable collection in `run_metadata`.
+- Raw comparison reports carry a stable corpus/gold `dataset_identity` and
+  per-cell semantic `configuration_identity`; neither includes temporary
+  storage paths, document bodies, keys, or provider URLs.
 - `AXES` drives CLI flags, request schema field names, and labels.
 
 ## May change

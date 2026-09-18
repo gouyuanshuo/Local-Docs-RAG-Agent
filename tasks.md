@@ -118,6 +118,8 @@ Current theme:
 - [x] Serialize RAG index lifecycle operations on one host, publish durable
       repair intent, and add atomic disposable Qdrant initialization with
       fail-closed ownership cleanup
+- [x] Isolate every eval-comparison cell from interactive storage, with stable
+      dataset/configuration identities and exact-name Qdrant orphan metadata
 - [ ] Resolve the upstream Starlette/AnyIO `BlockingPortal` deprecation warning
       or add a narrowly justified filter after the dependency lock is selected
 

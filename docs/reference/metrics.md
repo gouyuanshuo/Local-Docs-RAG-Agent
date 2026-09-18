@@ -98,11 +98,14 @@ fields; the aliases carry the same values:
 
 ## Comparison report
 
-`/api/eval/compare` and `local-docs-rag eval-compare` return:
+`local-docs-rag eval-compare` and the internal comparison function produce a
+raw report. The current `/api/eval/compare` response projects the older public
+shape from that report:
 
 | Field | Value |
 | --- | --- |
 | `num_runs` | number of cells |
+| `dataset_identity` | stable digest of corpus relative paths/content checksums and gold bytes; it excludes document bodies and temporary storage |
 | one list per axis | the values swept: `runtimes`, `vector_backends`, `chunk_strategies`, `retrieval_strategies`, `rerankers`, `top_ks`, `chunk_sizes`, `chunk_overlaps` |
 | `runs` | every cell |
 | `leaderboard` | the cells that may be ranked, best first |
@@ -111,6 +114,16 @@ Each cell has a `label`, a `status`, a `reason` or `error` where one applies, it
 `retrieval_config`, its `runtime`, and a `summary` when it ran. The `label` has
 one segment per axis, in the order the axes are defined, for example
 `basic:local:markdown:blended:rr-none:k4:s800:o120`.
+
+The raw report also gives every cell a `configuration_identity`, a digest of
+the planned retrieval/runtime/provider-model settings. It intentionally omits
+credentials, credential-bearing URLs, document bodies, and isolated storage
+paths. A Qdrant cell records its exact disposable collection in
+`run_metadata.disposable_qdrant_collection`; an unsuccessful cleanup also sets
+`run_metadata.orphan_recovery_required`. The CLI/raw writer preserves these
+provenance fields. The current FastAPI comparison response model does not yet
+expose them, so delivery must extend that schema before API clients rely on
+them.
 
 A cell's `status` is `ok`, `degraded`, `skipped`, or `error`. What each means,
 and the reasons attached to it, are in

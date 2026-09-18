@@ -20,10 +20,14 @@ wrong.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import itertools
 import json
 import math
 import pathlib
+import tempfile
+import typing
+import uuid
 from collections.abc import Callable, Mapping, Sequence
 
 from local_docs_rag_agent import config as app_config
@@ -33,6 +37,13 @@ from local_docs_rag_agent.evals import harness
 
 # Guards API and CLI input from expanding into an unbounded Cartesian workload.
 MAX_MATRIX_RUNS = 128
+
+
+class _IdentityDigest(typing.Protocol):
+    """Minimal hash protocol used for canonical comparison identities."""
+
+    def update(self, data: bytes, /) -> object:
+        """Add bytes to the digest."""
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -268,11 +279,16 @@ def run_eval_matrix(
     """
     plan = plan_eval_matrix(config, requested)
     harness.load_eval_cases(config.eval_path)
+    dataset_identity = _dataset_identity(config)
 
-    runs = [_run_matrix_case(variant) for variant in plan.variants]
+    runs = [
+        _run_matrix_case(variant, dataset_identity=dataset_identity)
+        for variant in plan.variants
+    ]
 
     payload: dict[str, object] = {
         "num_runs": plan.num_runs,
+        "dataset_identity": dataset_identity,
         **plan.axes,
         "leaderboard": _build_leaderboard(runs),
         "runs": runs,
@@ -286,43 +302,301 @@ def _dump_json(payload: dict[str, object]) -> str:
     return json.dumps(payload, ensure_ascii=True, indent=2)
 
 
-def _run_matrix_case(config: app_config.AppConfig) -> dict[str, object]:
+def _run_matrix_case(
+    config: app_config.AppConfig,
+    *,
+    dataset_identity: str | None = None,
+) -> dict[str, object]:
     label = run_label(config)
-    common = {
+    common: dict[str, object] = {
         "label": label,
         "retrieval_config": presenters.serialize_retrieval_config(config),
         "runtime": config.agent_runtime,
+        "configuration_identity": _configuration_identity(config),
     }
+    if dataset_identity is not None:
+        common["dataset_identity"] = dataset_identity
     skip_reason = _skip_reason(config)
     if skip_reason is not None:
         return {**common, "status": "skipped", "reason": skip_reason}
 
+    if config.vector_backend == "qdrant":
+        return _run_qdrant_matrix_case(config, common)
+    return _run_local_matrix_case(config, common)
+
+
+def _run_local_matrix_case(
+    config: app_config.AppConfig,
+    common: dict[str, object],
+) -> dict[str, object]:
+    """Evaluate one local cell in temporary storage.
+
+    Returns:
+      The completed, degraded, skipped, or error cell payload.
+    """
     try:
-        rag.ingest_documents(config)
-        results = harness.run_eval(config)
-        summary = presenters.serialize_eval_summary(
-            results,
-            runtime=config.agent_runtime,
-            config=config,
-        )
-        degraded = cell_degradation_reason(results)
-        if degraded is not None:
-            return {
-                **common,
-                "status": "degraded",
-                "reason": degraded,
-                "summary": summary,
-            }
-        return {"label": label, "status": "ok", "summary": summary}
+        with tempfile.TemporaryDirectory(
+            prefix="local-docs-rag-compare-"
+        ) as storage_dir:
+            storage_path = pathlib.Path(storage_dir)
+            isolated = config.with_overrides(
+                index_path=storage_path / "chunks.jsonl",
+                ingest_manifest_path=storage_path / "ingest_manifest.json",
+            )
+            rag.ingest_documents(isolated)
+            results = harness.run_eval(isolated)
+            return _result_from_eval_results(results, config, common)
     except Exception as exc:
-        skip_reason = _qdrant_runtime_skip_reason(config, exc)
-        if skip_reason is not None:
-            return {**common, "status": "skipped", "reason": skip_reason}
+        return _error_result(common, config, exc)
+
+
+def _run_qdrant_matrix_case(
+    config: app_config.AppConfig,
+    common: dict[str, object],
+) -> dict[str, object]:
+    """Evaluate and clean up one disposable Qdrant comparison cell.
+
+    Returns:
+      The completed, degraded, skipped, or error cell payload.
+    """
+    collection_name = _disposable_qdrant_collection(config.qdrant_collection)
+    metadata: dict[str, object] = {
+        "disposable_qdrant_collection": collection_name,
+    }
+    common = {**common, "run_metadata": metadata}
+    ownership: rag.QdrantIndexOwnership | None = None
+    cell_error: Exception | None = None
+    result: dict[str, object]
+
+    with tempfile.TemporaryDirectory(
+        prefix="local-docs-rag-compare-"
+    ) as storage_dir:
+        isolated = config.with_overrides(
+            qdrant_collection=collection_name,
+            ingest_manifest_path=pathlib.Path(storage_dir)
+            / "ingest_manifest.json",
+        )
+        try:
+            ownership = rag.initialize_owned_qdrant_index(isolated)
+            results = harness.run_eval(isolated)
+            result = _result_from_eval_results(results, config, common)
+        except Exception as exc:
+            cell_error = exc
+            result = _error_result(common, config, exc)
+
+        if ownership is None:
+            if _has_partial_cleanup_failure(cell_error):
+                metadata["orphan_recovery_required"] = True
+                return _initializer_cleanup_error_result(
+                    common,
+                    collection_name,
+                    cell_error,
+                )
+            return result
+        try:
+            rag.delete_owned_qdrant_index(isolated, ownership)
+        except Exception as cleanup_error:
+            metadata["orphan_recovery_required"] = True
+            return _cleanup_error_result(
+                common,
+                collection_name,
+                cell_error,
+                cleanup_error,
+            )
+    return result
+
+
+def _result_from_eval_results(
+    results: list[models.EvalResult],
+    original_config: app_config.AppConfig,
+    common: dict[str, object],
+) -> dict[str, object]:
+    """Return one cell payload using the original semantic configuration."""
+    summary = presenters.serialize_eval_summary(
+        results,
+        runtime=original_config.agent_runtime,
+        config=original_config,
+    )
+    degraded = cell_degradation_reason(results)
+    if degraded is not None:
         return {
             **common,
-            "status": "error",
-            "error": f"{type(exc).__name__}: {exc}",
+            "status": "degraded",
+            "reason": degraded,
+            "summary": summary,
         }
+    return {**common, "status": "ok", "summary": summary}
+
+
+def _error_result(
+    common: dict[str, object],
+    config: app_config.AppConfig,
+    exc: Exception,
+) -> dict[str, object]:
+    """Return the existing skip or error representation for one cell failure."""
+    skip_reason = _qdrant_runtime_skip_reason(config, exc)
+    if skip_reason is not None:
+        return {**common, "status": "skipped", "reason": skip_reason}
+    return {
+        **common,
+        "status": "error",
+        "error": _exception_description(exc),
+    }
+
+
+def _cleanup_error_result(
+    common: dict[str, object],
+    collection_name: str,
+    cell_error: Exception | None,
+    cleanup_error: Exception,
+) -> dict[str, object]:
+    """Return a visible cleanup error without discarding the cell failure."""
+    message = (
+        "Qdrant comparison cleanup failed for disposable collection "
+        f"{collection_name}: {type(cleanup_error).__name__}: {cleanup_error}"
+    )
+    if cell_error is not None:
+        message += (
+            f"; original cell failure: {_exception_description(cell_error)}"
+        )
+    return {**common, "status": "error", "error": message}
+
+
+def _initializer_cleanup_error_result(
+    common: dict[str, object],
+    collection_name: str,
+    cell_error: Exception | None,
+) -> dict[str, object]:
+    """Report a failed initializer cleanup with exact orphan recovery data.
+
+    Returns:
+      An error payload with the exact disposable collection name.
+    """
+    if cell_error is None:
+        raise AssertionError("Initializer cleanup report requires a cell error")
+    return {
+        **common,
+        "status": "error",
+        "error": (
+            "Qdrant comparison initializer reported failed partial cleanup "
+            f"for disposable collection {collection_name}: "
+            f"{_exception_description(cell_error)}"
+        ),
+    }
+
+
+def _has_partial_cleanup_failure(exc: Exception | None) -> bool:
+    """Return whether an initializer reports a failed partial cleanup note."""
+    if exc is None:
+        return False
+    return any(
+        "partial" in note.lower()
+        and "cleanup" in note.lower()
+        and "fail" in note.lower()
+        for note in getattr(exc, "__notes__", ())
+    )
+
+
+def _exception_description(exc: Exception) -> str:
+    """Return an exception message including non-secret diagnostic notes."""
+    message = f"{type(exc).__name__}: {exc}"
+    notes = getattr(exc, "__notes__", ())
+    if notes:
+        message += "; notes: " + " | ".join(notes)
+    return message
+
+
+def _disposable_qdrant_collection(baseline: str) -> str:
+    """Return a bounded UUID collection name distinct from `baseline`."""
+    safe_baseline = "".join(
+        character if character.isalnum() or character in "_-" else "-"
+        for character in baseline
+    ).strip("-_")
+    prefix = safe_baseline[:48] or "local-docs-rag"
+    return f"{prefix}-eval-{uuid.uuid4().hex}"
+
+
+def _dataset_identity(config: app_config.AppConfig) -> str:
+    """Hash corpus and gold checksums without returning their contents.
+
+    Returns:
+      A stable non-secret digest of the evaluation dataset.
+    """
+    digest = hashlib.sha256(b"local-docs-rag-dataset-v1\0")
+    source_texts = rag.read_source_texts(
+        config.docs_dir, config.docs_exclude_patterns
+    )
+    for source_path, text in sorted(source_texts.items()):
+        _update_identity_digest(
+            digest,
+            _canonical_source_path(config.docs_dir, source_path),
+        )
+        _update_identity_digest(
+            digest, hashlib.sha256(text.encode("utf-8")).hexdigest()
+        )
+    _update_identity_digest(
+        digest, hashlib.sha256(config.eval_path.read_bytes()).hexdigest()
+    )
+    return digest.hexdigest()
+
+
+def _canonical_source_path(docs_dir: pathlib.Path, source_path: str) -> str:
+    """Return a corpus-root-relative source identity when possible."""
+    try:
+        return (
+            pathlib.Path(source_path)
+            .resolve()
+            .relative_to(docs_dir.resolve())
+            .as_posix()
+        )
+    except ValueError:
+        return pathlib.Path(source_path).as_posix()
+
+
+def _configuration_identity(config: app_config.AppConfig) -> str:
+    """Hash semantic comparison settings without keys, URLs, or paths.
+
+    Returns:
+      A stable non-secret digest of planned semantic settings.
+    """
+    values = {
+        "agent_runtime": config.agent_runtime,
+        "agents_max_turns": config.agents_max_turns,
+        "vector_backend": config.vector_backend,
+        "chunk_strategy": config.chunk_strategy,
+        "chunk_size": config.chunk_size,
+        "chunk_overlap": config.chunk_overlap,
+        "top_k": config.top_k,
+        "retrieval_strategy": config.retrieval_strategy,
+        "retrieval_candidate_k": config.retrieval_candidate_k,
+        "rrf_k": config.rrf_k,
+        "reranker": config.reranker,
+        "rerank_candidate_k": config.rerank_candidate_k,
+        "rerank_model": config.rerank_model,
+        "llm_provider": config.llm_provider,
+        "llm_model": config.llm_model,
+        "llm_api_style": config.llm_api_style,
+        "embedding_provider": config.embedding_provider,
+        "embedding_model": config.embedding_model,
+        "embedding_dimensions": config.embedding_dimensions,
+        "embedding_batch_size": config.embedding_batch_size,
+        "embedding_max_retries": config.embedding_max_retries,
+        "embedding_retry_backoff_ms": config.embedding_retry_backoff_ms,
+    }
+    encoded = json.dumps(
+        values, ensure_ascii=True, separators=(",", ":"), sort_keys=True
+    ).encode("utf-8")
+    return hashlib.sha256(b"local-docs-rag-config-v1\0" + encoded).hexdigest()
+
+
+def _update_identity_digest(
+    digest: _IdentityDigest,
+    value: str,
+) -> None:
+    """Add one length-delimited canonical string to an identity digest."""
+    encoded = value.encode("utf-8")
+    digest.update(len(encoded).to_bytes(8, "big"))
+    digest.update(encoded)
 
 
 def cell_degradation_reason(

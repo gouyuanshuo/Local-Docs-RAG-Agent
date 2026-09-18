@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 import pathlib
 
 import pytest
@@ -12,6 +13,50 @@ from local_docs_rag_agent.core import constants, exceptions, models
 from local_docs_rag_agent.evals import comparison, harness
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+
+def _write_eval_gold(path: pathlib.Path) -> None:
+    path.write_text(
+        json.dumps({"question": "What is alpha?"}), encoding="utf-8"
+    )
+
+
+def _comparison_config(
+    tmp_path: pathlib.Path,
+    *,
+    vector_backend: constants.VectorBackendName = "local",
+    qdrant_collection: str = "interactive",
+) -> app_config.AppConfig:
+    eval_path = tmp_path / "eval.jsonl"
+    _write_eval_gold(eval_path)
+    return app_config.AppConfig.from_env().with_overrides(
+        docs_dir=REPO_ROOT / "data" / "corpus" / "sample",
+        eval_path=eval_path,
+        index_path=tmp_path / "interactive.jsonl",
+        ingest_manifest_path=tmp_path / "interactive-manifest.json",
+        vector_backend=vector_backend,
+        qdrant_url=(
+            "http://qdrant.invalid:6333" if vector_backend == "qdrant" else None
+        ),
+        qdrant_collection=qdrant_collection,
+    )
+
+
+def _single_backend_request(
+    backend: constants.VectorBackendName,
+    *,
+    chunk_sizes: list[int] | None = None,
+) -> dict[str, list[object]]:
+    return {
+        "runtimes": ["basic"],
+        "vector_backends": [backend],
+        "chunk_strategies": ["markdown"],
+        "retrieval_strategies": ["dense"],
+        "rerankers": ["none"],
+        "top_ks": [4],
+        "chunk_sizes": list[object](chunk_sizes or [800]),
+        "chunk_overlaps": [120],
+    }
 
 
 def _two_values(
@@ -104,6 +149,257 @@ def test_invalid_matrix_has_no_ingest_side_effects(
     assert calls == []
 
 
+def test_local_matrix_cells_isolate_interactive_storage_on_success_and_error(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _comparison_config(tmp_path)
+    config.index_path.write_bytes(b"interactive index")
+    config.ingest_manifest_path.write_bytes(b"interactive manifest")
+    original_index = config.index_path.read_bytes()
+    original_manifest = config.ingest_manifest_path.read_bytes()
+    isolated_paths: list[tuple[pathlib.Path, pathlib.Path]] = []
+
+    def write_isolated(
+        config: app_config.AppConfig,
+    ) -> list[models.DocumentChunk]:
+        isolated_paths.append((config.index_path, config.ingest_manifest_path))
+        config.index_path.write_text("isolated index", encoding="utf-8")
+        config.ingest_manifest_path.write_text(
+            "isolated manifest", encoding="utf-8"
+        )
+        if config.chunk_size == 900:
+            raise RuntimeError("cell failure")
+        return []
+
+    monkeypatch.setattr(rag, "ingest_documents", write_isolated)
+    monkeypatch.setattr(
+        harness, "run_eval", lambda config: [_eval_result(_live_diagnostics())]
+    )
+
+    report = comparison.run_eval_matrix(
+        config,
+        _single_backend_request("local", chunk_sizes=[800, 900]),
+    )
+
+    assert config.index_path.read_bytes() == original_index
+    assert config.ingest_manifest_path.read_bytes() == original_manifest
+    assert len(isolated_paths) == 2
+    assert all(index != config.index_path for index, _ in isolated_paths)
+    assert all(
+        manifest != config.ingest_manifest_path
+        for _, manifest in isolated_paths
+    )
+    assert all(not index.exists() for index, _ in isolated_paths)
+    assert all(not manifest.exists() for _, manifest in isolated_paths)
+    assert isinstance(report["dataset_identity"], str)
+    runs = report["runs"]
+    assert isinstance(runs, list)
+    assert [run["status"] for run in runs if isinstance(run, dict)] == [
+        "ok",
+        "error",
+    ]
+    identities = {
+        run["configuration_identity"] for run in runs if isinstance(run, dict)
+    }
+    assert len(identities) == 2
+
+
+def test_qdrant_matrix_cells_delete_only_owned_collections(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _comparison_config(tmp_path, vector_backend="qdrant")
+    created: dict[object, str] = {}
+    deleted: list[str] = []
+
+    def initialize(config: app_config.AppConfig) -> object:
+        token = object()
+        created[token] = config.qdrant_collection
+        return token
+
+    def delete(config: app_config.AppConfig, token: object) -> None:
+        assert created[token] == config.qdrant_collection
+        deleted.append(config.qdrant_collection)
+
+    def run_eval(config: app_config.AppConfig) -> list[models.EvalResult]:
+        if config.chunk_size == 900:
+            raise RuntimeError("evaluation failure")
+        return [_eval_result(_live_diagnostics())]
+
+    monkeypatch.setattr(rag, "initialize_owned_qdrant_index", initialize)
+    monkeypatch.setattr(rag, "delete_owned_qdrant_index", delete)
+    monkeypatch.setattr(harness, "run_eval", run_eval)
+
+    report = comparison.run_eval_matrix(
+        config,
+        _single_backend_request("qdrant", chunk_sizes=[800, 900]),
+    )
+
+    assert len(set(created.values())) == 2
+    assert all(name != "interactive" for name in created.values())
+    assert sorted(deleted) == sorted(created.values())
+    assert "interactive" not in deleted
+    runs = report["runs"]
+    assert isinstance(runs, list)
+    assert all(isinstance(run, dict) for run in runs)
+    assert all(
+        run["run_metadata"]["disposable_qdrant_collection"] in created.values()
+        for run in runs
+        if isinstance(run, dict)
+    )
+
+
+def test_qdrant_initializer_failure_does_not_claim_cleanup(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _comparison_config(tmp_path, vector_backend="qdrant")
+    deleted: list[object] = []
+
+    def initialize(config: app_config.AppConfig) -> object:
+        del config
+        raise RuntimeError("initializer failure")
+
+    def delete(config: app_config.AppConfig, token: object) -> None:
+        del config
+        deleted.append(token)
+
+    monkeypatch.setattr(rag, "initialize_owned_qdrant_index", initialize)
+    monkeypatch.setattr(rag, "delete_owned_qdrant_index", delete)
+
+    run = comparison._run_matrix_case(config)
+
+    assert run["status"] == "error"
+    assert deleted == []
+    metadata = run["run_metadata"]
+    assert isinstance(metadata, dict)
+    assert metadata["disposable_qdrant_collection"] != "interactive"
+
+
+def test_qdrant_initializer_partial_cleanup_note_requires_recovery(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _comparison_config(tmp_path, vector_backend="qdrant")
+
+    def initialize(config: app_config.AppConfig) -> object:
+        del config
+        error = RuntimeError("initializer failure")
+        error.add_note(
+            "Partial Qdrant collection cleanup also failed; use exact-name "
+            "orphan recovery."
+        )
+        raise error
+
+    monkeypatch.setattr(rag, "initialize_owned_qdrant_index", initialize)
+
+    run = comparison._run_matrix_case(config)
+
+    assert run["status"] == "error"
+    assert "Partial Qdrant collection cleanup also failed" in str(run["error"])
+    metadata = run["run_metadata"]
+    assert isinstance(metadata, dict)
+    collection = metadata["disposable_qdrant_collection"]
+    assert isinstance(collection, str)
+    assert collection in str(run["error"])
+    assert metadata["orphan_recovery_required"] is True
+
+
+def test_qdrant_cleanup_failure_reports_exact_orphan_collection(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _comparison_config(tmp_path, vector_backend="qdrant")
+    token = object()
+
+    monkeypatch.setattr(
+        rag, "initialize_owned_qdrant_index", lambda config: token
+    )
+    monkeypatch.setattr(
+        harness, "run_eval", lambda config: [_eval_result(_live_diagnostics())]
+    )
+
+    def fail_cleanup(config: app_config.AppConfig, ownership: object) -> None:
+        del config
+        assert ownership is token
+        raise RuntimeError("cleanup failure")
+
+    monkeypatch.setattr(rag, "delete_owned_qdrant_index", fail_cleanup)
+
+    run = comparison._run_matrix_case(config)
+
+    assert run["status"] == "error"
+    assert "cleanup failure" in str(run["error"])
+    metadata = run["run_metadata"]
+    assert isinstance(metadata, dict)
+    collection = metadata["disposable_qdrant_collection"]
+    assert isinstance(collection, str)
+    assert collection in str(run["error"])
+    assert metadata["orphan_recovery_required"] is True
+
+
+def test_comparison_identities_ignore_isolated_paths_and_change_meaningfully(
+    tmp_path: pathlib.Path,
+) -> None:
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    document = docs_dir / "source.md"
+    document.write_text("first corpus", encoding="utf-8")
+    eval_path = tmp_path / "eval.jsonl"
+    _write_eval_gold(eval_path)
+    base = app_config.AppConfig.from_env().with_overrides(
+        docs_dir=docs_dir,
+        eval_path=eval_path,
+        index_path=tmp_path / "interactive-a.jsonl",
+        ingest_manifest_path=tmp_path / "interactive-a.json",
+    )
+    isolated = base.with_overrides(
+        index_path=tmp_path / "other" / "index.jsonl",
+        ingest_manifest_path=tmp_path / "other" / "manifest.json",
+    )
+
+    dataset_before = comparison._dataset_identity(base)
+    configuration_before = comparison._configuration_identity(base)
+    assert dataset_before == comparison._dataset_identity(isolated)
+    assert configuration_before == (
+        comparison._configuration_identity(isolated)
+    )
+
+    document.write_text("changed corpus", encoding="utf-8")
+    assert dataset_before != comparison._dataset_identity(base)
+    assert configuration_before != (
+        comparison._configuration_identity(base.with_overrides(chunk_size=900))
+    )
+
+    copied_docs_dir = tmp_path / "copied-docs"
+    copied_docs_dir.mkdir()
+    (copied_docs_dir / "source.md").write_text(
+        "changed corpus", encoding="utf-8"
+    )
+    copied_eval_path = tmp_path / "copied-eval.jsonl"
+    copied_eval_path.write_bytes(eval_path.read_bytes())
+    copied = base.with_overrides(
+        docs_dir=copied_docs_dir,
+        eval_path=copied_eval_path,
+        index_path=tmp_path / "copied-index.jsonl",
+        ingest_manifest_path=tmp_path / "copied-manifest.json",
+        vector_backend="qdrant",
+        qdrant_url="http://qdrant.invalid:6333",
+        qdrant_collection="interactive-eval-0123456789abcdef",
+    )
+    qdrant_variant = copied.with_overrides(
+        qdrant_collection="interactive-eval-fedcba9876543210"
+    )
+
+    assert comparison._dataset_identity(base) == comparison._dataset_identity(
+        copied
+    )
+    assert comparison._configuration_identity(copied) == (
+        comparison._configuration_identity(qdrant_variant)
+    )
+
+
 def test_matrix_plan_reports_the_twelve_default_local_cells() -> None:
     plan = comparison.plan_eval_matrix(app_config.AppConfig.from_env())
 
@@ -148,7 +444,12 @@ def test_matrix_execution_uses_the_planned_axes_and_variants(
     plan = comparison.plan_eval_matrix(config, requested)
     executed: list[app_config.AppConfig] = []
 
-    def record_run(config: app_config.AppConfig) -> dict[str, object]:
+    def record_run(
+        config: app_config.AppConfig,
+        *,
+        dataset_identity: str | None = None,
+    ) -> dict[str, object]:
+        del dataset_identity
         executed.append(config)
         return {
             "label": comparison.run_label(config),

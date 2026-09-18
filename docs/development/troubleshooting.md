@@ -147,6 +147,11 @@ an intentionally unused stage.
 A request expanding past 128 combinations, or naming an empty axis, is refused
 as a configuration error before anything runs.
 
+**Did an eval comparison change my interactive local index?** No. Each local
+cell runs with a separate temporary index and ingest manifest, which are
+removed after success or failure. The comparison's `retrieval_config` still
+describes the planned variant rather than those temporary storage paths.
+
 ## The index and the corpus
 
 **Results look wrong, or eval cannot find its sources.** Check `DOCS_DIR`. The
@@ -191,8 +196,11 @@ or a single designated owner; the local lock cannot coordinate hosts.
 **A disposable Qdrant comparison collection was orphaned.** This can happen if
 the process dies and loses its ownership token, or if first ingest and the
 initializer's guarded partial-collection cleanup both fail. Use the exact
-UUID-derived collection name recorded for the run, verify its comparison
-prefix, and delete only that collection with Qdrant administration tooling.
+UUID-derived collection name recorded as
+`run_metadata.disposable_qdrant_collection`, verify its comparison prefix, and
+delete only that collection with Qdrant administration tooling. A cleanup
+failure also sets `run_metadata.orphan_recovery_required=true` and makes the
+cell an operational error. Never guess a collection name from a label.
 Never delete by a wildcard or by the interactive collection's configured name.
 Comparison callers must use `initialize_owned_qdrant_index` before evaluation;
 it performs first ingest and returns the only token accepted by
