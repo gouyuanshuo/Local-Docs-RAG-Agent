@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import traceback
 import types
 from typing import Any
 
@@ -381,6 +382,37 @@ def test_switching_local_index_path_requires_dedicated_manifest(
     assert not switched.index_path.exists()
 
 
+def test_local_index_dangling_symlink_survives_ingest_and_ensure(
+    tmp_path: pathlib.Path,
+) -> None:
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "sample.md").write_text("Evidence", encoding="utf-8")
+    target_dir = tmp_path / "target"
+    target_dir.mkdir()
+    index_target = target_dir / "chunks.jsonl"
+    index_link = tmp_path / "chunks-link.jsonl"
+    index_link.symlink_to(index_target)
+    config = app_config.AppConfig.from_env().with_overrides(
+        docs_dir=docs,
+        docs_exclude_patterns=[],
+        index_path=index_link,
+        ingest_manifest_path=tmp_path / "manifest.json",
+        embedding_api_key=None,
+    )
+    original_identity = ingest.storage_identity(config)
+
+    ingest.ingest_documents(config)
+    ingest.ensure_index(config)
+
+    assert index_link.is_symlink()
+    assert index_target.exists()
+    assert ingest.storage_identity(config) == original_identity
+    assert [
+        chunk.text for chunk in store_factory.build_store(config).load()
+    ] == ["Evidence"]
+
+
 @pytest.mark.parametrize(
     ("override", "value"),
     [
@@ -485,6 +517,25 @@ def test_qdrant_ipv6_storage_identity_treats_omitted_port_as_6333(
     assert ingest.storage_identity(config) == ingest.storage_identity(explicit)
 
 
+def test_qdrant_storage_identity_normalizes_equivalent_ipv6_literals(
+    tmp_path: pathlib.Path,
+) -> None:
+    config = _qdrant_config(
+        tmp_path,
+        tmp_path / "docs",
+        tmp_path / "manifest.json",
+    ).with_overrides(
+        qdrant_url=("https://[2001:0DB8:0000:0000:0000:0000:0000:0001]/cluster")
+    )
+    compressed = config.with_overrides(
+        qdrant_url="https://[2001:db8::1]:6333/cluster"
+    )
+
+    assert ingest.storage_identity(config) == ingest.storage_identity(
+        compressed
+    )
+
+
 @pytest.mark.parametrize(("scheme", "port"), [("http", 80), ("https", 443)])
 def test_qdrant_standard_web_port_switch_requires_dedicated_manifest(
     tmp_path: pathlib.Path,
@@ -518,6 +569,51 @@ def test_qdrant_standard_web_port_switch_requires_dedicated_manifest(
 
     assert store.save_calls == save_calls
     assert store.removed_source_paths == []
+
+
+def test_qdrant_storage_identity_rejects_port_zero(
+    tmp_path: pathlib.Path,
+) -> None:
+    config = _qdrant_config(
+        tmp_path,
+        tmp_path / "docs",
+        tmp_path / "manifest.json",
+    ).with_overrides(qdrant_url="https://qdrant.example:0/cluster")
+
+    with pytest.raises(
+        exceptions.ConfigurationError,
+        match=r"valid HTTP\(S\) endpoint",
+    ):
+        ingest.storage_identity(config)
+
+
+@pytest.mark.parametrize(
+    "bad_url",
+    [
+        "http://fake-user:fake-password@example.invalid\uff0fbad",
+        "http://fake-user:fake-password@[2001:db8::1",
+    ],
+)
+def test_malformed_qdrant_url_traceback_excludes_credentials(
+    tmp_path: pathlib.Path,
+    bad_url: str,
+) -> None:
+    config = _qdrant_config(
+        tmp_path,
+        tmp_path / "docs",
+        tmp_path / "manifest.json",
+    ).with_overrides(qdrant_url=bad_url)
+
+    with pytest.raises(
+        exceptions.ConfigurationError,
+        match=r"valid HTTP\(S\) endpoint",
+    ) as exc_info:
+        ingest.storage_identity(config)
+
+    formatted = "".join(traceback.format_exception(exc_info.value))
+    assert "fake-user" not in formatted
+    assert "fake-password" not in formatted
+    assert exc_info.value.__suppress_context__ is True
 
 
 def test_manifest_storage_identity_does_not_persist_qdrant_credentials(

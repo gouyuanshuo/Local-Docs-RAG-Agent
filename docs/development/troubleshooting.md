@@ -174,6 +174,11 @@ manifests rebuild automatically. For Qdrant, first verify that the configured
 collection belongs to this corpus, clear it, then move the legacy manifest aside
 and run `local-docs-rag ingest` to create a versioned, target-bound one.
 
+**`QDRANT_URL must be a valid HTTP(S) endpoint`.** Check the scheme, brackets
+around IPv6 literals, and port. Port `0` is invalid; omitting the port selects
+Qdrant's REST port `6333`. The diagnostic intentionally does not echo the URL,
+because URL user information or query parameters may contain credentials.
+
 **`DOCS_DIR does not exist`.** The directory is resolved relative to where the
 process starts. Run from the repository root, or use an absolute path.
 

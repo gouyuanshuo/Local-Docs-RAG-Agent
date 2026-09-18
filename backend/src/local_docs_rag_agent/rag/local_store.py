@@ -29,11 +29,12 @@ class LocalJsonlChunkStore:
         """Bind the store to an index file, a provider, and a strategy.
 
         Args:
-          index_path: Where the JSONL index is read and written.
+          index_path: Where the JSONL index is read and written. Resolved once
+            so a final-component symlink remains intact across atomic writes.
           embedding_provider: Used to embed the query at search time.
           settings: Ranking knobs. Defaults to the project defaults.
         """
-        self._index_path = index_path
+        self._index_path = index_path.resolve()
         self._embedding_provider = embedding_provider
         self._settings = settings or retrieval.RetrievalSettings()
 

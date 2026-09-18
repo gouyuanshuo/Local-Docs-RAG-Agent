@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import ipaddress
 import json
 import pathlib
 from urllib import parse
@@ -259,22 +260,21 @@ def storage_identity(config: app_config.AppConfig) -> str:
 
 
 def _canonical_qdrant_url(url: str) -> str:
-    parsed = parse.urlsplit(url)
-    scheme = parsed.scheme.lower()
-    hostname = parsed.hostname
-    if scheme not in {"http", "https"} or hostname is None:
-        raise exceptions.ConfigurationError(
-            "QDRANT_URL must be an HTTP(S) URL with a host"
-        )
     try:
+        parsed = parse.urlsplit(url)
+        scheme = parsed.scheme.lower()
+        hostname = parsed.hostname
         port = parsed.port
-    except ValueError as exc:
+        if scheme not in {"http", "https"} or hostname is None or port == 0:
+            raise ValueError
+        normalized_host = hostname.lower()
+        if ":" in normalized_host:
+            normalized_host = ipaddress.IPv6Address(normalized_host).compressed
+            normalized_host = f"[{normalized_host}]"
+    except ValueError:
         raise exceptions.ConfigurationError(
-            "QDRANT_URL must contain a valid port"
-        ) from exc
-    normalized_host = hostname.lower()
-    if ":" in normalized_host:
-        normalized_host = f"[{normalized_host}]"
+            "QDRANT_URL must be a valid HTTP(S) endpoint"
+        ) from None
     effective_port = port if port is not None else 6333
     netloc = f"{normalized_host}:{effective_port}"
     path = parsed.path.rstrip("/")

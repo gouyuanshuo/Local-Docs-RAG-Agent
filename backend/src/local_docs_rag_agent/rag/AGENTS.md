@@ -32,6 +32,10 @@ pipeline -> rerank -> llm_rerank
   identity. A known target mismatch must fail before store mutation.
 - Qdrant storage identity uses effective REST port `6333` when the URL omits a
   port. Explicit ports, including `80` and `443`, remain distinct targets.
+- Qdrant endpoint parsing reports a fixed credential-free configuration error;
+  IPv6 literals are compressed and port `0` is invalid.
+- The local store resolves its bound index path once before I/O, matching the
+  identity path and preserving a final-component symlink during atomic writes.
 - The index fingerprint includes the resolved document root and sorted unique
   exclusion patterns. Same-target scope changes rebuild while retaining the
   prior source list for stale-source deletion.

@@ -14,7 +14,7 @@ present). Copy `.env.example` to `.env` to configure a local instance.
 | --- | --- | --- | --- | --- |
 | `DOCS_DIR` | path | `data/corpus/sample` | readable directory | Directory holding source documents to ingest. Its resolved path is part of the index fingerprint. |
 | `DOCS_EXCLUDE_PATTERNS` | list[str] | `""` (empty) | comma-separated globs | Patterns under `DOCS_DIR` to exclude from ingestion. Sorted unique patterns are part of the index fingerprint. |
-| `INDEX_PATH` | path | `data/index/chunks.jsonl` | writable path | File path for the local JSONL store. Its resolved path is bound to the manifest's hashed storage identity. |
+| `INDEX_PATH` | path | `data/index/chunks.jsonl` | writable path | File path for the local JSONL store. Its resolved path is bound to the manifest's hashed storage identity; a final-component symlink is preserved during atomic writes. |
 | `INGEST_MANIFEST_PATH` | path | `data/index/ingest_manifest.json` | writable path | Versioned manifest recording source ownership, index fingerprint, and a non-secret hashed storage identity. Use a dedicated manifest per storage target. |
 | `EVAL_PATH` | path | `data/evals/sample_eval.jsonl` | readable JSONL file | Evaluation dataset containing gold questions and retrieval expectations. |
 | `AGENT_RUNTIME` | string | `basic` | `basic`, `agents_sdk` | Runtime orchestration engine to generate answers. |
@@ -74,7 +74,7 @@ present). Copy `.env.example` to `.env` to configure a local instance.
 
 | Variable | Type | Default | Validation / Values | Description |
 | --- | --- | --- | --- | --- |
-| `QDRANT_URL` | string | `None` | HTTP(S) URL | Endpoint URL for remote or local Qdrant server. Its canonical endpoint, without user information, query, or fragment, contributes to the hashed storage identity. An omitted port means Qdrant REST port `6333`; explicit ports remain distinct targets. |
+| `QDRANT_URL` | string | `None` | HTTP(S) URL | Endpoint URL for remote or local Qdrant server. Its canonical endpoint, without user information, query, or fragment, contributes to the hashed storage identity. An omitted port means Qdrant REST port `6333`; explicit ports remain distinct targets, IPv6 literals are compressed, and port `0` is invalid. |
 | `QDRANT_API_KEY` | string | `None` | API key token | Optional authentication token for Qdrant Cloud. |
 | `QDRANT_COLLECTION` | string | `local-docs-rag` | non-empty string | Target collection name in Qdrant; bound to the ingest manifest's storage identity. |
 | `QDRANT_TIMEOUT_S` | integer | `30` | positive integer | Request timeout in seconds for Qdrant client calls. |

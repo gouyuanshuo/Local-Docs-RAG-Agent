@@ -180,7 +180,15 @@ resolved local `INDEX_PATH`, or the canonical credential-free Qdrant endpoint
 and collection. API keys, URL user information, queries, fragments, and raw
 credential-bearing URLs are never persisted in that identity. Qdrant's
 effective REST port is `6333` when omitted; explicit ports such as `80` and
-`443` remain distinct storage targets.
+`443` remain distinct storage targets. IPv6 literals use their compressed
+form, port `0` is rejected, and malformed endpoint errors do not echo URL
+credentials.
+
+The local store resolves its configured index path once when it is built. Its
+reads, atomic writes, existence checks, and the manifest identity therefore
+refer to the same canonical file. A final-component `INDEX_PATH` symlink,
+including one whose target does not exist yet, is preserved rather than
+replaced by the first ingest.
 
 Changing scope on the same target rebuilds while the previous source list is
 still available, so newly excluded or removed Qdrant sources are deleted.
