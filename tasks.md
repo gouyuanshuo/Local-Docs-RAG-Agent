@@ -109,6 +109,12 @@ Current theme:
 - [x] Lock all backend extras and isolated build requirements; restore them
       with uv 0.12.16 in Python 3.11/3.13 CI, while preserving the frozen
       Node 22 and pnpm 10.18.0 frontend path
+- [x] Close Stage 2 identity edge cases: preserve final index symlinks,
+      normalize equivalent Qdrant targets, and sanitize malformed URLs without
+      exposing embedded credentials
+- [x] Audit Stage 2 after implementation: the combined review is clean after
+      one fix round; locked gates and all 205 tests pass on Python 3.11/3.13,
+      as do the Node 22 build, external wheel smoke, and no-key ingest/ask smoke
 - [ ] Resolve the upstream Starlette/AnyIO `BlockingPortal` deprecation warning
       or add a narrowly justified filter after the dependency lock is selected
 
