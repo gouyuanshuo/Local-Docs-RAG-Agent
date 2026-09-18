@@ -2,16 +2,15 @@
 
 The step order is deliberate and is what makes a partial or repeated run safe:
 
-1. read every source document, so an unreadable file aborts before anything is
-   written
-2. load the typed manifest recorded by the previous run
-3. verify storage ownership, then compare the scope/retrieval fingerprint and
+1. acquire the target's reentrant thread and cross-process lifecycle guard
+2. read every source document, so an unreadable file aborts before mutation
+3. load the typed manifest recorded by the previous run
+4. verify storage ownership, then compare the scope/retrieval fingerprint and
    work out removed and changed sources
-4. chunk only the sources that actually need reindexing
-5. attach embeddings and reject empty or mismatched vectors
-6. commit to the configured store, deleting points for removed and replaced
-   sources
-7. atomically replace the manifest
+5. chunk only the sources that actually need reindexing
+6. attach embeddings and reject empty or mismatched vectors
+7. durably publish repair intent, then commit the configured store
+8. atomically publish the clean manifest
 
 The fingerprint covers document scope plus every setting that changes what a
 stored vector *means*. A separate non-secret hash binds source ownership to the
@@ -35,6 +34,7 @@ from local_docs_rag_agent.providers import factory as provider_factory
 from local_docs_rag_agent.rag import (
     chunker,
     discovery,
+    index_lock,
     manifest,
     qdrant_store,
     store_factory,
@@ -71,6 +71,13 @@ def ingest_documents(
         comparable with the live vectors already in the collection.
       VectorStoreError: If the store rejects the write.
     """
+    with index_lock.index_guard(config):
+        return _ingest_documents_locked(config)
+
+
+def _ingest_documents_locked(
+    config: app_config.AppConfig,
+) -> list[models.DocumentChunk]:
     source_texts = discovery.read_source_texts(
         config.docs_dir, config.docs_exclude_patterns
     )
@@ -102,6 +109,7 @@ def ingest_documents(
             # nothing.
             config.vector_backend == "local"
             or legacy_rebuild
+            or previous_manifest.repair_required
             or (
                 isinstance(store, qdrant_store.QdrantChunkStore)
                 and not store.collection_exists()
@@ -116,26 +124,23 @@ def ingest_documents(
         _require_live_embeddings(embedding_provider)
 
     is_qdrant = config.vector_backend == "qdrant"
-    try:
-        store.save(
-            chunks,
-            removed_source_paths=(
-                list(plan.removed_sources) if is_qdrant else None
-            ),
-            # Include changed-to-empty sources so their stale Qdrant
-            # points are deleted.
-            replaced_source_paths=(
-                list(plan.sources_to_index) if is_qdrant else None
-            ),
-        )
-    except Exception:
-        if is_qdrant and plan.sources_to_index:
-            previous_manifest.marked_needs_reindex(
-                plan.sources_to_index,
-                storage_identity=desired_storage_identity,
-            ).save(config.ingest_manifest_path)
-        raise
-    previous_manifest.updated(
+    dirty_manifest = previous_manifest.marked_needs_reindex(
+        plan.sources_to_index,
+        storage_identity=desired_storage_identity,
+    )
+    dirty_manifest.save(config.ingest_manifest_path)
+    store.save(
+        chunks,
+        removed_source_paths=(
+            list(plan.removed_sources) if is_qdrant else None
+        ),
+        # Include changed-to-empty sources so their stale Qdrant points are
+        # deleted.
+        replaced_source_paths=(
+            list(plan.sources_to_index) if is_qdrant else None
+        ),
+    )
+    dirty_manifest.updated(
         source_checksums=source_checksums,
         indexed_sources=set(plan.sources_to_index),
         chunks=chunks,
@@ -169,6 +174,11 @@ def ensure_index(config: app_config.AppConfig) -> None:
       ConfigurationError: If the storage target is invalid, differs from the
         manifest, or a legacy Qdrant manifest needs an ownership decision.
     """
+    with index_lock.index_guard(config):
+        _ensure_index_locked(config)
+
+
+def _ensure_index_locked(config: app_config.AppConfig) -> None:
     stored = manifest.IngestManifest.load(config.ingest_manifest_path)
     desired_storage_identity = storage_identity(config)
     legacy_rebuild = _validate_manifest_storage(
@@ -184,7 +194,7 @@ def ensure_index(config: app_config.AppConfig) -> None:
             embedding_mode=_expected_embedding_mode(config),
         )
     )
-    needs_restore = bool(stored.needs_reindex)
+    needs_restore = stored.repair_required or bool(stored.needs_reindex)
     if config.vector_backend == "qdrant":
         if (
             configuration_changed
@@ -305,6 +315,7 @@ def _validate_manifest_storage(
             previous_manifest.sources
             or previous_manifest.index_fingerprint
             or previous_manifest.needs_reindex
+            or previous_manifest.repair_required
         )
         if config.vector_backend == "qdrant" and has_owned_state:
             raise exceptions.ConfigurationError(

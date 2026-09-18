@@ -161,17 +161,49 @@ On Qdrant, `blended` is the server's dense cosine order: the payload has no
 vectors to mix with BM25. Compare backends with `dense` and `hybrid_rrf`, not
 `blended`. Local `blended` remains `max(dense, lexical, mix)`.
 
+### Persistence concurrency decision
+
+Index lifecycle serialization is a single-host, same-user guarantee. Every
+local process derives the same advisory lock file from the canonical storage
+target, and an explicit per-target thread lock prevents threads in one process
+from bypassing the operating-system lock. The owning thread may enter the guard
+reentrantly so retrieval can call `ensure_index` while holding readiness and
+query under one critical section. A local lock artifact lives beside the
+resolved index file. A remote lock artifact lives in the current user's cache
+and is named only by the credential-free hashed endpoint-and-collection
+identity; neither location depends on a process temporary directory.
+
+The guard covers manifest inspection, dirty-intent publication, store mutation,
+clean-manifest publication, and retrieval's readiness-plus-query window. It has
+a finite timeout reported as an actionable configuration error. Lock files may
+remain after normal exit or process death; they are identity markers, not proof
+that a lock is held, and can be left in place. The operating system releases
+the advisory lock when the owning process exits.
+
+This does not coordinate different hosts. Deployments with Qdrant writers or
+readers on more than one host must provide an external distributed lock or
+otherwise guarantee a single lifecycle owner. The application must not claim
+multi-host safety from its host-local lock files.
+
 The ingest order is deliberate:
 
-1. validate and read `DOCS_DIR` before writing anything
-2. load the typed manifest
-3. verify that its hashed storage identity owns the configured target
-4. compare the document-scope/retrieval fingerprint and calculate
+1. acquire the target's reentrant thread and cross-process lifecycle guard
+2. validate and read `DOCS_DIR` before writing anything
+3. load the typed manifest
+4. verify that its hashed storage identity owns the configured target
+5. compare the document-scope/retrieval fingerprint and calculate
    removed/changed sources
-5. chunk only the required sources
-6. attach and validate embeddings
-7. update the selected store
-8. atomically replace the manifest
+6. chunk only the required sources
+7. attach and validate embeddings
+8. atomically publish `repair_required` before any store mutation
+9. update the selected store
+10. atomically publish the clean manifest
+
+Retrieval holds the same guard while it checks readiness and queries the store.
+It enters `ensure_index` reentrantly, captures the embedding status, and
+releases the guard before reranking or answer generation. If a process dies
+after step 8, the next reader sees `repair_required` and deterministically
+rebuilds current sources and replays idempotent stale/replacement deletes.
 
 The versioned manifest separates two concerns. The index fingerprint includes
 the resolved `DOCS_DIR`, sorted unique `DOCS_EXCLUDE_PATTERNS`, embedding mode
@@ -204,6 +236,21 @@ If a Qdrant save deletes a source and then fails to upsert, the manifest records
 those paths in `needs_reindex` so a later ingest *or* `ensure_index` (Ask/eval)
 with a matching checksum still attempts restore instead of claiming the source
 is already indexed.
+
+Disposable Qdrant lifecycle uses an ownership-checked facade seam rather than
+exposing deletion on `ChunkStore`. A claim succeeds only when its uniquely
+named collection is absent and returns an opaque process-issued token bound to
+the exact credential-free target identity and collection. Cleanup recomputes
+and verifies every field under the same index guard before deleting. It refuses
+pre-existing, mismatched, forged, or reused claims, so the configured
+interactive collection cannot be deleted through a run-owned token.
+
+A process death loses the in-memory cleanup token and can leave a disposable
+collection orphaned. Record each UUID-derived run collection name in comparison
+output. Recovery is a targeted operator action: verify the recorded run prefix
+and exact collection name in Qdrant, then delete only that collection with
+Qdrant administration tooling. Never wildcard-delete collections. A multi-host
+claim/create race still requires the external coordination described above.
 
 ### Domain layer (`core/`)
 

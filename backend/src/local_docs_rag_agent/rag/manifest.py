@@ -3,9 +3,10 @@
 The manifest stores a checksum and the chunk ids for every source, plus the
 fingerprint of the scope and retrieval settings the index was built under. Its
 hashed storage identity keeps one target's source ownership from being replayed
-against another target. Together these fields make an incremental ingest safe:
-unchanged sources are skipped, removed sources have their points deleted, and a
-scope or settings change invalidates the whole index at once.
+against another target. A durable repair marker is published before store
+mutation and cleared only after success. Together these fields make an
+incremental ingest safe: unchanged sources are skipped, removed sources have
+their points deleted, and interrupted writes are repaired before retrieval.
 """
 
 from __future__ import annotations
@@ -72,7 +73,8 @@ class IngestManifest:
 
     The fingerprint changes whenever document scope or a setting changes what
     a stored vector means. The storage identity separately proves which local
-    file or Qdrant collection owns the recorded deletion list.
+    file or Qdrant collection owns the recorded deletion list. `repair_required`
+    means a store mutation began without a subsequent clean publication.
     """
 
     version: int = CURRENT_VERSION
@@ -80,6 +82,7 @@ class IngestManifest:
     sources: dict[str, ManifestEntry] = dataclasses.field(default_factory=dict)
     index_fingerprint: str | None = None
     needs_reindex: tuple[str, ...] = ()
+    repair_required: bool = False
 
     @classmethod
     def load(cls, path: pathlib.Path) -> IngestManifest:
@@ -135,6 +138,11 @@ class IngestManifest:
         needs_reindex = _string_tuple(
             payload.get("needs_reindex", []), path, "needs_reindex"
         )
+        repair_required = payload.get("repair_required", False)
+        if not isinstance(repair_required, bool):
+            raise exceptions.DataFormatError(
+                f"Ingest manifest {path} has an invalid repair_required"
+            )
         return cls(
             version=version,
             storage_identity=storage_identity,
@@ -147,6 +155,7 @@ class IngestManifest:
             },
             index_fingerprint=index_fingerprint,
             needs_reindex=needs_reindex,
+            repair_required=repair_required,
         )
 
     def updated(
@@ -203,6 +212,7 @@ class IngestManifest:
             sources=next_sources,
             index_fingerprint=index_fingerprint,
             needs_reindex=remaining_dirty,
+            repair_required=False,
         )
 
     def marked_needs_reindex(
@@ -213,12 +223,12 @@ class IngestManifest:
     ) -> IngestManifest:
         """Return a copy that will reindex `source_paths` on the next ingest.
 
-        Used when a store write deleted or failed to upsert those sources,
-        so a matching checksum must not be treated as "already indexed".
+        Published before a store mutation so an interrupted write cannot let
+        matching checksums be treated as "already indexed".
 
         Args:
           source_paths: Sources whose Qdrant points may be missing.
-          storage_identity: Hashed identity of the store whose write failed.
+          storage_identity: Hashed identity of the store about to be mutated.
 
         Returns:
           A new manifest. Existing checksums are left in place so the
@@ -232,6 +242,7 @@ class IngestManifest:
             needs_reindex=tuple(
                 sorted(set(self.needs_reindex) | set(source_paths))
             ),
+            repair_required=True,
         )
 
     def save(self, path: pathlib.Path) -> None:
@@ -241,6 +252,7 @@ class IngestManifest:
             "storage_identity": self.storage_identity,
             "index_fingerprint": self.index_fingerprint,
             "needs_reindex": list(self.needs_reindex),
+            "repair_required": self.repair_required,
             "sources": {
                 source_path: entry.to_payload()
                 for source_path, entry in sorted(self.sources.items())

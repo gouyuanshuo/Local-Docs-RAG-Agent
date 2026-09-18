@@ -26,7 +26,7 @@ tests. Restore it with `pnpm install --frozen-lockfile`; its gate is
 | --- | --- |
 | `core`, `config` | `tests/test_env.py`, `tests/test_config.py` |
 | `providers` | `tests/test_chat_provider.py`, `tests/test_embedding_provider.py`, `tests/test_provider_factory.py` |
-| `rag` | `tests/test_chunker.py`, `tests/test_ingest.py`, `tests/test_local_store.py`, `tests/test_qdrant_store.py`, `tests/test_retrieval.py`, `tests/test_rerank.py` |
+| `rag` | `tests/test_chunker.py`, `tests/test_index_lifecycle.py`, `tests/test_ingest.py`, `tests/test_local_store.py`, `tests/test_qdrant_store.py`, `tests/test_retrieval.py`, `tests/test_rerank.py` |
 | `runtime` | `tests/test_agents_runtime.py`, `tests/test_runtime_shared.py` |
 | `evals` | `tests/test_eval_harness.py`, `tests/test_eval_comparison.py`, `tests/test_eval_gold.py` |
 | delivery | `tests/test_api.py`, `tests/test_cli.py` |

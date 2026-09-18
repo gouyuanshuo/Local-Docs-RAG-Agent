@@ -1039,6 +1039,7 @@ source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "openai" },
+    { name = "portalocker" },
     { name = "python-dotenv" },
     { name = "uvicorn" },
 ]
@@ -1063,6 +1064,7 @@ requires-dist = [
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.17.0" },
     { name = "openai", specifier = ">=1.109.1" },
     { name = "openai-agents", marker = "extra == 'agents'", specifier = ">=0.2.0" },
+    { name = "portalocker", specifier = ">=3.2.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6.0.0" },
     { name = "python-dotenv", specifier = ">=1.0.1" },

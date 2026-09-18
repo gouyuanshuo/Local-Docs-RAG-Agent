@@ -17,13 +17,24 @@ The candidate depth comes from the reranker rather than from the caller, because
 only the reranker knows how much it is willing to read. With reranking off that
 depth is exactly `top_k`, so the disabled path issues the same query the project
 issued before this module existed.
+
+Readiness and store search share the index lifecycle guard, preventing a query
+from observing a dirty manifest or partial store update. The guard is released
+before reranking, so an LLM reranker never holds a persistence lock during its
+network call.
 """
 
 from __future__ import annotations
 
 from local_docs_rag_agent import config as app_config
 from local_docs_rag_agent.core import models
-from local_docs_rag_agent.rag import llm_rerank, rerank, store_factory
+from local_docs_rag_agent.rag import (
+    index_lock,
+    ingest,
+    llm_rerank,
+    rerank,
+    store_factory,
+)
 
 
 def build_reranker(config: app_config.AppConfig) -> rerank.Reranker:
@@ -63,16 +74,19 @@ def retrieve(
       which with reranking off is the same number.
     """
     limit = config.top_k if top_k is None else top_k
-    store = store_factory.build_store(config)
     reranker = build_reranker(config)
-    candidates = store.search(
-        query=query, top_k=reranker.candidate_depth(limit)
-    )
+    with index_lock.index_guard(config):
+        ingest.ensure_index(config)
+        store = store_factory.build_store(config)
+        candidates = store.search(
+            query=query, top_k=reranker.candidate_depth(limit)
+        )
+        embedding_status = store.embedding_status
     hits = reranker.rerank(query=query, hits=candidates, top_k=limit)
     # Both statuses are read after the work, because a provider reports how it
     # actually behaved on this call rather than how it was configured.
     return models.RetrievalOutcome(
         hits=hits,
-        embedding_status=store.embedding_status,
+        embedding_status=embedding_status,
         reranker_status=reranker.status,
     )

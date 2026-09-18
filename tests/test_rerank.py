@@ -9,6 +9,7 @@ import pytest
 from local_docs_rag_agent import config as app_config
 from local_docs_rag_agent.core import exceptions, models
 from local_docs_rag_agent.rag import (
+    ingest,
     llm_rerank,
     pipeline,
     rerank,
@@ -267,6 +268,7 @@ def test_pipeline_retrieves_the_reranker_window_and_returns_top_k(
     reranker, _ = _reranker(reply="[3, 1]", candidate_k=20)
     monkeypatch.setattr(store_factory, "build_store", lambda config: store)
     monkeypatch.setattr(pipeline, "build_reranker", lambda config: reranker)
+    monkeypatch.setattr(ingest, "ensure_index", lambda config: None)
 
     outcome = pipeline.retrieve(
         app_config.AppConfig.from_env().with_overrides(top_k=2), "attention"
@@ -286,6 +288,7 @@ def test_pipeline_reports_both_retrieval_stages(
     reranker, _ = _reranker(reply="nonsense")
     monkeypatch.setattr(store_factory, "build_store", lambda config: store)
     monkeypatch.setattr(pipeline, "build_reranker", lambda config: reranker)
+    monkeypatch.setattr(ingest, "ensure_index", lambda config: None)
 
     outcome = pipeline.retrieve(app_config.AppConfig.from_env(), "attention")
 
@@ -298,6 +301,7 @@ def test_pipeline_holds_the_reranker_off_the_query_when_it_is_disabled(
 ) -> None:
     store = FakeStore(_hits())
     monkeypatch.setattr(store_factory, "build_store", lambda config: store)
+    monkeypatch.setattr(ingest, "ensure_index", lambda config: None)
 
     outcome = pipeline.retrieve(
         app_config.AppConfig.from_env().with_overrides(top_k=2), "attention"

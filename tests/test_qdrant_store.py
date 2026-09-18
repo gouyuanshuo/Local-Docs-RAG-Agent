@@ -140,6 +140,33 @@ def test_qdrant_save_rejects_chunk_without_embedding(
     assert error.value.reason_code == "invalid_vectors"
 
 
+def test_qdrant_delete_collection_normalizes_client_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeQdrantClient:
+        def __init__(self, **kwargs: Any) -> None:
+            del kwargs
+
+        def delete_collection(self, collection_name: str) -> None:
+            del collection_name
+            raise RuntimeError("forced delete failure")
+
+    monkeypatch.setattr(qdrant_client, "QdrantClient", FakeQdrantClient)
+    store = qdrant_store.QdrantChunkStore(
+        url="https://qdrant.example",
+        api_key=None,
+        collection_name="run-owned",
+        timeout_s=10,
+        embedding_provider=StubEmbeddingProvider(),
+    )
+
+    with pytest.raises(exceptions.VectorStoreError) as exc_info:
+        store.delete_collection()
+
+    assert exc_info.value.reason_code == "operation_failed"
+    assert "delete_collection" in str(exc_info.value)
+
+
 def test_qdrant_load_paginates_until_offset_is_exhausted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

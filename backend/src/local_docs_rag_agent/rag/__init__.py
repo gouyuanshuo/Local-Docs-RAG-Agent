@@ -25,6 +25,12 @@ from local_docs_rag_agent.rag.discovery import (
     collect_document_paths,
     read_source_texts,
 )
+from local_docs_rag_agent.rag.index_lock import index_guard
+from local_docs_rag_agent.rag.index_ownership import (
+    QdrantIndexOwnership,
+    claim_qdrant_index_ownership,
+    delete_owned_qdrant_index,
+)
 from local_docs_rag_agent.rag.ingest import ensure_index, ingest_documents
 from local_docs_rag_agent.rag.local_store import LocalJsonlChunkStore
 from local_docs_rag_agent.rag.pipeline import build_reranker, retrieve
@@ -42,13 +48,17 @@ __all__ = [
     "IdentityReranker",
     "LocalJsonlChunkStore",
     "QdrantChunkStore",
+    "QdrantIndexOwnership",
     "Reranker",
     "RetrievalSettings",
     "build_reranker",
     "build_store",
     "chunk_text",
+    "claim_qdrant_index_ownership",
     "collect_document_paths",
+    "delete_owned_qdrant_index",
     "ensure_index",
+    "index_guard",
     "ingest_documents",
     "rank_chunks",
     "read_source_texts",

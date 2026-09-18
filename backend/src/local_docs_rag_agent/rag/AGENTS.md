@@ -8,6 +8,9 @@ package, import **only** `local_docs_rag_agent.rag` (the facade).
 - `retrieve` / `build_reranker` — the only answer-path retrieval entry
 - `ingest_documents` / `ensure_index` — lifecycle; `ensure_index` honors
   `needs_reindex`
+- `index_guard` — same-user, single-host lifecycle critical section
+- `claim_qdrant_index_ownership` / `delete_owned_qdrant_index` — fail-closed
+  ownership seam for disposable Qdrant collections
 - `build_store` / `retrieval_settings`
 - `chunk_text`, `collect_document_paths`, `read_source_texts`
 - `rank_chunks`, `RetrievalSettings`, `ChunkStore`, store types, `Reranker`
@@ -19,6 +22,7 @@ discovery -> chunker -> ingest -> pipeline
 pipeline -> store_factory -> local_store / qdrant_store / retrieval
 retrieval -> bm25 / fusion / scoring
 pipeline -> rerank -> llm_rerank
+index_lock -> config, core (and lazy storage identity lookup)
 ```
 
 ## Invariants
@@ -28,6 +32,15 @@ pipeline -> rerank -> llm_rerank
 - Qdrant ingest/search refuse non-live embeddings.
 - After delete-then-upsert failure, `needs_reindex` is set; `ensure_index`
   must restore even when checksums match.
+- Every store save follows durable `repair_required` publication. A clean
+  manifest is published only after the store mutation succeeds.
+- Ingest and retrieval readiness/query hold the same reentrant thread plus
+  cross-process guard. Reranking runs after the guard is released.
+- Local lock artifacts live beside the resolved index file. Qdrant lock
+  artifacts live in the per-user cache and contain only a hashed,
+  credential-free storage identity. Persistent lock files are harmless.
+- Host-local guards do not coordinate Qdrant lifecycle work across hosts;
+  multi-host deployments require external coordination.
 - The versioned ingest manifest binds source ownership to a hashed storage
   identity. A known target mismatch must fail before store mutation.
 - Qdrant storage identity uses effective REST port `6333` when the URL omits a
@@ -62,7 +75,8 @@ pipeline -> rerank -> llm_rerank
 
 ## Tests
 
-`tests/test_chunker.py`, `test_ingest.py`, `test_local_store.py`,
+`tests/test_chunker.py`, `test_index_lifecycle.py`, `test_ingest.py`,
+`test_local_store.py`,
 `test_qdrant_store.py`, `test_retrieval.py`, `test_rerank.py`,
 `test_import_graph.py`.
 

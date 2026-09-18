@@ -115,6 +115,8 @@ Current theme:
 - [x] Audit Stage 2 after implementation: the combined review is clean after
       one fix round; locked gates and all 205 tests pass on Python 3.11/3.13,
       as do the Node 22 build, external wheel smoke, and no-key ingest/ask smoke
+- [x] Serialize RAG index lifecycle operations on one host, publish durable
+      repair intent, and add fail-closed disposable Qdrant ownership cleanup
 - [ ] Resolve the upstream Starlette/AnyIO `BlockingPortal` deprecation warning
       or add a narrowly justified filter after the dependency lock is selected
 

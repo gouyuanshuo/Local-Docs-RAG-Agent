@@ -86,6 +86,21 @@ class QdrantChunkStore:
         except Exception as exc:
             raise self._operation_error("collection_exists", exc) from exc
 
+    def delete_collection(self) -> None:
+        """Delete this concrete store's configured collection.
+
+        This lifecycle operation is intentionally absent from `ChunkStore`.
+        Callers outside `rag` use the ownership-checked facade cleanup seam,
+        never this concrete method directly.
+
+        Raises:
+          VectorStoreError: If Qdrant rejects the deletion.
+        """
+        try:
+            self._client.delete_collection(self._collection_name)
+        except Exception as exc:
+            raise self._operation_error("delete_collection", exc) from exc
+
     def save(
         self,
         chunks: list[models.DocumentChunk],

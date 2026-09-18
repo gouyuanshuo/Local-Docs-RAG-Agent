@@ -179,6 +179,21 @@ around IPv6 literals, and port. Port `0` is invalid; omitting the port selects
 Qdrant's REST port `6333`. The diagnostic intentionally does not echo the URL,
 because URL user information or query parameters may contain credentials.
 
+**Timed out waiting for the index lifecycle lock.** Another thread or process
+on this host is ingesting or querying the same target. Retry after it finishes.
+An old `.lock` file beside a local index, or in the per-user cache for Qdrant,
+is harmless: the file is a stable target name, while the operating system owns
+and releases the actual advisory lock. These artifacts persist intentionally
+and do not depend on `TMPDIR`. Do not delete one to bypass an active owner.
+Qdrant lifecycle work from multiple hosts needs an external distributed lock
+or a single designated owner; the local lock cannot coordinate hosts.
+
+**A disposable Qdrant comparison collection was orphaned.** This can happen if
+the process dies and loses its ownership token. Use the exact UUID-derived
+collection name recorded for the run, verify its comparison prefix, and delete
+only that collection with Qdrant administration tooling. Never delete by a
+wildcard or by the interactive collection's configured name.
+
 **`DOCS_DIR does not exist`.** The directory is resolved relative to where the
 process starts. Run from the repository root, or use an absolute path.
 
