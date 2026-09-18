@@ -200,7 +200,9 @@ UUID-derived collection name recorded as
 `run_metadata.disposable_qdrant_collection`, verify its comparison prefix, and
 delete only that collection with Qdrant administration tooling. A cleanup
 failure also sets `run_metadata.orphan_recovery_required=true` and makes the
-cell an operational error. Never guess a collection name from a label.
+cell an operational error. The raw cell retains its prior summary or reason and
+records `run_metadata.pre_cleanup_status`, but it is never ranked. Never guess
+a collection name from a label.
 Never delete by a wildcard or by the interactive collection's configured name.
 Comparison callers must use `initialize_owned_qdrant_index` before evaluation;
 it performs first ingest and returns the only token accepted by

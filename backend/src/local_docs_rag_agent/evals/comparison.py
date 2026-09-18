@@ -366,43 +366,71 @@ def _run_qdrant_matrix_case(
     common = {**common, "run_metadata": metadata}
     ownership: rag.QdrantIndexOwnership | None = None
     cell_error: Exception | None = None
-    result: dict[str, object]
+    result: dict[str, object] | None = None
+    interruption: BaseException | None = None
+    isolated: app_config.AppConfig | None = None
 
-    with tempfile.TemporaryDirectory(
-        prefix="local-docs-rag-compare-"
-    ) as storage_dir:
-        isolated = config.with_overrides(
-            qdrant_collection=collection_name,
-            ingest_manifest_path=pathlib.Path(storage_dir)
-            / "ingest_manifest.json",
-        )
-        try:
-            ownership = rag.initialize_owned_qdrant_index(isolated)
-            results = harness.run_eval(isolated)
-            result = _result_from_eval_results(results, config, common)
-        except Exception as exc:
-            cell_error = exc
-            result = _error_result(common, config, exc)
-
-        if ownership is None:
-            if _has_partial_cleanup_failure(cell_error):
-                metadata["orphan_recovery_required"] = True
-                return _initializer_cleanup_error_result(
-                    common,
-                    collection_name,
-                    cell_error,
-                )
-            return result
-        try:
-            rag.delete_owned_qdrant_index(isolated, ownership)
-        except Exception as cleanup_error:
-            metadata["orphan_recovery_required"] = True
-            return _cleanup_error_result(
-                common,
-                collection_name,
-                cell_error,
-                cleanup_error,
+    try:
+        with tempfile.TemporaryDirectory(
+            prefix="local-docs-rag-compare-"
+        ) as storage_dir:
+            isolated = config.with_overrides(
+                qdrant_collection=collection_name,
+                ingest_manifest_path=pathlib.Path(storage_dir)
+                / "ingest_manifest.json",
             )
+            try:
+                ownership = rag.initialize_owned_qdrant_index(isolated)
+                results = harness.run_eval(isolated)
+                result = _result_from_eval_results(results, config, common)
+            except BaseException as exc:
+                if not isinstance(exc, Exception):
+                    interruption = exc
+                    raise
+                cell_error = exc
+                result = _error_result(common, config, exc)
+
+            if ownership is None:
+                if _has_partial_cleanup_failure(cell_error):
+                    metadata["orphan_recovery_required"] = True
+                    return _initializer_cleanup_error_result(
+                        common,
+                        collection_name,
+                        cell_error,
+                    )
+                if result is None:
+                    raise AssertionError("Qdrant cell ended without a result")
+                return result
+    finally:
+        if ownership is not None:
+            if isolated is None:
+                raise AssertionError(
+                    "Qdrant ownership requires an isolated config"
+                )
+            try:
+                rag.delete_owned_qdrant_index(isolated, ownership)
+            except BaseException as cleanup_error:
+                metadata["orphan_recovery_required"] = True
+                if interruption is not None:
+                    _add_interruption_cleanup_note(
+                        interruption,
+                        collection_name,
+                        cleanup_error,
+                    )
+                elif isinstance(cleanup_error, Exception):
+                    if result is None:
+                        raise AssertionError(
+                            "Qdrant cleanup error requires a cell result"
+                        ) from cleanup_error
+                    result = _cleanup_error_result(
+                        result,
+                        collection_name,
+                        cleanup_error,
+                    )
+                else:
+                    raise
+    if result is None:
+        raise AssertionError("Qdrant cell ended without a result")
     return result
 
 
@@ -445,21 +473,45 @@ def _error_result(
 
 
 def _cleanup_error_result(
-    common: dict[str, object],
+    result: dict[str, object],
     collection_name: str,
-    cell_error: Exception | None,
     cleanup_error: Exception,
 ) -> dict[str, object]:
-    """Return a visible cleanup error without discarding the cell failure."""
+    """Return a cleanup error without discarding the completed cell payload."""
+    metadata = result.get("run_metadata")
+    copied_metadata = dict(metadata) if isinstance(metadata, dict) else {}
+    prior_status = result.get("status")
+    copied_metadata["pre_cleanup_status"] = prior_status
+    copied_metadata["orphan_recovery_required"] = True
+    copied_metadata["cleanup_error"] = _exception_description(cleanup_error)
+    prior_error = result.get("error")
+    if prior_error is not None:
+        copied_metadata["prior_error"] = prior_error
     message = (
         "Qdrant comparison cleanup failed for disposable collection "
-        f"{collection_name}: {type(cleanup_error).__name__}: {cleanup_error}"
+        f"{collection_name}: {_exception_description(cleanup_error)}"
     )
-    if cell_error is not None:
-        message += (
-            f"; original cell failure: {_exception_description(cell_error)}"
-        )
-    return {**common, "status": "error", "error": message}
+    if prior_error is not None:
+        message += f"; original cell failure: {prior_error}"
+    return {
+        **result,
+        "status": "error",
+        "error": message,
+        "run_metadata": copied_metadata,
+    }
+
+
+def _add_interruption_cleanup_note(
+    interruption: BaseException,
+    collection_name: str,
+    cleanup_error: BaseException,
+) -> None:
+    """Attach orphan recovery data without replacing an interruption."""
+    interruption.add_note(
+        "Qdrant comparison cleanup failed for disposable collection "
+        f"{collection_name}; exact-name orphan recovery is required "
+        f"({type(cleanup_error).__name__})."
+    )
 
 
 def _initializer_cleanup_error_result(
@@ -485,7 +537,7 @@ def _initializer_cleanup_error_result(
     }
 
 
-def _has_partial_cleanup_failure(exc: Exception | None) -> bool:
+def _has_partial_cleanup_failure(exc: BaseException | None) -> bool:
     """Return whether an initializer reports a failed partial cleanup note."""
     if exc is None:
         return False
@@ -497,7 +549,7 @@ def _has_partial_cleanup_failure(exc: Exception | None) -> bool:
     )
 
 
-def _exception_description(exc: Exception) -> str:
+def _exception_description(exc: BaseException) -> str:
     """Return an exception message including non-secret diagnostic notes."""
     message = f"{type(exc).__name__}: {exc}"
     notes = getattr(exc, "__notes__", ())
@@ -541,16 +593,19 @@ def _dataset_identity(config: app_config.AppConfig) -> str:
 
 
 def _canonical_source_path(docs_dir: pathlib.Path, source_path: str) -> str:
-    """Return a corpus-root-relative source identity when possible."""
+    """Return a lexical corpus-relative source identity when possible.
+
+    The discovery path is intentionally not resolved: a symlink alias is a
+    distinct corpus member even when it points at the same file as another
+    discovered path.
+    """
+    source = pathlib.Path(source_path)
     try:
-        return (
-            pathlib.Path(source_path)
-            .resolve()
-            .relative_to(docs_dir.resolve())
-            .as_posix()
-        )
+        if source.is_absolute():
+            return source.absolute().relative_to(docs_dir.absolute()).as_posix()
+        return source.relative_to(docs_dir).as_posix()
     except ValueError:
-        return pathlib.Path(source_path).as_posix()
+        return source.as_posix()
 
 
 def _configuration_identity(config: app_config.AppConfig) -> str:

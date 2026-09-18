@@ -339,6 +339,131 @@ def test_qdrant_cleanup_failure_reports_exact_orphan_collection(
     assert metadata["orphan_recovery_required"] is True
 
 
+def test_qdrant_interrupt_still_deletes_owned_collection(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _comparison_config(tmp_path, vector_backend="qdrant")
+    token = object()
+    deleted: list[object] = []
+
+    monkeypatch.setattr(
+        rag, "initialize_owned_qdrant_index", lambda config: token
+    )
+    monkeypatch.setattr(
+        harness,
+        "run_eval",
+        lambda config: (_ for _ in ()).throw(KeyboardInterrupt("stop")),
+    )
+    monkeypatch.setattr(
+        rag,
+        "delete_owned_qdrant_index",
+        lambda config, ownership: deleted.append(ownership),
+    )
+
+    with pytest.raises(KeyboardInterrupt, match="stop"):
+        comparison._run_matrix_case(config)
+
+    assert deleted == [token]
+
+
+def test_qdrant_interrupt_preserves_active_exception_on_cleanup_failure(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _comparison_config(tmp_path, vector_backend="qdrant")
+    token = object()
+
+    monkeypatch.setattr(
+        rag, "initialize_owned_qdrant_index", lambda config: token
+    )
+    monkeypatch.setattr(
+        harness,
+        "run_eval",
+        lambda config: (_ for _ in ()).throw(KeyboardInterrupt("stop")),
+    )
+    monkeypatch.setattr(
+        rag,
+        "delete_owned_qdrant_index",
+        lambda config, ownership: (_ for _ in ()).throw(SystemExit("cleanup")),
+    )
+
+    with pytest.raises(KeyboardInterrupt, match="stop") as raised:
+        comparison._run_matrix_case(config)
+
+    notes = getattr(raised.value, "__notes__", [])
+    assert any("disposable collection" in note for note in notes)
+    assert any("SystemExit" in note for note in notes)
+
+
+@pytest.mark.parametrize("outcome", ["ok", "degraded", "skipped", "error"])
+def test_qdrant_cleanup_failure_preserves_cell_outcome(
+    outcome: str,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _comparison_config(tmp_path, vector_backend="qdrant")
+    token = object()
+
+    monkeypatch.setattr(
+        rag, "initialize_owned_qdrant_index", lambda config: token
+    )
+
+    if outcome == "ok":
+        monkeypatch.setattr(
+            harness,
+            "run_eval",
+            lambda config: [_eval_result(_live_diagnostics())],
+        )
+    elif outcome == "degraded":
+        monkeypatch.setattr(
+            harness,
+            "run_eval",
+            lambda config: [
+                _eval_result(_live_diagnostics(chat_mode="fallback"))
+            ],
+        )
+    elif outcome == "skipped":
+        monkeypatch.setattr(
+            harness,
+            "run_eval",
+            lambda config: (_ for _ in ()).throw(
+                exceptions.VectorStoreError(
+                    "Qdrant unreachable", reason_code="unreachable"
+                )
+            ),
+        )
+    else:
+        monkeypatch.setattr(
+            harness,
+            "run_eval",
+            lambda config: (_ for _ in ()).throw(RuntimeError("eval failure")),
+        )
+
+    def fail_cleanup(config: app_config.AppConfig, ownership: object) -> None:
+        del config
+        assert ownership is token
+        raise RuntimeError("cleanup failure")
+
+    monkeypatch.setattr(rag, "delete_owned_qdrant_index", fail_cleanup)
+
+    run = comparison._run_matrix_case(config)
+
+    assert run["status"] == "error"
+    assert comparison._build_leaderboard([run]) == []
+    metadata = run["run_metadata"]
+    assert isinstance(metadata, dict)
+    assert metadata["pre_cleanup_status"] == outcome
+    assert metadata["orphan_recovery_required"] is True
+    assert metadata["cleanup_error"] == "RuntimeError: cleanup failure"
+    if outcome in {"ok", "degraded"}:
+        assert isinstance(run["summary"], dict)
+    if outcome in {"degraded", "skipped"}:
+        assert run["reason"]
+    if outcome == "error":
+        assert metadata["prior_error"] == "RuntimeError: eval failure"
+
+
 def test_comparison_identities_ignore_isolated_paths_and_change_meaningfully(
     tmp_path: pathlib.Path,
 ) -> None:
@@ -397,6 +522,34 @@ def test_comparison_identities_ignore_isolated_paths_and_change_meaningfully(
     )
     assert comparison._configuration_identity(copied) == (
         comparison._configuration_identity(qdrant_variant)
+    )
+
+
+def test_dataset_identity_keeps_lexical_symlink_aliases(
+    tmp_path: pathlib.Path,
+) -> None:
+    def make_corpus(root: pathlib.Path, alias: str) -> pathlib.Path:
+        root.mkdir()
+        (root / "target.md").write_text("same corpus", encoding="utf-8")
+        (root / alias).symlink_to("target.md")
+        return root
+
+    eval_path = tmp_path / "eval.jsonl"
+    _write_eval_gold(eval_path)
+    first_docs = make_corpus(tmp_path / "first-docs", "alias.md")
+    copied_docs = make_corpus(tmp_path / "copied-docs", "alias.md")
+    renamed_docs = make_corpus(tmp_path / "renamed-docs", "renamed.md")
+    base = app_config.AppConfig.from_env().with_overrides(eval_path=eval_path)
+
+    first = base.with_overrides(docs_dir=first_docs)
+    copied = base.with_overrides(docs_dir=copied_docs)
+    renamed = base.with_overrides(docs_dir=renamed_docs)
+
+    assert comparison._dataset_identity(first) == comparison._dataset_identity(
+        copied
+    )
+    assert comparison._dataset_identity(first) != comparison._dataset_identity(
+        renamed
     )
 
 

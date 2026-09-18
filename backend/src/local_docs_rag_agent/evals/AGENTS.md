@@ -36,10 +36,12 @@ Load gold, score one run, sweep a matrix, rank a leaderboard.
   before a cell can ingest. Defaults plan 12 local cells, or 24 with Qdrant.
 - Every local matrix cell uses a fresh temporary index and manifest. Qdrant
   cells use an owned UUID-derived collection and temporary manifest; cleanup
-  failures retain the exact disposable collection in `run_metadata`.
+  failures retain the exact disposable collection, cleanup diagnostics, and
+  `pre_cleanup_status` in `run_metadata` while making the cell unrankable.
 - Raw comparison reports carry a stable corpus/gold `dataset_identity` and
   per-cell semantic `configuration_identity`; neither includes temporary
-  storage paths, document bodies, keys, or provider URLs.
+  storage paths, document bodies, keys, provider URLs, or resolved-away
+  symlink aliases.
 - `AXES` drives CLI flags, request schema field names, and labels.
 
 ## May change

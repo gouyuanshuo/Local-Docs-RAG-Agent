@@ -120,10 +120,12 @@ the planned retrieval/runtime/provider-model settings. It intentionally omits
 credentials, credential-bearing URLs, document bodies, and isolated storage
 paths. A Qdrant cell records its exact disposable collection in
 `run_metadata.disposable_qdrant_collection`; an unsuccessful cleanup also sets
-`run_metadata.orphan_recovery_required`. The CLI/raw writer preserves these
-provenance fields. The current FastAPI comparison response model does not yet
-expose them, so delivery must extend that schema before API clients rely on
-them.
+`run_metadata.orphan_recovery_required`, `pre_cleanup_status`, and a cleanup
+diagnostic. Its status becomes `error`, but its prior summary/reason remains in
+the raw cell so the completed evaluation is not erased; the error cell is never
+ranked. The CLI/raw writer preserves these provenance fields. The current
+FastAPI comparison response model does not yet expose them, so delivery must
+extend that schema before API clients rely on them.
 
 A cell's `status` is `ok`, `degraded`, `skipped`, or `error`. What each means,
 and the reasons attached to it, are in
