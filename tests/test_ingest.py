@@ -455,6 +455,71 @@ def test_qdrant_storage_identity_canonicalizes_endpoint_credentials(
     assert ingest.storage_identity(first) == ingest.storage_identity(second)
 
 
+def test_qdrant_storage_identity_treats_omitted_port_as_6333(
+    tmp_path: pathlib.Path,
+) -> None:
+    config = _qdrant_config(
+        tmp_path,
+        tmp_path / "docs",
+        tmp_path / "manifest.json",
+    ).with_overrides(qdrant_url="https://qdrant.example/cluster")
+    explicit = config.with_overrides(
+        qdrant_url="https://qdrant.example:6333/cluster"
+    )
+
+    assert ingest.storage_identity(config) == ingest.storage_identity(explicit)
+
+
+def test_qdrant_ipv6_storage_identity_treats_omitted_port_as_6333(
+    tmp_path: pathlib.Path,
+) -> None:
+    config = _qdrant_config(
+        tmp_path,
+        tmp_path / "docs",
+        tmp_path / "manifest.json",
+    ).with_overrides(qdrant_url="https://[2001:db8::1]/cluster")
+    explicit = config.with_overrides(
+        qdrant_url="https://[2001:db8::1]:6333/cluster"
+    )
+
+    assert ingest.storage_identity(config) == ingest.storage_identity(explicit)
+
+
+@pytest.mark.parametrize(("scheme", "port"), [("http", 80), ("https", 443)])
+def test_qdrant_standard_web_port_switch_requires_dedicated_manifest(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scheme: str,
+    port: int,
+) -> None:
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    source = docs / "sample.md"
+    source.write_text("Evidence", encoding="utf-8")
+    config = _qdrant_config(
+        tmp_path,
+        docs,
+        tmp_path / "manifest.json",
+    ).with_overrides(qdrant_url=f"{scheme}://qdrant.example/cluster")
+    store = FakeQdrantStore(collection_exists=True)
+    _install_fakes(monkeypatch, store)
+    ingest.ingest_documents(config)
+    source.unlink()
+    save_calls = store.save_calls
+
+    switched = config.with_overrides(
+        qdrant_url=f"{scheme}://qdrant.example:{port}/cluster"
+    )
+    with pytest.raises(
+        exceptions.ConfigurationError,
+        match="dedicated INGEST_MANIFEST_PATH",
+    ):
+        ingest.ingest_documents(switched)
+
+    assert store.save_calls == save_calls
+    assert store.removed_source_paths == []
+
+
 def test_manifest_storage_identity_does_not_persist_qdrant_credentials(
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,

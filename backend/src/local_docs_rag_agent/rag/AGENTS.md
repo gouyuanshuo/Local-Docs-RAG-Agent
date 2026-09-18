@@ -30,6 +30,8 @@ pipeline -> rerank -> llm_rerank
   must restore even when checksums match.
 - The versioned ingest manifest binds source ownership to a hashed storage
   identity. A known target mismatch must fail before store mutation.
+- Qdrant storage identity uses effective REST port `6333` when the URL omits a
+  port. Explicit ports, including `80` and `443`, remain distinct targets.
 - The index fingerprint includes the resolved document root and sorted unique
   exclusion patterns. Same-target scope changes rebuild while retaining the
   prior source list for stale-source deletion.

@@ -178,7 +178,9 @@ the resolved `DOCS_DIR`, sorted unique `DOCS_EXCLUDE_PATTERNS`, embedding mode
 and model, and chunk settings. Its storage identity is a SHA-256 digest of the
 resolved local `INDEX_PATH`, or the canonical credential-free Qdrant endpoint
 and collection. API keys, URL user information, queries, fragments, and raw
-credential-bearing URLs are never persisted in that identity.
+credential-bearing URLs are never persisted in that identity. Qdrant's
+effective REST port is `6333` when omitted; explicit ports such as `80` and
+`443` remain distinct storage targets.
 
 Changing scope on the same target rebuilds while the previous source list is
 still available, so newly excluded or removed Qdrant sources are deleted.

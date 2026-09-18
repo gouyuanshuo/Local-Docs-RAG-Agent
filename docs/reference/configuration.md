@@ -74,7 +74,7 @@ present). Copy `.env.example` to `.env` to configure a local instance.
 
 | Variable | Type | Default | Validation / Values | Description |
 | --- | --- | --- | --- | --- |
-| `QDRANT_URL` | string | `None` | HTTP(S) URL | Endpoint URL for remote or local Qdrant server. Its canonical endpoint, without user information, query, or fragment, contributes to the hashed storage identity. |
+| `QDRANT_URL` | string | `None` | HTTP(S) URL | Endpoint URL for remote or local Qdrant server. Its canonical endpoint, without user information, query, or fragment, contributes to the hashed storage identity. An omitted port means Qdrant REST port `6333`; explicit ports remain distinct targets. |
 | `QDRANT_API_KEY` | string | `None` | API key token | Optional authentication token for Qdrant Cloud. |
 | `QDRANT_COLLECTION` | string | `local-docs-rag` | non-empty string | Target collection name in Qdrant; bound to the ingest manifest's storage identity. |
 | `QDRANT_TIMEOUT_S` | integer | `30` | positive integer | Request timeout in seconds for Qdrant client calls. |

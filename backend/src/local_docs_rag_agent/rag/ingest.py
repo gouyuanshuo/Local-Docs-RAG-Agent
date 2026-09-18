@@ -275,12 +275,8 @@ def _canonical_qdrant_url(url: str) -> str:
     normalized_host = hostname.lower()
     if ":" in normalized_host:
         normalized_host = f"[{normalized_host}]"
-    default_port = (scheme == "http" and port == 80) or (
-        scheme == "https" and port == 443
-    )
-    netloc = normalized_host
-    if port is not None and not default_port:
-        netloc = f"{netloc}:{port}"
+    effective_port = port if port is not None else 6333
+    netloc = f"{normalized_host}:{effective_port}"
     path = parsed.path.rstrip("/")
     return parse.urlunsplit((scheme, netloc, path, "", ""))
 
