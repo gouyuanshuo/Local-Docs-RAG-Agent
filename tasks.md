@@ -88,6 +88,11 @@ Current theme:
 - [x] Preserve runtime/provider diagnostics in per-case eval results
 - [x] Add a strict live Qdrant verification script with stage-specific diagnostics
 
+### Audit remediation (2026-09-19)
+
+- [x] Repair real Agents SDK tool registration when postponed annotations are
+      resolved by the SDK decorator
+
 ### Structure and readability pass
 
 - [x] Remove stray root shim scripts and untrack already-ignored build output

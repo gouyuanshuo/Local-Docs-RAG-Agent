@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import socket
 import sys
 import types
-from typing import Any, ClassVar
+from typing import Any, ClassVar, NoReturn
 
 import pytest
 
@@ -133,6 +135,63 @@ def _retrieval_outcome() -> models.RetrievalOutcome:
             provider="none", mode="ready", reason="reranker_disabled"
         ),
     )
+
+
+@pytest.mark.parametrize("api_style", ["responses", "chat_completions"])
+def test_real_sdk_registers_tools(api_style: str) -> None:
+    config = _config(api_style)
+    client = openai_client.build_async_openai_client(
+        api_key="fake-key",
+        base_url="https://provider.invalid/v1",
+        trust_env=False,
+    )
+    try:
+        built = agents_sdk._build_sdk_agent(config, client)
+        assert {tool.name for tool in built.tools} == {
+            "list_local_documents",
+            "search_local_documents",
+            "get_current_time",
+        }
+    finally:
+        asyncio.run(client.close())
+
+
+def test_real_sdk_public_runtime_uses_fake_runner_offline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agents_module = pytest.importorskip("agents")
+    registered_tools: set[str] = set()
+
+    def block_network(*args: object, **kwargs: object) -> NoReturn:
+        del args, kwargs
+        raise AssertionError("The Agents SDK runtime test must stay offline.")
+
+    async def fake_run(
+        agent: Any,
+        question: str,
+        *,
+        context: agents_sdk.AgentRuntimeContext,
+        max_turns: int,
+    ) -> types.SimpleNamespace:
+        del question, context, max_turns
+        registered_tools.update(tool.name for tool in agent.tools)
+        return types.SimpleNamespace(final_output="Offline SDK answer.")
+
+    monkeypatch.setattr(socket, "create_connection", block_network)
+    monkeypatch.setattr(
+        asyncio.BaseEventLoop, "create_connection", block_network
+    )
+    monkeypatch.setattr(agents_module.Runner, "run", fake_run)
+
+    answer = agents_sdk.answer_with_agents_sdk(_config("responses"), "question")
+
+    assert answer.answer == "Offline SDK answer."
+    assert answer.diagnostics.actual_runtime == "agents_sdk"
+    assert registered_tools == {
+        "list_local_documents",
+        "search_local_documents",
+        "get_current_time",
+    }
 
 
 @pytest.mark.parametrize(

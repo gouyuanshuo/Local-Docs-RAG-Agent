@@ -20,6 +20,8 @@ Internals: `dispatch.py`, `basic.py`, `agents_sdk.py`, `shared.py`.
 - `requested_runtime` vs `actual_runtime` always recorded.
 - Agents SDK uses a request-owned client; never a process-global OpenAI
   client.
+- Before decorating tools, the lazily imported `agents` module is bound in
+  `agents_sdk` globals so the real SDK can resolve postponed annotations.
 - Search goes through `rag.retrieve` (via `tools.search_documents`).
 
 ## May change

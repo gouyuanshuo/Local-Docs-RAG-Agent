@@ -143,7 +143,7 @@ def _build_sdk_agent(
 
     # function_tool resolves postponed annotations from the module global
     # namespace.
-    globals()["RunContextWrapper"] = agents.RunContextWrapper
+    globals()["agents"] = agents
 
     @agents.function_tool
     def list_local_documents(
