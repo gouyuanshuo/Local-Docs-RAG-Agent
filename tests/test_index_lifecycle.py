@@ -113,12 +113,16 @@ class _OwnershipStore:
         self,
         exists: bool,
         *,
-        save_error: Exception | None = None,
+        save_error: BaseException | None = None,
+        delete_error: BaseException | None = None,
+        create_before_error: bool = True,
     ) -> None:
         self._exists = exists
         self.delete_calls = 0
         self.save_calls = 0
         self.save_error = save_error
+        self.delete_error = delete_error
+        self.create_before_error = create_before_error
 
     def collection_exists(self) -> bool:
         return self._exists
@@ -134,12 +138,16 @@ class _OwnershipStore:
     ) -> None:
         del chunks, removed_source_paths, replaced_source_paths
         self.save_calls += 1
-        self._exists = True
+        if self.create_before_error:
+            self._exists = True
         if self.save_error is not None:
             raise self.save_error
+        self._exists = True
 
     def delete_collection(self) -> None:
         self.delete_calls += 1
+        if self.delete_error is not None:
+            raise self.delete_error
         self._exists = False
 
     @property
@@ -336,6 +344,132 @@ def test_index_guard_serializes_spawned_processes(
             second.join(timeout=5.0)
 
 
+@pytest.mark.parametrize("shared_resource", ["manifest", "store"])
+def test_index_guard_serializes_partial_overlap_between_threads(
+    tmp_path: pathlib.Path,
+    shared_resource: str,
+) -> None:
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    first_root.mkdir()
+    second_root.mkdir()
+    first = _local_config(first_root)
+    second = _local_config(second_root)
+    if shared_resource == "manifest":
+        second = second.with_overrides(
+            ingest_manifest_path=first.ingest_manifest_path
+        )
+    else:
+        second = second.with_overrides(index_path=first.index_path)
+    holder_entered = threading.Event()
+    release_holder = threading.Event()
+    contender_entered = threading.Event()
+    errors: list[BaseException] = []
+
+    def hold() -> None:
+        try:
+            with rag.index_guard(first):
+                holder_entered.set()
+                assert release_holder.wait(timeout=5.0)
+        except BaseException as exc:  # pragma: no cover - assertion reports it
+            errors.append(exc)
+
+    def contend() -> None:
+        try:
+            with rag.index_guard(second):
+                contender_entered.set()
+        except BaseException as exc:  # pragma: no cover - assertion reports it
+            errors.append(exc)
+
+    holder = threading.Thread(target=hold)
+    contender = threading.Thread(target=contend)
+    holder.start()
+    try:
+        assert holder_entered.wait(timeout=5.0) is True
+        contender.start()
+        assert contender_entered.wait(timeout=0.1) is False
+        release_holder.set()
+        assert contender_entered.wait(timeout=5.0) is True
+    finally:
+        release_holder.set()
+        holder.join(timeout=5.0)
+        contender.join(timeout=5.0)
+    assert not holder.is_alive()
+    assert not contender.is_alive()
+    assert errors == []
+
+
+@pytest.mark.parametrize("shared_resource", ["manifest", "store"])
+def test_index_guard_serializes_partial_overlap_between_spawned_processes(
+    tmp_path: pathlib.Path,
+    shared_resource: str,
+) -> None:
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    first_root.mkdir()
+    second_root.mkdir()
+    first = _local_config(first_root)
+    second = _local_config(second_root)
+    if shared_resource == "manifest":
+        second = second.with_overrides(
+            ingest_manifest_path=first.ingest_manifest_path
+        )
+    else:
+        second = second.with_overrides(index_path=first.index_path)
+    context = multiprocessing.get_context("spawn")
+    first_entered = context.Event()
+    release_first = context.Event()
+    second_entered = context.Event()
+    release_second = context.Event()
+    second_ready = context.Event()
+    begin_second = context.Event()
+    holder = context.Process(
+        target=_guard_process,
+        args=(
+            str(first.index_path),
+            str(first.ingest_manifest_path),
+            first_entered,
+            release_first,
+        ),
+    )
+    contender = context.Process(
+        target=_guard_process,
+        args=(
+            str(second.index_path),
+            str(second.ingest_manifest_path),
+            second_entered,
+            release_second,
+            second_ready,
+            begin_second,
+        ),
+    )
+    holder.start()
+    try:
+        assert first_entered.wait(timeout=5.0) is True
+        contender.start()
+        assert second_ready.wait(timeout=5.0) is True
+        begin_second.set()
+        assert second_entered.wait(timeout=0.3) is False
+        release_first.set()
+        assert second_entered.wait(timeout=5.0) is True
+        release_second.set()
+        holder.join(timeout=5.0)
+        contender.join(timeout=5.0)
+        assert holder.exitcode == 0
+        assert contender.exitcode == 0
+    finally:
+        release_first.set()
+        release_second.set()
+        begin_second.set()
+        if holder.is_alive():
+            holder.terminate()
+        if contender.pid is not None and contender.is_alive():
+            contender.terminate()
+        holder.join(timeout=5.0)
+        if contender.pid is not None:
+            contender.join(timeout=5.0)
+
+
 def test_local_guard_does_not_depend_on_process_temp_directory(
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -400,6 +534,39 @@ def test_local_guard_does_not_depend_on_process_temp_directory(
         first.join(timeout=5.0)
         if "second" in locals():
             second.join(timeout=5.0)
+
+
+def test_qdrant_lock_artifacts_exclude_endpoint_credentials(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    index_lock = importlib.import_module("local_docs_rag_agent.rag.index_lock")
+    remote_lock_root = tmp_path / "remote-locks"
+    monkeypatch.setattr(index_lock, "_REMOTE_LOCK_ROOT", remote_lock_root)
+    config = _qdrant_config(tmp_path).with_overrides(
+        qdrant_url=(
+            "https://lock-user:lock-password@qdrant.example/private-path"
+            "?token=lock-query#lock-fragment"
+        )
+    )
+
+    with rag.index_guard(config):
+        pass
+
+    artifacts = [
+        *remote_lock_root.glob("*.lock"),
+        *config.ingest_manifest_path.parent.glob("*.lock"),
+    ]
+    assert len(artifacts) == 2
+    rendered = "\n".join(str(path) for path in artifacts)
+    for secret in (
+        "lock-user",
+        "lock-password",
+        "private-path",
+        "lock-query",
+        "lock-fragment",
+    ):
+        assert secret not in rendered
 
 
 @pytest.mark.skipif(not hasattr(os, "fork"), reason="requires POSIX fork")
@@ -537,6 +704,85 @@ def test_index_guard_normalizes_file_open_failure_without_release(
     ):
         pytest.fail("unopenable lock unexpectedly acquired")
     assert released is False
+
+
+def test_index_guard_releases_first_resource_when_second_acquisition_fails(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _local_config(tmp_path)
+    index_lock = importlib.import_module("local_docs_rag_agent.rag.index_lock")
+    locks: list[Any] = []
+
+    class _OrderedFileLock:
+        def __init__(self) -> None:
+            self.released = False
+            self.position = len(locks)
+            self.fh = None
+            locks.append(self)
+
+        def acquire(self, *args: Any, **kwargs: Any) -> None:
+            del args, kwargs
+            if self.position == 1:
+                raise PermissionError("synthetic second-resource failure")
+
+        def release(self) -> None:
+            self.released = True
+
+    monkeypatch.setattr(
+        index_lock.portalocker,
+        "Lock",
+        lambda *args, **kwargs: _OrderedFileLock(),
+    )
+
+    with (
+        pytest.raises(exceptions.ConfigurationError),
+        rag.index_guard(config),
+    ):
+        pytest.fail("partially acquired guard unexpectedly entered")
+
+    assert len(locks) == 2
+    assert locks[0].released is True
+    assert locks[1].released is False
+
+
+def test_index_guard_attempts_every_release_after_one_release_fails(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _local_config(tmp_path)
+    index_lock = importlib.import_module("local_docs_rag_agent.rag.index_lock")
+    locks: list[Any] = []
+
+    class _OrderedFileLock:
+        def __init__(self) -> None:
+            self.release_attempted = False
+            self.position = len(locks)
+            self.fh = None
+            locks.append(self)
+
+        def acquire(self, *args: Any, **kwargs: Any) -> None:
+            del args, kwargs
+
+        def release(self) -> None:
+            self.release_attempted = True
+            if self.position == 1:
+                raise PermissionError("synthetic release failure")
+
+    monkeypatch.setattr(
+        index_lock.portalocker,
+        "Lock",
+        lambda *args, **kwargs: _OrderedFileLock(),
+    )
+
+    with (
+        pytest.raises(exceptions.ConfigurationError),
+        rag.index_guard(config),
+    ):
+        pass
+
+    assert len(locks) == 2
+    assert all(lock.release_attempted for lock in locks)
 
 
 def test_index_guard_timeout_is_actionable(
@@ -742,6 +988,130 @@ def test_qdrant_ownership_initializer_cleans_partial_failed_creation(
     store.save_error = None
     ownership = rag.initialize_owned_qdrant_index(config)
     rag.delete_owned_qdrant_index(config, ownership)
+
+
+@pytest.mark.parametrize(
+    "interruption",
+    [KeyboardInterrupt("stop ingest"), SystemExit("stop ingest")],
+)
+def test_qdrant_initializer_cleans_and_re_raises_interruption(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    interruption: BaseException,
+) -> None:
+    config = _qdrant_config(tmp_path).with_overrides(
+        qdrant_collection="interrupted-initializer"
+    )
+    (config.docs_dir / "sample.md").write_text("Evidence", encoding="utf-8")
+    store = _OwnershipStore(exists=False, save_error=interruption)
+    monkeypatch.setattr(qdrant_store, "QdrantChunkStore", _OwnershipStore)
+    monkeypatch.setattr(
+        store_factory,
+        "build_store",
+        lambda config, embedding_provider=None: store,
+    )
+    monkeypatch.setattr(
+        provider_factory,
+        "build_embedding_provider",
+        lambda config: _FakeEmbeddingProvider(),
+    )
+
+    with pytest.raises(type(interruption)) as exc_info:
+        rag.initialize_owned_qdrant_index(config)
+
+    assert exc_info.value is interruption
+    assert store.exists() is False
+    assert store.delete_calls == 1
+    assert rag.qdrant_orphaned_collection(interruption) is None
+
+    store.save_error = None
+    ownership = rag.initialize_owned_qdrant_index(config)
+    rag.delete_owned_qdrant_index(config, ownership)
+
+
+@pytest.mark.parametrize(
+    ("interruption", "cleanup_error"),
+    [
+        (KeyboardInterrupt("stop ingest"), RuntimeError("cleanup failed")),
+        (SystemExit("stop ingest"), SystemExit("cleanup interrupted")),
+    ],
+)
+def test_qdrant_initializer_marks_orphan_when_interrupt_cleanup_fails(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    interruption: BaseException,
+    cleanup_error: BaseException,
+) -> None:
+    collection = "exact-interrupted-collection"
+    config = _qdrant_config(tmp_path).with_overrides(
+        qdrant_collection=collection
+    )
+    (config.docs_dir / "sample.md").write_text("Evidence", encoding="utf-8")
+    store = _OwnershipStore(
+        exists=False,
+        save_error=interruption,
+        delete_error=cleanup_error,
+    )
+    monkeypatch.setattr(qdrant_store, "QdrantChunkStore", _OwnershipStore)
+    monkeypatch.setattr(
+        store_factory,
+        "build_store",
+        lambda config, embedding_provider=None: store,
+    )
+    monkeypatch.setattr(
+        provider_factory,
+        "build_embedding_provider",
+        lambda config: _FakeEmbeddingProvider(),
+    )
+
+    with pytest.raises(type(interruption)) as exc_info:
+        rag.initialize_owned_qdrant_index(config)
+
+    assert exc_info.value is interruption
+    assert rag.qdrant_orphaned_collection(interruption) == collection
+    assert any(collection in note for note in interruption.__notes__)
+    assert store.exists() is True
+    assert store.delete_calls == 1
+
+    store._exists = False
+    store.save_error = None
+    store.delete_error = None
+    ownership = rag.initialize_owned_qdrant_index(config)
+    rag.delete_owned_qdrant_index(config, ownership)
+
+
+def test_qdrant_initializer_does_not_mark_or_delete_absent_collection(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    interruption = KeyboardInterrupt("before collection creation")
+    config = _qdrant_config(tmp_path).with_overrides(
+        qdrant_collection="never-created"
+    )
+    (config.docs_dir / "sample.md").write_text("Evidence", encoding="utf-8")
+    store = _OwnershipStore(
+        exists=False,
+        save_error=interruption,
+        create_before_error=False,
+    )
+    monkeypatch.setattr(qdrant_store, "QdrantChunkStore", _OwnershipStore)
+    monkeypatch.setattr(
+        store_factory,
+        "build_store",
+        lambda config, embedding_provider=None: store,
+    )
+    monkeypatch.setattr(
+        provider_factory,
+        "build_embedding_provider",
+        lambda config: _FakeEmbeddingProvider(),
+    )
+
+    with pytest.raises(KeyboardInterrupt) as exc_info:
+        rag.initialize_owned_qdrant_index(config)
+
+    assert exc_info.value is interruption
+    assert store.delete_calls == 0
+    assert rag.qdrant_orphaned_collection(interruption) is None
 
 
 @pytest.mark.skipif(not hasattr(os, "fork"), reason="requires POSIX fork")

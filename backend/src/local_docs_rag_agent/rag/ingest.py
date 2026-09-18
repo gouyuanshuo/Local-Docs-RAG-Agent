@@ -2,15 +2,16 @@
 
 The step order is deliberate and is what makes a partial or repeated run safe:
 
-1. acquire the target's reentrant thread and cross-process lifecycle guard
-2. read every source document, so an unreadable file aborts before mutation
-3. load the typed manifest recorded by the previous run
-4. verify storage ownership, then compare the scope/retrieval fingerprint and
+1. validate and bind the canonical manifest and storage targets
+2. acquire both reentrant thread and cross-process lifecycle resources
+3. read every source document, so an unreadable file aborts before mutation
+4. load the typed manifest recorded by the previous run
+5. verify storage ownership, then compare the scope/retrieval fingerprint and
    work out removed and changed sources
-5. chunk only the sources that actually need reindexing
-6. attach embeddings and reject empty or mismatched vectors
-7. durably publish repair intent, then commit the configured store
-8. atomically publish the clean manifest
+6. chunk only the sources that actually need reindexing
+7. attach embeddings and reject empty or mismatched vectors
+8. durably publish repair intent, then commit the configured store
+9. atomically publish the clean manifest
 
 The fingerprint covers document scope plus every setting that changes what a
 stored vector *means*. A separate non-secret hash binds source ownership to the
@@ -69,12 +70,13 @@ def ingest_documents(
         embeddings receives fallback vectors.
       VectorStoreError: If the store rejects the write.
     """
-    with index_lock.index_guard(config):
-        return _ingest_documents_locked(config)
+    with index_lock.index_guard(config) as manifest_path:
+        return _ingest_documents_locked(config, manifest_path)
 
 
 def _ingest_documents_locked(
     config: app_config.AppConfig,
+    manifest_path: pathlib.Path,
 ) -> list[models.DocumentChunk]:
     source_texts = discovery.read_source_texts(
         config.docs_dir, config.docs_exclude_patterns
@@ -83,9 +85,7 @@ def _ingest_documents_locked(
         source_path: source_checksum(text)
         for source_path, text in source_texts.items()
     }
-    previous_manifest = manifest.IngestManifest.load(
-        config.ingest_manifest_path
-    )
+    previous_manifest = manifest.IngestManifest.load(manifest_path)
     desired_storage_identity = storage_identity(config)
     legacy_rebuild = _validate_manifest_storage(
         config,
@@ -120,7 +120,7 @@ def _ingest_documents_locked(
         plan.sources_to_index,
         storage_identity=desired_storage_identity,
     )
-    dirty_manifest.save(config.ingest_manifest_path)
+    dirty_manifest.save(manifest_path)
     store.save(
         chunks,
         removed_source_paths=(
@@ -151,7 +151,7 @@ def _ingest_documents_locked(
             ),
         ),
         storage_identity=desired_storage_identity,
-    ).save(config.ingest_manifest_path)
+    ).save(manifest_path)
     return chunks
 
 
@@ -170,12 +170,15 @@ def ensure_index(config: app_config.AppConfig) -> None:
       ConfigurationError: If the storage target is invalid, differs from the
         manifest, or a legacy Qdrant manifest needs an ownership decision.
     """
-    with index_lock.index_guard(config):
-        _ensure_index_locked(config)
+    with index_lock.index_guard(config) as manifest_path:
+        _ensure_index_locked(config, manifest_path)
 
 
-def _ensure_index_locked(config: app_config.AppConfig) -> None:
-    stored = manifest.IngestManifest.load(config.ingest_manifest_path)
+def _ensure_index_locked(
+    config: app_config.AppConfig,
+    manifest_path: pathlib.Path,
+) -> None:
+    stored = manifest.IngestManifest.load(manifest_path)
     desired_storage_identity = storage_identity(config)
     legacy_rebuild = _validate_manifest_storage(
         config,
@@ -236,26 +239,74 @@ def storage_identity(config: app_config.AppConfig) -> str:
       A SHA-256 digest of canonical, non-secret target data.
 
     Raises:
-      ConfigurationError: If a Qdrant URL is missing or is not an HTTP(S)
-        endpoint with a host and valid port.
+      ConfigurationError: If target semantics are invalid, including an
+        unsupported backend, aliased local index/manifest files, or a Qdrant
+        URL that is missing or malformed.
     """
+    payload = _storage_target_payload(config)
+    serialized = json.dumps(payload, ensure_ascii=True, sort_keys=True)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def validate_storage_target(config: app_config.AppConfig) -> None:
+    """Validate storage semantics without mutation or client construction.
+
+    The check is side-effect free: it does not acquire lifecycle locks, create
+    providers or stores, contact Qdrant, or write local paths. A missing Qdrant
+    URL is invalid here; callers that classify that configuration as skipped
+    must make that decision before invoking this validator.
+
+    Args:
+      config: Settings selecting the storage and manifest targets.
+
+    Raises:
+      ConfigurationError: If the backend is unsupported, a Qdrant URL is
+        missing or malformed, or local index and manifest paths alias.
+    """
+    _storage_target_payload(config)
+
+
+def _storage_target_payload(
+    config: app_config.AppConfig,
+) -> dict[str, str]:
     if config.vector_backend == "local":
-        payload = {
+        index_path = config.index_path.resolve()
+        manifest_path = manifest.canonical_path(config.ingest_manifest_path)
+        if _paths_alias(index_path, manifest_path):
+            raise exceptions.ConfigurationError(
+                "INDEX_PATH and INGEST_MANIFEST_PATH must identify different "
+                "files",
+                action_hint=(
+                    "Choose separate canonical paths for chunk storage and "
+                    "the ingest manifest, then retry."
+                ),
+            )
+        return {
             "vector_backend": "local",
-            "index_path": str(config.index_path.resolve()),
+            "index_path": str(index_path),
         }
-    else:
+    if config.vector_backend == "qdrant":
         if not config.qdrant_url:
             raise exceptions.ConfigurationError(
                 "QDRANT_URL must be set when VECTOR_BACKEND=qdrant"
             )
-        payload = {
+        return {
             "vector_backend": "qdrant",
             "qdrant_url": _canonical_qdrant_url(config.qdrant_url),
             "qdrant_collection": config.qdrant_collection,
         }
-    serialized = json.dumps(payload, ensure_ascii=True, sort_keys=True)
-    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+    raise exceptions.ConfigurationError(
+        f"VECTOR_BACKEND is unsupported: {config.vector_backend!r}"
+    )
+
+
+def _paths_alias(first: pathlib.Path, second: pathlib.Path) -> bool:
+    if first == second:
+        return True
+    try:
+        return first.samefile(second)
+    except OSError:
+        return False
 
 
 def _canonical_qdrant_url(url: str) -> str:

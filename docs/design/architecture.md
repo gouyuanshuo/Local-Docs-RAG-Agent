@@ -177,15 +177,26 @@ vectors to mix with BM25. Compare backends with `dense` and `hybrid_rrf`, not
 
 ### Persistence concurrency decision
 
-Index lifecycle serialization is a single-host, same-user guarantee. Every
-local process derives the same advisory lock file from the canonical storage
-target, and an explicit per-target thread lock prevents threads in one process
-from bypassing the operating-system lock. The owning thread may enter the guard
-reentrantly so retrieval can call `ensure_index` while holding readiness and
-query under one critical section. A local lock artifact lives beside the
-resolved index file. A remote lock artifact lives in the current user's cache
-and is named only by the credential-free hashed endpoint-and-collection
-identity; neither location depends on a process temporary directory.
+Index lifecycle serialization is a single-host, same-user guarantee. Each
+operation locks two independent resources: the canonical ingest manifest and
+the canonical storage target. Resource keys are acquired in deterministic
+global order under one finite deadline, using explicit per-resource thread
+locks plus operating-system advisory locks. The owning thread may enter the
+same guard reentrantly so retrieval can call `ensure_index` while holding
+readiness and query under one critical section. A shared manifest serializes
+even when storage differs, and shared storage serializes even when manifests
+differ; configurations sharing neither resource remain concurrent. Partial
+acquisition unwinds every resource already acquired, and release failures do
+not prevent attempts to release the remaining resources.
+
+Manifest and local-store lock artifacts live beside their respective resolved
+files. A Qdrant store artifact lives in the current user's cache and is named
+only by the credential-free hashed endpoint-and-collection identity. None of
+these locations depends on a process temporary directory. The manifest target
+is resolved once before guard acquisition and that bound path is used for load
+and atomic publication, preserving existing and dangling final-component
+symlinks. Local `INDEX_PATH` and `INGEST_MANIFEST_PATH` must not resolve to the
+same file; validation fails before either file or store is mutated.
 
 The guard covers manifest inspection, dirty-intent publication, store mutation,
 clean-manifest publication, and retrieval's readiness-plus-query window. It has
@@ -209,17 +220,18 @@ multi-host safety from its host-local lock files.
 
 The ingest order is deliberate:
 
-1. acquire the target's reentrant thread and cross-process lifecycle guard
-2. validate and read `DOCS_DIR` before writing anything
-3. load the typed manifest
-4. verify that its hashed storage identity owns the configured target
-5. compare the document-scope/retrieval fingerprint and calculate
+1. purely validate and canonically bind the storage and manifest targets
+2. acquire both resources' reentrant thread and cross-process guards
+3. validate and read `DOCS_DIR` before writing anything
+4. load the typed manifest from its bound canonical path
+5. verify that its hashed storage identity owns the configured target
+6. compare the document-scope/retrieval fingerprint and calculate
    removed/changed sources
-6. chunk only the required sources
-7. attach and validate embeddings
-8. atomically publish `repair_required` before any store mutation
-9. update the selected store
-10. atomically publish the clean manifest
+7. chunk only the required sources
+8. attach and validate embeddings
+9. atomically publish `repair_required` before any store mutation
+10. update the selected store
+11. atomically publish the clean manifest
 
 Retrieval holds the same guard while it checks readiness and queries the store.
 It enters `ensure_index` reentrantly, captures the embedding status, and
@@ -254,6 +266,13 @@ requires a dedicated manifest or an explicit operator decision to clear and
 adopt a confirmed-owned target. Legacy local manifests rebuild safely; legacy
 Qdrant manifests cannot be adopted without that ownership decision.
 
+`validate_storage_target` exposes target validation without acquiring a lock,
+constructing a provider/client/store, contacting a service, or writing a path.
+It deliberately treats a missing Qdrant URL as invalid; a caller such as an
+evaluation planner that classifies missing Qdrant configuration as skipped
+must do so before invoking this seam. Malformed endpoint diagnostics are fixed
+and credential-free.
+
 If a changed document becomes empty, it is still included in an incremental
 store's replacement deletes so old records cannot survive.
 
@@ -278,12 +297,20 @@ for retry.
 
 A process death loses the in-memory cleanup token and can leave a disposable
 collection orphaned. Record each UUID-derived run collection name in comparison
-output. Initialization can also orphan a partial collection if both first
-ingest and its guarded cleanup fail. Recovery is a targeted operator action:
-verify the recorded run prefix and exact collection name in Qdrant, then delete
-only that collection with Qdrant administration tooling. Never wildcard-delete
-collections. A multi-host initialization race still requires the external
-coordination described above.
+output. Initialization catches even `KeyboardInterrupt` and `SystemExit`,
+always discards its process claim, and attempts exact-target cleanup. If cleanup
+also fails or is interrupted, the original exception object escapes unchanged
+with a human-readable exact-name note; `qdrant_orphaned_collection` exposes the
+same name structurally. Recovery is a targeted operator action: verify the run
+prefix and exact collection name in Qdrant, then delete only that collection
+with Qdrant administration tooling. Never wildcard-delete collections. A
+multi-host initialization race still requires the external coordination
+described above.
+
+Normalized Qdrant failures never expose the raw configured URL, raw client
+message, or unsafe exception cause/context. They retain the operation,
+collection, exception class, stable reason code, reachability classification,
+and actionable proxy/network hints.
 
 ### Domain layer (`core/`)
 

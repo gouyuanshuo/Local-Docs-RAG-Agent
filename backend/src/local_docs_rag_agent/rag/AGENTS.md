@@ -11,6 +11,10 @@ package, import **only** `local_docs_rag_agent.rag` (the facade).
 - `index_guard` — same-user, single-host lifecycle critical section
 - `initialize_owned_qdrant_index` / `delete_owned_qdrant_index` — atomic
   first-ingest and fail-closed cleanup for disposable Qdrant collections
+- `qdrant_orphaned_collection` — structured exact-name recovery signal on an
+  exception escaping interrupted Qdrant initialization
+- `validate_storage_target` — pure, side-effect-free target validation; a
+  missing Qdrant URL is invalid to this seam
 - `build_store` / `retrieval_settings`
 - `chunk_text`, `collect_document_paths`, `read_source_texts`
 - `rank_chunks`, `RetrievalSettings`, `ChunkStore`, store types, `Reranker`
@@ -40,14 +44,16 @@ index_lock -> config, core (and lazy storage identity lookup)
   must restore even when checksums match.
 - Every store save follows durable `repair_required` publication. A clean
   manifest is published only after the store mutation succeeds.
-- Ingest and retrieval readiness/query hold the same reentrant thread plus
-  cross-process guard. Reranking runs after the guard is released.
+- Ingest and retrieval readiness/query lock both the canonical manifest and
+  storage target in global order under one deadline. Sharing either resource
+  serializes; configurations sharing neither remain concurrent. Reranking runs
+  after both resources are released.
 - After `fork`, child lock/ownership registries are reset and inherited lock
   descriptors are closed without unlocking the parent's guard. Contention on
   one target does not serialize an unrelated target.
-- Local lock artifacts live beside the resolved index file. Qdrant lock
-  artifacts live in the per-user cache and contain only a hashed,
-  credential-free storage identity. Persistent lock files are harmless.
+- Manifest and local-store lock artifacts live beside their resolved files.
+  Qdrant store artifacts live in the per-user cache and contain only a hashed,
+  credential-free identity. Persistent lock files are harmless.
 - Host-local guards do not coordinate Qdrant lifecycle work across hosts;
   multi-host deployments require external coordination.
 - The versioned ingest manifest binds source ownership to a hashed storage
@@ -56,12 +62,21 @@ index_lock -> config, core (and lazy storage identity lookup)
   or republishes them, even if they leave document scope before recovery.
 - Qdrant ownership initialization holds the guard through absence check and
   first ingest. It returns a cleanup token only after collection creation.
+- An initialization `BaseException` discards its claim and attempts exact
+  cleanup. Cleanup failure never replaces the original; it adds an exact-name
+  note and structured `qdrant_orphaned_collection` marker.
 - Qdrant storage identity uses effective REST port `6333` when the URL omits a
   port. Explicit ports, including `80` and `443`, remain distinct targets.
 - Qdrant endpoint parsing reports a fixed credential-free configuration error;
   IPv6 literals are compressed and port `0` is invalid.
+- Qdrant operation errors omit raw URLs and exception messages and suppress
+  unsafe chaining while retaining operation, collection, exception class,
+  reason code, and recovery hints.
 - The local store resolves its bound index path once before I/O, matching the
   identity path and preserving a final-component symlink during atomic writes.
+- The manifest target is likewise resolved before locking and I/O, preserving
+  existing or dangling final-component symlinks. A local index and manifest
+  may never resolve to the same file.
 - The index fingerprint includes the resolved document root and sorted unique
   exclusion patterns. Same-target scope changes rebuild while retaining the
   prior source list for stale-source deletion.

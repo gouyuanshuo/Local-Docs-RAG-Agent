@@ -10,9 +10,11 @@ import pytest
 import qdrant_client
 
 from local_docs_rag_agent import config as app_config
+from local_docs_rag_agent import rag
 from local_docs_rag_agent.core import exceptions, models
 from local_docs_rag_agent.providers import factory as provider_factory
 from local_docs_rag_agent.rag import (
+    index_lock,
     ingest,
     manifest,
     qdrant_store,
@@ -614,6 +616,90 @@ def test_local_index_dangling_symlink_survives_ingest_and_ensure(
     ] == ["Evidence"]
 
 
+@pytest.mark.parametrize("target_exists", [False, True])
+def test_manifest_final_symlink_survives_ingest_and_ensure(
+    tmp_path: pathlib.Path,
+    target_exists: bool,
+) -> None:
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "sample.md").write_text("Evidence", encoding="utf-8")
+    index_dir = tmp_path / "index"
+    manifest_link_dir = tmp_path / "manifest-link"
+    manifest_target_dir = tmp_path / "manifest-target"
+    index_dir.mkdir()
+    manifest_link_dir.mkdir()
+    manifest_target_dir.mkdir()
+    manifest_target = manifest_target_dir / "manifest.json"
+    if target_exists:
+        manifest.IngestManifest().save(manifest_target)
+    manifest_link = manifest_link_dir / "manifest.json"
+    manifest_link.symlink_to(manifest_target)
+    config = app_config.AppConfig.from_env().with_overrides(
+        docs_dir=docs,
+        docs_exclude_patterns=[],
+        index_path=index_dir / "chunks.jsonl",
+        ingest_manifest_path=manifest_link,
+        embedding_api_key=None,
+    )
+
+    ingest.ingest_documents(config)
+    ingest.ensure_index(config)
+
+    assert manifest_link.is_symlink()
+    assert manifest_target.exists()
+    assert (
+        manifest.IngestManifest.load(manifest_target).repair_required is False
+    )
+    assert list(manifest_link_dir.glob("*.lock")) == []
+    assert list(manifest_target_dir.glob("*.lock"))
+
+
+@pytest.mark.parametrize("alias_kind", ["direct", "symlinks", "hardlinks"])
+def test_local_index_and_manifest_may_not_alias_same_file(
+    tmp_path: pathlib.Path,
+    alias_kind: str,
+) -> None:
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "sample.md").write_text("Evidence", encoding="utf-8")
+    shared_target = tmp_path / "shared-state.json"
+    shared_target.write_bytes(b"unchanged-state")
+    if alias_kind == "symlinks":
+        index_path = tmp_path / "index-link.jsonl"
+        manifest_path = tmp_path / "manifest-link.json"
+        index_path.symlink_to(shared_target)
+        manifest_path.symlink_to(shared_target)
+    elif alias_kind == "hardlinks":
+        index_path = tmp_path / "index-hardlink.jsonl"
+        manifest_path = tmp_path / "manifest-hardlink.json"
+        index_path.hardlink_to(shared_target)
+        manifest_path.hardlink_to(shared_target)
+    else:
+        index_path = shared_target
+        manifest_path = shared_target
+    config = app_config.AppConfig.from_env().with_overrides(
+        docs_dir=docs,
+        docs_exclude_patterns=[],
+        index_path=index_path,
+        ingest_manifest_path=manifest_path,
+        embedding_api_key=None,
+    )
+
+    with pytest.raises(
+        exceptions.ConfigurationError,
+        match=r"INDEX_PATH.*INGEST_MANIFEST_PATH",
+    ):
+        ingest.ingest_documents(config)
+
+    assert shared_target.read_bytes() == b"unchanged-state"
+    assert index_path.exists()
+    assert manifest_path.exists()
+    if alias_kind == "symlinks":
+        assert index_path.is_symlink()
+        assert manifest_path.is_symlink()
+
+
 @pytest.mark.parametrize(
     ("override", "value"),
     [
@@ -815,6 +901,85 @@ def test_malformed_qdrant_url_traceback_excludes_credentials(
     assert "fake-user" not in formatted
     assert "fake-password" not in formatted
     assert exc_info.value.__suppress_context__ is True
+
+
+def test_validate_storage_target_is_side_effect_free(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    docs = tmp_path / "docs"
+    config = _qdrant_config(
+        tmp_path,
+        docs,
+        tmp_path / "manifest.json",
+    )
+
+    def unexpected_call(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise AssertionError("validation must not construct or lock")
+
+    monkeypatch.setattr(qdrant_client, "QdrantClient", unexpected_call)
+    monkeypatch.setattr(
+        provider_factory,
+        "build_embedding_provider",
+        unexpected_call,
+    )
+    monkeypatch.setattr(store_factory, "build_store", unexpected_call)
+    monkeypatch.setattr(index_lock, "index_guard", unexpected_call)
+
+    rag.validate_storage_target(config)
+
+    assert not docs.exists()
+    assert not config.index_path.exists()
+    assert not config.ingest_manifest_path.exists()
+
+
+def test_validate_storage_target_rejects_missing_qdrant_url(
+    tmp_path: pathlib.Path,
+) -> None:
+    config = _qdrant_config(
+        tmp_path,
+        tmp_path / "docs",
+        tmp_path / "manifest.json",
+    ).with_overrides(qdrant_url=None)
+
+    with pytest.raises(exceptions.ConfigurationError, match="QDRANT_URL"):
+        rag.validate_storage_target(config)
+
+
+def test_validate_storage_target_rejects_unknown_backend(
+    tmp_path: pathlib.Path,
+) -> None:
+    config = app_config.AppConfig.from_env().with_overrides(
+        index_path=tmp_path / "index.jsonl",
+        ingest_manifest_path=tmp_path / "manifest.json",
+    )
+    object.__setattr__(config, "vector_backend", "future-store")
+
+    with pytest.raises(exceptions.ConfigurationError, match="unsupported"):
+        rag.validate_storage_target(config)
+
+
+def test_validate_storage_target_malformed_url_traceback_excludes_credentials(
+    tmp_path: pathlib.Path,
+) -> None:
+    config = _qdrant_config(
+        tmp_path,
+        tmp_path / "docs",
+        tmp_path / "manifest.json",
+    ).with_overrides(
+        qdrant_url=(
+            "http://validation-user:validation-password@"
+            "example.invalid\uff0fbad"
+        )
+    )
+
+    with pytest.raises(exceptions.ConfigurationError) as exc_info:
+        rag.validate_storage_target(config)
+
+    formatted = "".join(traceback.format_exception(exc_info.value))
+    assert "validation-user" not in formatted
+    assert "validation-password" not in formatted
 
 
 def test_manifest_storage_identity_does_not_persist_qdrant_credentials(

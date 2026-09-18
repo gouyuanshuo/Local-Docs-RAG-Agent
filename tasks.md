@@ -124,6 +124,8 @@ Current theme:
       orphan-recovery metadata through the HTTP response schema
 - [x] Express index existence, incremental-update support, and live-embedding
       requirements through the `ChunkStore` lifecycle contract
+- [x] Lock canonical manifest and storage resources together, recover Qdrant
+      initialization interruptions, and sanitize outward Qdrant failures
 - [ ] Resolve the upstream Starlette/AnyIO `BlockingPortal` deprecation warning
       or add a narrowly justified filter after the dependency lock is selected
 

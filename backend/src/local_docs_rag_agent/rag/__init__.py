@@ -30,8 +30,13 @@ from local_docs_rag_agent.rag.index_ownership import (
     QdrantIndexOwnership,
     delete_owned_qdrant_index,
     initialize_owned_qdrant_index,
+    qdrant_orphaned_collection,
 )
-from local_docs_rag_agent.rag.ingest import ensure_index, ingest_documents
+from local_docs_rag_agent.rag.ingest import (
+    ensure_index,
+    ingest_documents,
+    validate_storage_target,
+)
 from local_docs_rag_agent.rag.local_store import LocalJsonlChunkStore
 from local_docs_rag_agent.rag.pipeline import build_reranker, retrieve
 from local_docs_rag_agent.rag.qdrant_store import QdrantChunkStore
@@ -60,8 +65,10 @@ __all__ = [
     "index_guard",
     "ingest_documents",
     "initialize_owned_qdrant_index",
+    "qdrant_orphaned_collection",
     "rank_chunks",
     "read_source_texts",
     "retrieval_settings",
     "retrieve",
+    "validate_storage_target",
 ]

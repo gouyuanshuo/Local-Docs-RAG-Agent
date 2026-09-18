@@ -99,7 +99,7 @@ class QdrantChunkStore:
         try:
             return bool(self._client.collection_exists(self._collection_name))
         except Exception as exc:
-            raise self._operation_error("collection_exists", exc) from exc
+            raise self._operation_error("collection_exists", exc) from None
 
     def delete_collection(self) -> None:
         """Delete this concrete store's configured collection.
@@ -118,7 +118,7 @@ class QdrantChunkStore:
                     "Qdrant reported that the collection was not deleted"
                 )
         except Exception as exc:
-            raise self._operation_error("delete_collection", exc) from exc
+            raise self._operation_error("delete_collection", exc) from None
 
     def save(
         self,
@@ -202,7 +202,7 @@ class QdrantChunkStore:
                     ],
                 )
         except Exception as exc:
-            raise self._operation_error("save", exc) from exc
+            raise self._operation_error("save", exc) from None
 
     def load(self) -> list[models.DocumentChunk]:
         """Read every stored chunk, paging through the collection.
@@ -233,7 +233,7 @@ class QdrantChunkStore:
                 if next_offset is None:
                     return chunks
         except Exception as exc:
-            raise self._operation_error("load", exc) from exc
+            raise self._operation_error("load", exc) from None
 
     def search(self, query: str, top_k: int) -> list[models.RetrievalHit]:
         """Rank the collection against `query`.
@@ -295,7 +295,7 @@ class QdrantChunkStore:
                 if isinstance(point.payload, dict)
             ]
         except Exception as exc:
-            raise self._operation_error("search", exc) from exc
+            raise self._operation_error("search", exc) from None
 
         # `blended` needs the chunk vectors to combine signals, and the server
         # does not return them, so on this backend it means what it has always
@@ -433,22 +433,28 @@ def qdrant_operation_error(
 
     Args:
       operation: The client call that failed, named in the message.
-      url: The service the call was made against.
+      url: The service the call was made against. It is accepted for caller
+        compatibility but never included in the outward error because it may
+        contain credentials or sensitive path/query data.
       collection_name: The collection the call addressed.
       exc: The raw failure.
       trust_env: Whether the client honoured environment proxies,
         which decides which proxy hint is worth giving.
 
     Returns:
-      The normalized error. An already-normalized one is passed
-      through unchanged, so a specific diagnosis such as a
-      vector-size mismatch is not flattened into a generic failure.
+      A credential-safe error retaining any existing stable reason code.
     """
+    del url
+    context = (
+        f"operation={operation} collection={collection_name} "
+        f"error_type={exc.__class__.__name__}"
+    )
     if isinstance(exc, exceptions.VectorStoreError):
-        return exc
-
-    context = f"operation={operation} collection={collection_name} url={url}"
-    detail = f"{exc.__class__.__name__}: {exc}"
+        return exceptions.VectorStoreError(
+            f"Qdrant operation rejected. {context}.",
+            reason_code=exc.reason_code,
+            action_hint=_safe_qdrant_action_hint(exc.reason_code),
+        )
     if looks_like_qdrant_unreachable(str(exc)):
         proxy_hint = (
             "Environment proxies are already disabled for this client."
@@ -457,7 +463,7 @@ def qdrant_operation_error(
             "EXTERNAL_HTTP_TRUST_ENV=false."
         )
         return exceptions.VectorStoreError(
-            f"Qdrant service appears unreachable. {context}. error={detail}",
+            f"Qdrant service appears unreachable. {context}.",
             reason_code="unreachable",
             action_hint=(
                 "Check QDRANT_URL, network access, and whether the "
@@ -466,9 +472,20 @@ def qdrant_operation_error(
             ),
         )
     return exceptions.VectorStoreError(
-        f"Qdrant operation failed. {context}. error={detail}",
+        f"Qdrant operation failed. {context}.",
         reason_code="operation_failed",
     )
+
+
+def _safe_qdrant_action_hint(reason_code: str) -> str | None:
+    if reason_code == "vector_size_mismatch":
+        return (
+            "Recreate the collection or use an embedding model with the "
+            "collection's vector dimension."
+        )
+    if reason_code == "invalid_collection":
+        return "Use a collection with one unnamed dense vector."
+    return None
 
 
 def looks_like_qdrant_unreachable(message: str) -> bool:

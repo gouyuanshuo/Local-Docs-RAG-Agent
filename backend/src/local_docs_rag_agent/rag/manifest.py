@@ -21,6 +21,18 @@ CURRENT_VERSION = 2
 LEGACY_VERSION = 1
 
 
+def canonical_path(path: pathlib.Path) -> pathlib.Path:
+    """Resolve the manifest target once before lifecycle locking and I/O.
+
+    Args:
+      path: Configured manifest path, which may be a final-component symlink.
+
+    Returns:
+      The canonical target used for both locking and manifest publication.
+    """
+    return path.resolve()
+
+
 @dataclasses.dataclass(frozen=True, slots=True)
 class ManifestEntry:
     """One source document's checksum and the chunk ids it produced."""

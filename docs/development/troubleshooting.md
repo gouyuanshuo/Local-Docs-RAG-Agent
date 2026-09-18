@@ -95,6 +95,11 @@ transport errors from several libraries. It covers refused and reset
 connections (including `WinError 10061` and `WinError 10054`), failed name
 resolution, and a server that disconnected.
 
+The normalized failure intentionally omits the raw configured URL and raw
+client message, including from exception chaining, because both can repeat URL
+credentials or sensitive path/query data. It retains the operation,
+collection, exception class, `reason_code`, and actionable network/proxy hint.
+
 **A stale proxy.** Provider and Qdrant clients honour `HTTP_PROXY`,
 `HTTPS_PROXY`, and `ALL_PROXY` by default. If a leftover proxy produces
 connection errors that look like an outage, set `EXTERNAL_HTTP_TRUST_ENV=false`
@@ -103,11 +108,11 @@ service is reachable only through a proxy. The unreachable hint tells you which
 case you are in.
 
 **Ingest or search refuses to run.** Qdrant rejects fallback embeddings, and
-reports `Qdrant ingest requires a live embedding provider` or `Qdrant search
-requires a live embedding provider`. Hash vectors are not comparable with the
-live vectors already in a collection, so writing or querying with them would
-corrupt results quietly. The action hint names the cause: a transient failure
-suggests retries and backoff, anything else suggests checking
+reports that the configured vector store or Qdrant search requires a live
+embedding provider. Hash vectors are not comparable with the live vectors
+already in a collection, so writing or querying with them would corrupt
+results quietly. The action hint names the cause: a transient failure suggests
+retries and backoff, anything else suggests checking
 `EMBEDDING_API_KEY`, `EMBEDDING_BASE_URL`, and `EMBEDDING_MODEL`. The local
 backend has no such rule and stores fallback vectors.
 
@@ -185,13 +190,21 @@ Qdrant's REST port `6333`. The diagnostic intentionally does not echo the URL,
 because URL user information or query parameters may contain credentials.
 
 **Timed out waiting for the index lifecycle lock.** Another thread or process
-on this host is ingesting or querying the same target. Retry after it finishes.
-An old `.lock` file beside a local index, or in the per-user cache for Qdrant,
-is harmless: the file is a stable target name, while the operating system owns
-and releases the actual advisory lock. These artifacts persist intentionally
-and do not depend on `TMPDIR`. Do not delete one to bypass an active owner.
-Qdrant lifecycle work from multiple hosts needs an external distributed lock
-or a single designated owner; the local lock cannot coordinate hosts.
+on this host is using the same canonical manifest or storage target. Retry
+after it finishes. Each operation acquires both resources in global order, so
+sharing either one serializes while unrelated pairs remain concurrent. An old
+`.lock` file beside a manifest/local index, or in the per-user cache for
+Qdrant, is harmless: the file is a stable resource name, while the operating
+system owns and releases the actual advisory lock. These artifacts persist
+intentionally and do not depend on `TMPDIR`. Do not delete one to bypass an
+active owner. Qdrant lifecycle work from multiple hosts needs an external
+distributed lock or a single designated owner; local locks cannot coordinate
+hosts.
+
+**`INDEX_PATH` and `INGEST_MANIFEST_PATH` identify the same file.** Choose two
+distinct canonical files. This includes symlinks or hard links that identify
+one target. The check happens before manifest or store mutation; do not work
+around it by replacing a link.
 
 **A disposable Qdrant comparison collection was orphaned.** This can happen if
 the process dies and loses its ownership token, or if first ingest and the
@@ -205,10 +218,17 @@ records `run_metadata.pre_cleanup_status`, but it is never ranked. Never guess
 a collection name from a label. If cleanup itself is interrupted, the original
 `KeyboardInterrupt` or `SystemExit` is re-raised with the same exact-name
 recovery direction in an exception note; no raw cell can safely be returned.
+Programmatic callers can read the exact structured recovery name with
+`rag.qdrant_orphaned_collection(exception)` instead of parsing that note.
 Never delete by a wildcard or by the interactive collection's configured name.
 Comparison callers must use `initialize_owned_qdrant_index` before evaluation;
 it performs first ingest and returns the only token accepted by
 `delete_owned_qdrant_index`. Do not pre-create the collection separately.
+
+Use `rag.validate_storage_target(config)` when a caller needs pure preflight
+validation without locks, writes, provider/client construction, or service
+contact. It treats a missing `QDRANT_URL` as invalid; comparison planning that
+wants `missing_qdrant_url` to be a skipped cell must classify that case first.
 
 **`DOCS_DIR does not exist`.** The directory is resolved relative to where the
 process starts. Run from the repository root, or use an absolute path.

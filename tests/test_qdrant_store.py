@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import traceback
 import types
 from typing import Any
 
@@ -110,6 +111,97 @@ def test_unreachable_error_knows_proxy_is_already_disabled() -> None:
     )
 
     assert "already disabled" in str(error)
+
+
+@pytest.mark.parametrize(
+    ("raw_message", "reason_code"),
+    [
+        (
+            "connection reset while using api-key-secret at path-secret",
+            "unreachable",
+        ),
+        (
+            "protocol exploded with query-secret and pass-secret",
+            "operation_failed",
+        ),
+    ],
+)
+def test_qdrant_failure_traceback_excludes_url_and_exception_secrets(
+    monkeypatch: pytest.MonkeyPatch,
+    raw_message: str,
+    reason_code: str,
+) -> None:
+    configured_url = (
+        "https://user-secret:pass-secret@qdrant.example/path-secret"
+        "?token=query-secret#fragment-secret"
+    )
+
+    class FakeQdrantClient:
+        def __init__(self, **kwargs: Any) -> None:
+            del kwargs
+
+        def collection_exists(self, collection_name: str) -> bool:
+            del collection_name
+            raise RuntimeError(f"{raw_message}; url={configured_url}")
+
+    monkeypatch.setattr(qdrant_client, "QdrantClient", FakeQdrantClient)
+    store = qdrant_store.QdrantChunkStore(
+        url=configured_url,
+        api_key="api-key-secret",
+        collection_name="safe-collection",
+        timeout_s=10,
+        embedding_provider=StubEmbeddingProvider(),
+    )
+
+    with pytest.raises(exceptions.VectorStoreError) as exc_info:
+        store.collection_exists()
+
+    formatted = "".join(traceback.format_exception(exc_info.value))
+    assert exc_info.value.reason_code == reason_code
+    assert "collection_exists" in str(exc_info.value)
+    assert "safe-collection" in str(exc_info.value)
+    assert "RuntimeError" in str(exc_info.value)
+    for secret in (
+        "user-secret",
+        "pass-secret",
+        "path-secret",
+        "query-secret",
+        "fragment-secret",
+        "api-key-secret",
+        configured_url,
+        raw_message,
+    ):
+        assert secret not in formatted
+
+
+def test_qdrant_normalizer_redacts_pre_normalized_exception_text() -> None:
+    raw = exceptions.VectorStoreError(
+        "raw-domain-secret at https://user:password@example.invalid/private",
+        reason_code="invalid_collection",
+        action_hint="query-secret",
+    )
+
+    error = qdrant_store.qdrant_operation_error(
+        operation="save",
+        url="https://url-secret@example.invalid/path-secret",
+        collection_name="safe-collection",
+        exc=raw,
+    )
+
+    assert error.reason_code == "invalid_collection"
+    assert "save" in str(error)
+    assert "safe-collection" in str(error)
+    assert "VectorStoreError" in str(error)
+    for secret in (
+        "raw-domain-secret",
+        "user",
+        "password",
+        "private",
+        "query-secret",
+        "url-secret",
+        "path-secret",
+    ):
+        assert secret not in str(error)
 
 
 def test_qdrant_search_rejects_fallback_embedding_vector(

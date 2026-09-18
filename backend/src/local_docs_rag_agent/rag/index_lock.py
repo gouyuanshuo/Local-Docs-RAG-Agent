@@ -1,10 +1,11 @@
-"""Single-host lifecycle serialization for one configured index target.
+"""Single-host serialization for manifest and storage lifecycle resources.
 
 The operating-system lock coordinates processes while an explicit reentrant
-thread lock closes the gap left by advisory locks inside one process. Local
-locks live beside the canonical index file; remote locks use a credential-free
-identity in the user's cache. Only the owning thread may enter recursively.
-Lock files are stable identity markers and may safely outlive a run.
+thread lock closes the gap left by advisory locks inside one process. Manifest
+and local-store locks live beside their canonical files; remote locks use a
+credential-free identity in the user's cache. Resources are globally ordered,
+and only the owning thread may enter recursively. Lock files are stable
+identity markers and may safely outlive a run.
 """
 
 from __future__ import annotations
@@ -42,13 +43,28 @@ class _LockState:
     users: int = 0
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class _LockResource:
+    key: str
+    path: pathlib.Path
+
+
+@dataclasses.dataclass(slots=True)
+class _AcquiredResource:
+    resource: _LockResource
+    state: _LockState
+    thread_lock_acquired: bool = False
+    file_lock: portalocker.Lock | None = None
+    file_lock_acquired: bool = False
+
+
 _LOCK_STATES: dict[str, _LockState] = {}
 _ACTIVE_FILE_LOCKS: dict[int, portalocker.Lock] = {}
 
 
 @contextlib.contextmanager
-def index_guard(config: app_config.AppConfig) -> Iterator[None]:
-    """Serialize index readiness, reads, and writes for one storage target.
+def index_guard(config: app_config.AppConfig) -> Iterator[pathlib.Path]:
+    """Serialize lifecycle work for both manifest and storage target.
 
     The guarantee covers processes owned by the same user on one host. Qdrant
     deployments with lifecycle operations on multiple hosts need external
@@ -58,106 +74,161 @@ def index_guard(config: app_config.AppConfig) -> Iterator[None]:
       config: Settings identifying the local file or Qdrant collection.
 
     Yields:
-      Control while this thread owns the target's lifecycle lock.
+      The canonical manifest target while this thread owns both lifecycle
+      resources.
 
     Raises:
-      ConfigurationError: If the lock cannot be acquired before the finite
-        timeout or its lock artifact cannot be opened or updated.
+      ConfigurationError: If either target is invalid, the lock cannot be
+        acquired before the finite timeout, or a lock artifact cannot be
+        opened or updated.
     """
     _ensure_current_process()
-    key = _lock_key(config)
-    state = _retain_lock_state(key)
+    resources, manifest_path = _lock_resources(config)
     deadline = time.monotonic() + LOCK_TIMEOUT_SECONDS
-    thread_lock_acquired = False
-    file_lock: portalocker.Lock | None = None
-    file_lock_acquired = False
+    acquired: list[_AcquiredResource] = []
     try:
-        if not state.thread_lock.acquire(timeout=LOCK_TIMEOUT_SECONDS):
-            raise _timeout_error()
-        thread_lock_acquired = True
-        depths = _thread_depths()
-        reentrant = depths.get(key, 0) > 0
-        if not reentrant:
-            lock_path = _lock_path(config, key)
-            try:
-                lock_path.parent.mkdir(parents=True, exist_ok=True)
-            except OSError as exc:
-                raise _lock_io_error() from exc
-            file_lock = portalocker.Lock(
-                lock_path,
-                mode="a",
-                timeout=0.0,
-                check_interval=0.05,
-                fail_when_locked=True,
+        for resource in resources:
+            frame = _AcquiredResource(
+                resource=resource,
+                state=_retain_lock_state(resource.key),
             )
-            while True:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise _timeout_error()
-                try:
-                    with _ACTIVE_LOCKS_GUARD:
-                        file_lock.acquire(
-                            timeout=0.0,
-                            check_interval=0.05,
-                            fail_when_locked=True,
-                        )
-                        _ACTIVE_FILE_LOCKS[id(file_lock)] = file_lock
-                except portalocker.exceptions.LockException:
-                    time.sleep(min(0.05, remaining))
-                    continue
-                except OSError as exc:
-                    raise _lock_io_error() from exc
-                break
-            file_lock_acquired = True
-        depths[key] = depths.get(key, 0) + 1
-        try:
-            yield
-        finally:
-            next_depth = depths[key] - 1
-            if next_depth:
-                depths[key] = next_depth
-            else:
-                depths.pop(key, None)
+            acquired.append(frame)
+            _acquire_resource(frame, deadline)
+        yield manifest_path
     finally:
         active_error = sys.exception()
-        try:
-            if file_lock is not None and file_lock_acquired:
-                with _ACTIVE_LOCKS_GUARD:
-                    try:
-                        file_lock.release()
-                    except (
-                        OSError,
-                        portalocker.exceptions.LockException,
-                    ) as exc:
-                        if active_error is None:
-                            raise _lock_io_error() from exc
-                    finally:
-                        _ACTIVE_FILE_LOCKS.pop(id(file_lock), None)
-        finally:
-            if thread_lock_acquired:
-                state.thread_lock.release()
-            _release_lock_state(key, state)
+        release_error: BaseException | None = None
+        for frame in reversed(acquired):
+            try:
+                _release_resource(frame, active_error or release_error)
+            except BaseException as exc:
+                release_error = exc
+        if active_error is None and release_error is not None:
+            raise release_error
 
 
-def _lock_key(config: app_config.AppConfig) -> str:
-    if config.vector_backend == "local":
-        target = f"local:{config.index_path.resolve()}"
-    else:
-        # Imported lazily to avoid an ingest -> index_lock -> ingest cycle.
-        from local_docs_rag_agent.rag import ingest
-
-        target = f"qdrant:{ingest.storage_identity(config)}"
-    return hashlib.sha256(target.encode("utf-8")).hexdigest()
-
-
-def _lock_path(
+def _lock_resources(
     config: app_config.AppConfig,
-    key: str,
-) -> pathlib.Path:
+) -> tuple[tuple[_LockResource, ...], pathlib.Path]:
+    # Imported lazily to avoid an ingest -> index_lock -> ingest cycle.
+    from local_docs_rag_agent.rag import ingest, manifest
+
+    ingest.validate_storage_target(config)
+    manifest_path = manifest.canonical_path(config.ingest_manifest_path)
+    manifest_resource = _local_resource("manifest", manifest_path)
     if config.vector_backend == "local":
-        target = config.index_path.resolve()
-        return target.parent / f".local-docs-rag-agent-{key}.lock"
-    return _REMOTE_LOCK_ROOT / f"{key}.lock"
+        index_path = config.index_path.resolve()
+        storage_resource = _local_resource("local-store", index_path)
+    else:
+        storage_key = _resource_key(
+            "remote-store", ingest.storage_identity(config)
+        )
+        storage_resource = _LockResource(
+            key=storage_key,
+            path=_REMOTE_LOCK_ROOT / f"{storage_key}.lock",
+        )
+    return (
+        tuple(
+            sorted((manifest_resource, storage_resource), key=lambda x: x.key)
+        ),
+        manifest_path,
+    )
+
+
+def _local_resource(kind: str, target: pathlib.Path) -> _LockResource:
+    key = _resource_key(kind, str(target))
+    return _LockResource(
+        key=key,
+        path=target.parent / f".local-docs-rag-agent-{kind}-{key}.lock",
+    )
+
+
+def _resource_key(kind: str, target: str) -> str:
+    value = f"{kind}:{target}"
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _acquire_resource(
+    frame: _AcquiredResource,
+    deadline: float,
+) -> None:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0 or not frame.state.thread_lock.acquire(timeout=remaining):
+        raise _timeout_error()
+    frame.thread_lock_acquired = True
+    depths = _thread_depths()
+    key = frame.resource.key
+    if depths.get(key, 0) == 0:
+        try:
+            frame.resource.path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise _lock_io_error() from exc
+        frame.file_lock = portalocker.Lock(
+            frame.resource.path,
+            mode="a",
+            timeout=0.0,
+            check_interval=0.05,
+            fail_when_locked=True,
+        )
+        _acquire_file_lock(frame, deadline)
+    depths[key] = depths.get(key, 0) + 1
+
+
+def _acquire_file_lock(
+    frame: _AcquiredResource,
+    deadline: float,
+) -> None:
+    assert frame.file_lock is not None
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise _timeout_error()
+        try:
+            with _ACTIVE_LOCKS_GUARD:
+                frame.file_lock.acquire(
+                    timeout=0.0,
+                    check_interval=0.05,
+                    fail_when_locked=True,
+                )
+                _ACTIVE_FILE_LOCKS[id(frame.file_lock)] = frame.file_lock
+        except portalocker.exceptions.LockException:
+            time.sleep(min(0.05, remaining))
+            continue
+        except OSError as exc:
+            raise _lock_io_error() from exc
+        frame.file_lock_acquired = True
+        return
+
+
+def _release_resource(
+    frame: _AcquiredResource,
+    active_error: BaseException | None,
+) -> None:
+    key = frame.resource.key
+    depths = _thread_depths()
+    if frame.thread_lock_acquired and key in depths:
+        next_depth = depths[key] - 1
+        if next_depth:
+            depths[key] = next_depth
+        else:
+            depths.pop(key, None)
+    try:
+        if frame.file_lock is not None and frame.file_lock_acquired:
+            with _ACTIVE_LOCKS_GUARD:
+                try:
+                    frame.file_lock.release()
+                except (
+                    OSError,
+                    portalocker.exceptions.LockException,
+                ) as exc:
+                    if active_error is None:
+                        raise _lock_io_error() from exc
+                finally:
+                    _ACTIVE_FILE_LOCKS.pop(id(frame.file_lock), None)
+    finally:
+        if frame.thread_lock_acquired:
+            frame.state.thread_lock.release()
+        _release_lock_state(key, frame.state)
 
 
 def _retain_lock_state(key: str) -> _LockState:

@@ -29,6 +29,9 @@ class QdrantIndexOwnership:
 _CLAIMS_GUARD = threading.Lock()
 _CLAIMS: dict[str, tuple[str, str]] = {}
 _CLAIMS_PROCESS_ID = os.getpid()
+_ORPHANED_COLLECTION_ATTRIBUTE = (
+    "_local_docs_rag_agent_qdrant_orphaned_collection"
+)
 
 
 def initialize_owned_qdrant_index(
@@ -87,19 +90,36 @@ def initialize_owned_qdrant_index(
                         "new unique collection name."
                     ),
                 )
-        except Exception as exc:
+        except BaseException as exc:
+            cleanup_failed = False
             try:
                 if store.collection_exists():
-                    store.delete_collection()
-            except Exception:
-                exc.add_note(
-                    "Partial Qdrant collection cleanup also failed; use "
-                    "exact-name orphan recovery."
-                )
+                    try:
+                        store.delete_collection()
+                    except BaseException:
+                        cleanup_failed = True
+            except BaseException:
+                cleanup_failed = True
             finally:
                 _discard_claim(ownership)
+            if cleanup_failed:
+                _mark_orphaned_collection(exc, collection_name)
             raise
         return ownership
+
+
+def qdrant_orphaned_collection(exc: BaseException) -> str | None:
+    """Return the exact Qdrant collection left by interrupted initialization.
+
+    Args:
+      exc: The original exception escaping owned Qdrant initialization.
+
+    Returns:
+      The exact collection requiring operator recovery, or None when cleanup
+      succeeded or no collection was created.
+    """
+    value = getattr(exc, _ORPHANED_COLLECTION_ATTRIBUTE, None)
+    return value if isinstance(value, str) and value else None
 
 
 def delete_owned_qdrant_index(
@@ -147,6 +167,18 @@ def delete_owned_qdrant_index(
 def _discard_claim(ownership: QdrantIndexOwnership) -> None:
     with _CLAIMS_GUARD:
         _CLAIMS.pop(ownership._nonce, None)
+
+
+def _mark_orphaned_collection(
+    exc: BaseException,
+    collection_name: str,
+) -> None:
+    setattr(exc, _ORPHANED_COLLECTION_ATTRIBUTE, collection_name)
+    exc.add_note(
+        "Qdrant initialization cleanup did not complete. Collection "
+        f"{collection_name!r} may be orphaned; inspect that exact collection "
+        "and delete only after verifying it belongs to the interrupted run."
+    )
 
 
 def _require_qdrant(config: app_config.AppConfig) -> None:
