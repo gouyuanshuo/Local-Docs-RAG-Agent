@@ -56,7 +56,9 @@ Load gold, score one run, sweep a matrix, rank a leaderboard.
 
 - Add gold cases (keep 8–15 unless a named expansion). Failure-mode
   coverage: rare term, paraphrase, near-dup, cross-section, fusion.
-- New compare axis: add one `MatrixAxis` in `AXES`, nothing else.
+- New compare axis: add one `MatrixAxis` in `AXES`; coordinate the matching
+  API schema and hand-synchronized `frontend/src/types/api.ts` wire field with
+  the delivery owner, including HTTP serialization and frontend build checks.
 
 ## Must not
 

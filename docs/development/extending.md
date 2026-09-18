@@ -131,11 +131,16 @@ module-only imports, 80 columns, and a Google docstring on anything public.
    prefix, and how it defaults.
 3. Add the matching field, under the same name, to `EvalCompareRequest` and
    `EvalCompareResponse` in `api/schemas.py`.
+4. Add the field to the hand-synchronized comparison wire types in
+   `frontend/src/types/api.ts`. Extend the HTTP serialization and frontend
+   type/build checks in the same change.
 
-Nothing else. The Cartesian product, the per-cell overrides, the run label, the
-report keys, and the CLI flag are all derived from that entry, and
-`tests/test_eval_comparison.py` fails if the schema, the CLI, or the label falls
-out of step with it.
+No other matrix-planning code changes are needed. The Cartesian product, the
+per-cell overrides, the run label, the report keys, and the CLI flag are all
+derived from that entry, and `tests/test_eval_comparison.py` fails if the
+Python schema, the CLI, or the label falls out of step with it. The TypeScript
+wire type remains an explicit delivery-boundary update rather than a derived
+artifact.
 
 That derivation is the point. The axes were once a parameter list, a length
 list, a `product()` call, and an unpacking tuple that had to agree by position.

@@ -136,17 +136,23 @@ match the live collection.
   - reorders a candidate window with one chat call, degrading to first-stage order
 - `rag/scoring.py`
   - the tokenizer, cosine similarity, and the original blended chunk score
-- `rag/file_io.py`
-  - atomic text-file replacement
+- `core/file_io.py` (shared lower layer)
+  - atomic text-file replacement used by local storage and manifests
 
-The dependency direction inside the package runs one way:
+Arrows below mean "imports or calls into." The lazy edges from `index_lock`
+back to ingest/manifest exist only to derive target identity without creating
+an eager import cycle:
 
 ```text
-discovery -> chunker -> ingest -> pipeline -> store_factory -> base / local_store
-                                                            -> qdrant_store
-                                                            -> retrieval -> bm25
-                                                                         -> fusion
-                                           -> rerank -> llm_rerank
+pipeline        -> ingest, store_factory, rerank, llm_rerank
+ingest          -> discovery, chunker, index_lock, manifest, store_factory
+index_ownership -> index_lock, ingest, qdrant_store, store_factory
+index_lock      -> config, core (+ lazy ingest / manifest target helpers)
+store_factory   -> base, local_store, qdrant_store, retrieval
+local_store     -> retrieval
+qdrant_store    -> retrieval
+retrieval       -> bm25, fusion, scoring
+llm_rerank      -> rerank
 ```
 
 `base` and `models` sit at the bottom and import nothing from the layers above them.
