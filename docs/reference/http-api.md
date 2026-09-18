@@ -142,8 +142,58 @@ a request error, while provider and runtime failures remain per-cell outcomes.
 - **Response**: `200 OK`
   ```json
   {
-    "num_runs": 4,
-    "runs": [],
+    "num_runs": 1,
+    "dataset_identity": "<stable-corpus-and-gold-digest>",
+    "runtimes": ["basic"],
+    "chunk_strategies": ["markdown"],
+    "vector_backends": ["qdrant"],
+    "top_ks": [4],
+    "chunk_sizes": [800],
+    "chunk_overlaps": [120],
+    "retrieval_strategies": ["blended"],
+    "rerankers": ["none"],
+    "runs": [
+      {
+        "label": "basic:qdrant:markdown:blended:rr-none:k4:s800:o120",
+        "status": "error",
+        "dataset_identity": "<stable-corpus-and-gold-digest>",
+        "configuration_identity": "<semantic-configuration-digest>",
+        "run_metadata": {
+          "disposable_qdrant_collection": "local-docs-rag-eval-<uuid>",
+          "orphan_recovery_required": true,
+          "pre_cleanup_status": "error",
+          "cleanup_error": "RuntimeError: cleanup failure",
+          "prior_error": "RuntimeError: eval failure"
+        },
+        "reason": null,
+        "error": "Qdrant comparison cleanup failed for disposable collection local-docs-rag-eval-<uuid>: RuntimeError: cleanup failure; original cell failure: RuntimeError: eval failure",
+        "retrieval_config": {
+          "vector_backend": "qdrant",
+          "chunk_strategy": "markdown",
+          "chunk_size": 800,
+          "chunk_overlap": 120,
+          "top_k": 4,
+          "retrieval_strategy": "blended",
+          "retrieval_candidate_k": 20,
+          "rrf_k": 60,
+          "reranker": "none",
+          "rerank_candidate_k": 20,
+          "docs_dir": "data/corpus/sample",
+          "docs_exclude_patterns": []
+        },
+        "runtime": "basic",
+        "summary": null
+      }
+    ],
     "leaderboard": []
   }
   ```
+
+`dataset_identity` identifies the corpus and gold data without including
+document bodies or temporary storage paths. Every run repeats that identity
+and adds a `configuration_identity` for its semantic runtime, retrieval, and
+provider settings. Qdrant runs also expose lifecycle `run_metadata`; when
+cleanup fails, the exact disposable collection and
+`orphan_recovery_required: true` make manual recovery possible without
+guessing at a collection name. Local runs omit `run_metadata` in the raw
+report and return it as `null` through the typed API model.

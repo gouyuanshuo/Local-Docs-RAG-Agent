@@ -120,6 +120,8 @@ Current theme:
       fail-closed ownership cleanup
 - [x] Isolate every eval-comparison cell from interactive storage, with stable
       dataset/configuration identities and exact-name Qdrant orphan metadata
+- [x] Expose eval-comparison dataset/configuration identities and typed Qdrant
+      orphan-recovery metadata through the HTTP response schema
 - [ ] Resolve the upstream Starlette/AnyIO `BlockingPortal` deprecation warning
       or add a narrowly justified filter after the dependency lock is selected
 

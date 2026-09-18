@@ -98,9 +98,8 @@ fields; the aliases carry the same values:
 
 ## Comparison report
 
-`local-docs-rag eval-compare` and the internal comparison function produce a
-raw report. The current `/api/eval/compare` response projects the older public
-shape from that report:
+`local-docs-rag eval-compare`, the internal comparison function, and
+`/api/eval/compare` expose the same provenance-bearing report shape:
 
 | Field | Value |
 | --- | --- |
@@ -110,7 +109,8 @@ shape from that report:
 | `runs` | every cell |
 | `leaderboard` | the cells that may be ranked, best first |
 
-Each cell has a `label`, a `status`, a `reason` or `error` where one applies, its
+Each cell repeats the `dataset_identity` and has a `label`, a `status`, a
+`configuration_identity`, a `reason` or `error` where one applies, its
 `retrieval_config`, its `runtime`, and a `summary` when it ran. The `label` has
 one segment per axis, in the order the axes are defined, for example
 `basic:local:markdown:blended:rr-none:k4:s800:o120`.
@@ -123,9 +123,10 @@ paths. A Qdrant cell records its exact disposable collection in
 `run_metadata.orphan_recovery_required`, `pre_cleanup_status`, and a cleanup
 diagnostic. Its status becomes `error`, but its prior summary/reason remains in
 the raw cell so the completed evaluation is not erased; the error cell is never
-ranked. The CLI/raw writer preserves these provenance fields. The current
-FastAPI comparison response model does not yet expose them, so delivery must
-extend that schema before API clients rely on them.
+ranked. The CLI, raw writer, and typed FastAPI response preserve these
+provenance fields. The typed API metadata also preserves `cleanup_error` and
+`prior_error`, when present, so a cleanup failure does not erase the original
+cell outcome.
 
 A cell's `status` is `ok`, `degraded`, `skipped`, or `error`. What each means,
 and the reasons attached to it, are in

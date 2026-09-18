@@ -7,7 +7,9 @@ serialize with `presenters`. No retrieval policy here.
 
 - `api/app.py` — FastAPI, CORS, error mapping, static `frontend/dist`
 - `api/routes.py` — `/api/health|info|documents|ingest|ask|eval|eval/compare`
-- `api/schemas.py` — request/response; option types from `core.constants`
+- `api/schemas.py` — request/response; option types from `core.constants`;
+  compare responses preserve dataset/configuration identities and typed Qdrant
+  cleanup metadata
 - `cli.py` + `commands/` — subcommands via `set_defaults(handler=...)`
 - `presenters.py` — **shared seam** with evals (JSON payloads)
 
@@ -22,6 +24,9 @@ Ask `question` max length 4000.
 - Fallback answers still 200 **with** diagnostics; compare cells that
   fallback are `degraded` (evals), not a silent board win.
 - Schema field names for compare axes match `comparison.AXES`.
+- `/api/eval/compare` preserves the raw report's `dataset_identity`, each
+  cell's `dataset_identity` and `configuration_identity`, and optional typed
+  `run_metadata`; delivery must not discard orphan-recovery details.
 
 ## May change
 

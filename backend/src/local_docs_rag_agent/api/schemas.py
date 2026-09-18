@@ -48,6 +48,7 @@ PositiveIntList = Annotated[
 NonNegativeIntList = Annotated[
     list[pydantic.NonNegativeInt], pydantic.Field(min_length=1, max_length=8)
 ]
+EvalMatrixRunStatus = Literal["ok", "skipped", "error", "degraded"]
 
 
 class AskRequest(pydantic.BaseModel):
@@ -257,6 +258,16 @@ class EvalLeaderboardRowResponse(pydantic.BaseModel):
     avg_response_time_ms: float
 
 
+class EvalMatrixRunMetadataResponse(pydantic.BaseModel):
+    """Lifecycle provenance for one disposable Qdrant comparison cell."""
+
+    disposable_qdrant_collection: str
+    orphan_recovery_required: bool = False
+    pre_cleanup_status: EvalMatrixRunStatus | None = None
+    cleanup_error: str | None = None
+    prior_error: str | None = None
+
+
 class EvalMatrixRunResponse(pydantic.BaseModel):
     """One cell of a comparison matrix.
 
@@ -266,7 +277,10 @@ class EvalMatrixRunResponse(pydantic.BaseModel):
     """
 
     label: str
-    status: Literal["ok", "skipped", "error", "degraded"]
+    status: EvalMatrixRunStatus
+    dataset_identity: str
+    configuration_identity: str
+    run_metadata: EvalMatrixRunMetadataResponse | None = None
     reason: str | None = None
     error: str | None = None
     retrieval_config: RetrievalConfigResponse | None = None
@@ -278,6 +292,7 @@ class EvalCompareResponse(pydantic.BaseModel):
     """Every comparison cell that ran, plus the leaderboard built from them."""
 
     num_runs: pydantic.NonNegativeInt
+    dataset_identity: str
     runtimes: list[constants.RuntimeName]
     chunk_strategies: list[constants.ChunkStrategyName]
     vector_backends: list[constants.VectorBackendName]
