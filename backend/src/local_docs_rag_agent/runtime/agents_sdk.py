@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import logging
 import textwrap
 from typing import Any
 
@@ -22,6 +23,8 @@ from local_docs_rag_agent.core import models
 from local_docs_rag_agent.providers import openai_client
 from local_docs_rag_agent.runtime import basic as basic_runtime
 from local_docs_rag_agent.runtime import shared as runtime_shared
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass(slots=True)
@@ -98,6 +101,7 @@ def answer_with_agents_sdk(
             )
         )
     except Exception as exc:
+        _log_sdk_exception(exc)
         if not client.is_closed():
             asyncio.run(client.close())
         return basic_runtime.answer_with_basic_runtime(
@@ -133,6 +137,34 @@ def answer_with_agents_sdk(
         answer=final_output,
         hits=run_context.retrieved_hits,
         diagnostics=diagnostics,
+    )
+
+
+def _log_sdk_exception(exc: Exception) -> None:
+    """Log safe location metadata for an Agents SDK failure.
+
+    Args:
+      exc: The SDK registration or run error to identify without rendering its
+        contents.
+    """
+    traceback = exc.__traceback__
+    while traceback is not None and traceback.tb_next is not None:
+        traceback = traceback.tb_next
+    if traceback is None:
+        _LOGGER.warning(
+            "Agents SDK failure: exception_type=%s",
+            exc.__class__.__name__,
+        )
+        return
+
+    frame = traceback.tb_frame
+    module_name = str(frame.f_globals.get("__name__", "<unknown>"))
+    _LOGGER.warning(
+        "Agents SDK failure: exception_type=%s module=%s function=%s line=%d",
+        exc.__class__.__name__,
+        module_name,
+        frame.f_code.co_name,
+        traceback.tb_lineno,
     )
 
 

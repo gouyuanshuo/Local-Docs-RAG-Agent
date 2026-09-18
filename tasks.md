@@ -92,6 +92,8 @@ Current theme:
 
 - [x] Repair real Agents SDK tool registration when postponed annotations are
       resolved by the SDK decorator
+- [x] Preserve safe SDK failure frame metadata without logging request content
+      or provider credentials
 - [x] Reject empty eval gold and exclude unmeasured comparison cells from the
       leaderboard
 - [x] Keep retrieval and citation evidence matching within individual chunks

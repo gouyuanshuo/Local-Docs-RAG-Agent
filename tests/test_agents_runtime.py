@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import socket
 import sys
 import types
@@ -276,6 +277,69 @@ def test_agents_runtime_closes_client_and_exposes_runner_fallback(
         fallback_call["runtime_reason"]
         == "runtime_fallback:agents_sdk_error:RuntimeError"
     )
+
+
+def test_agents_runtime_logs_safe_registration_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = FakeAsyncOpenAI()
+    fallback_answer = object()
+    fallback_call: dict[str, object] = {}
+    sensitive_values = (
+        "sdk-log-api-key-sentinel",
+        "sdk-log-document-sentinel",
+        "https://sdk-log-provider-sentinel.invalid/v1",
+        "sdk-log-question-sentinel",
+    )
+
+    def raise_sensitive_registration_error(
+        *args: object, **kwargs: object
+    ) -> Any:
+        del args, kwargs
+        raise RuntimeError(" ".join(sensitive_values))
+
+    def fake_basic_runtime(*args: object, **kwargs: object) -> object:
+        del args
+        fallback_call.update(kwargs)
+        return fallback_answer
+
+    monkeypatch.setattr(agents_sdk, "_supports_agents_sdk", lambda: True)
+    monkeypatch.setattr(
+        openai_client, "build_async_openai_client", lambda **kwargs: client
+    )
+    monkeypatch.setattr(
+        agents_sdk, "_build_sdk_agent", raise_sensitive_registration_error
+    )
+    monkeypatch.setattr(
+        basic_runtime, "answer_with_basic_runtime", fake_basic_runtime
+    )
+    caplog.set_level(logging.WARNING, logger=agents_sdk.__name__)
+
+    answer = agents_sdk.answer_with_agents_sdk(
+        _config("responses").with_overrides(
+            llm_api_key=sensitive_values[0],
+            llm_base_url=sensitive_values[2],
+        ),
+        sensitive_values[3],
+    )
+
+    assert answer is fallback_answer
+    assert client.closed is True
+    assert (
+        fallback_call["runtime_reason"]
+        == "runtime_fallback:agents_sdk_error:RuntimeError"
+    )
+    messages = [record.getMessage() for record in caplog.records]
+    assert len(messages) == 1
+    assert "exception_type=RuntimeError" in messages[0]
+    assert (
+        f"module={raise_sensitive_registration_error.__module__}" in messages[0]
+    )
+    assert "function=raise_sensitive_registration_error" in messages[0]
+    assert messages[0].rsplit("line=", maxsplit=1)[1].isdecimal()
+    for sensitive_value in sensitive_values:
+        assert sensitive_value not in messages[0]
 
 
 def test_search_documents_returns_pipeline_statuses(

@@ -22,6 +22,8 @@ Internals: `dispatch.py`, `basic.py`, `agents_sdk.py`, `shared.py`.
   client.
 - Before decorating tools, the lazily imported `agents` module is bound in
   `agents_sdk` globals so the real SDK can resolve postponed annotations.
+- SDK registration and run failures log only their class and innermost frame
+  module, function, and line; they never render request data or exception text.
 - Search goes through `rag.retrieve` (via `tools.search_documents`).
 
 ## May change

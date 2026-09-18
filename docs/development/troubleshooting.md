@@ -56,6 +56,11 @@ is recorded on the chat provider's status.
 | `runtime_fallback:agents_sdk_error:<Exception>` | Tool registration or the agent run raised | Reproduce with the exception name; it deliberately omits request details, and the basic answer is still returned |
 | `runtime_fallback:empty_agent_output` | The agent produced no final output | Check the model and `AGENTS_MAX_TURNS` |
 
+For an Agents SDK registration or run error, the server log retains the
+exception class and innermost frame's module, function, and line. It excludes
+the exception message, request content, document content, keys, provider URLs,
+responses, and local variables.
+
 ## HTTP errors
 
 Expected failures map to status codes, and the body is always `code`, `detail`,
