@@ -5,19 +5,18 @@ The step order is deliberate and is what makes a partial or repeated run safe:
 1. read every source document, so an unreadable file aborts before anything is
    written
 2. load the typed manifest recorded by the previous run
-3. compare the retrieval/embedding fingerprint and work out removed and changed
-   sources
+3. verify storage ownership, then compare the scope/retrieval fingerprint and
+   work out removed and changed sources
 4. chunk only the sources that actually need reindexing
 5. attach embeddings and reject empty or mismatched vectors
 6. commit to the configured store, deleting points for removed and replaced
    sources
 7. atomically replace the manifest
 
-The fingerprint covers every setting that changes what a stored vector *means* —
-the backend, the embedding model and dimension, whether embeddings are live or
-the hash fallback, and the chunking parameters. When any of those change, an
-incremental update would silently mix incomparable vectors, so the whole index
-is rebuilt instead.
+The fingerprint covers document scope plus every setting that changes what a
+stored vector *means*. A separate non-secret hash binds source ownership to the
+local index path or Qdrant endpoint and collection, so a target change cannot
+replay another target's deletion list.
 """
 
 from __future__ import annotations
@@ -26,6 +25,7 @@ import dataclasses
 import hashlib
 import json
 import pathlib
+from urllib import parse
 
 from local_docs_rag_agent import config as app_config
 from local_docs_rag_agent.core import exceptions, models
@@ -62,7 +62,8 @@ def ingest_documents(
       backend is only the chunks of the documents that changed.
 
     Raises:
-      ConfigurationError: If the documents cannot be read.
+      ConfigurationError: If the documents cannot be read, the storage target
+        is invalid, or the manifest cannot safely own the configured target.
       ProviderUnavailableError: If the provider returns the wrong number
         of vectors or an empty one, on any backend; or, on Qdrant, if
         embeddings degraded to fallback, because hash vectors are not
@@ -79,6 +80,12 @@ def ingest_documents(
     previous_manifest = manifest.IngestManifest.load(
         config.ingest_manifest_path
     )
+    desired_storage_identity = storage_identity(config)
+    legacy_rebuild = _validate_manifest_storage(
+        config,
+        previous_manifest,
+        desired_storage_identity,
+    )
     embedding_provider = provider_factory.build_embedding_provider(config)
     store = store_factory.build_store(
         config, embedding_provider=embedding_provider
@@ -93,6 +100,7 @@ def ingest_documents(
             # The local backend rewrites its whole file, so a partial plan buys
             # nothing.
             config.vector_backend == "local"
+            or legacy_rebuild
             or (
                 isinstance(store, qdrant_store.QdrantChunkStore)
                 and not store.collection_exists()
@@ -121,9 +129,10 @@ def ingest_documents(
         )
     except Exception:
         if is_qdrant and plan.sources_to_index:
-            previous_manifest.marked_needs_reindex(plan.sources_to_index).save(
-                config.ingest_manifest_path
-            )
+            previous_manifest.marked_needs_reindex(
+                plan.sources_to_index,
+                storage_identity=desired_storage_identity,
+            ).save(config.ingest_manifest_path)
         raise
     previous_manifest.updated(
         source_checksums=source_checksums,
@@ -139,6 +148,7 @@ def ingest_documents(
                 else _expected_embedding_mode(config)
             ),
         ),
+        storage_identity=desired_storage_identity,
     ).save(config.ingest_manifest_path)
     return chunks
 
@@ -153,11 +163,25 @@ def ensure_index(config: app_config.AppConfig) -> None:
 
     Args:
       config: The settings whose index should be present.
+
+    Raises:
+      ConfigurationError: If the storage target is invalid, differs from the
+        manifest, or a legacy Qdrant manifest needs an ownership decision.
     """
     stored = manifest.IngestManifest.load(config.ingest_manifest_path)
-    configuration_changed = stored.index_fingerprint != index_fingerprint(
+    desired_storage_identity = storage_identity(config)
+    legacy_rebuild = _validate_manifest_storage(
         config,
-        embedding_mode=_expected_embedding_mode(config),
+        stored,
+        desired_storage_identity,
+    )
+    configuration_changed = (
+        legacy_rebuild
+        or stored.index_fingerprint
+        != index_fingerprint(
+            config,
+            embedding_mode=_expected_embedding_mode(config),
+        )
     )
     needs_restore = bool(stored.needs_reindex)
     if config.vector_backend == "qdrant":
@@ -180,8 +204,10 @@ def source_checksum(text: str) -> str:
 def index_fingerprint(
     config: app_config.AppConfig, *, embedding_mode: str
 ) -> str:
-    """Return a hash of every setting that changes a stored vector."""
+    """Return a hash of document scope and vector-defining settings."""
     payload = {
+        "docs_dir": str(config.docs_dir.resolve()),
+        "docs_exclude_patterns": sorted(set(config.docs_exclude_patterns)),
         "vector_backend": config.vector_backend,
         "embedding_provider": config.embedding_provider,
         "embedding_base_url": config.embedding_base_url,
@@ -194,6 +220,115 @@ def index_fingerprint(
     }
     serialized = json.dumps(payload, ensure_ascii=True, sort_keys=True)
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def storage_identity(config: app_config.AppConfig) -> str:
+    """Return a non-secret hash identifying the configured chunk store.
+
+    Local storage is identified by its resolved index path. Qdrant storage is
+    identified by a canonical endpoint and collection; URL user information,
+    query parameters, fragments, and the API key are deliberately excluded.
+
+    Args:
+      config: The settings selecting the storage target.
+
+    Returns:
+      A SHA-256 digest of canonical, non-secret target data.
+
+    Raises:
+      ConfigurationError: If a Qdrant URL is missing or is not an HTTP(S)
+        endpoint with a host and valid port.
+    """
+    if config.vector_backend == "local":
+        payload = {
+            "vector_backend": "local",
+            "index_path": str(config.index_path.resolve()),
+        }
+    else:
+        if not config.qdrant_url:
+            raise exceptions.ConfigurationError(
+                "QDRANT_URL must be set when VECTOR_BACKEND=qdrant"
+            )
+        payload = {
+            "vector_backend": "qdrant",
+            "qdrant_url": _canonical_qdrant_url(config.qdrant_url),
+            "qdrant_collection": config.qdrant_collection,
+        }
+    serialized = json.dumps(payload, ensure_ascii=True, sort_keys=True)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _canonical_qdrant_url(url: str) -> str:
+    parsed = parse.urlsplit(url)
+    scheme = parsed.scheme.lower()
+    hostname = parsed.hostname
+    if scheme not in {"http", "https"} or hostname is None:
+        raise exceptions.ConfigurationError(
+            "QDRANT_URL must be an HTTP(S) URL with a host"
+        )
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise exceptions.ConfigurationError(
+            "QDRANT_URL must contain a valid port"
+        ) from exc
+    normalized_host = hostname.lower()
+    if ":" in normalized_host:
+        normalized_host = f"[{normalized_host}]"
+    default_port = (scheme == "http" and port == 80) or (
+        scheme == "https" and port == 443
+    )
+    netloc = normalized_host
+    if port is not None and not default_port:
+        netloc = f"{netloc}:{port}"
+    path = parsed.path.rstrip("/")
+    return parse.urlunsplit((scheme, netloc, path, "", ""))
+
+
+def _validate_manifest_storage(
+    config: app_config.AppConfig,
+    previous_manifest: manifest.IngestManifest,
+    desired_storage_identity: str,
+) -> bool:
+    if previous_manifest.version == manifest.LEGACY_VERSION:
+        if config.vector_backend == "qdrant":
+            raise exceptions.ConfigurationError(
+                "A legacy Qdrant manifest cannot prove target ownership",
+                action_hint=(
+                    "Verify ownership of the configured collection. To adopt "
+                    "it, clear the confirmed-owned collection, move the "
+                    "legacy manifest aside, and ingest with a dedicated "
+                    "INGEST_MANIFEST_PATH."
+                ),
+            )
+        return True
+
+    known_identity = previous_manifest.storage_identity
+    if known_identity is None:
+        has_owned_state = bool(
+            previous_manifest.sources
+            or previous_manifest.index_fingerprint
+            or previous_manifest.needs_reindex
+        )
+        if config.vector_backend == "qdrant" and has_owned_state:
+            raise exceptions.ConfigurationError(
+                "The Qdrant manifest has no storage identity",
+                action_hint=(
+                    "Verify target ownership, then use a dedicated "
+                    "INGEST_MANIFEST_PATH for the configured collection."
+                ),
+            )
+        return has_owned_state
+    if known_identity != desired_storage_identity:
+        raise exceptions.ConfigurationError(
+            "The ingest manifest belongs to a different storage target",
+            action_hint=(
+                "Use a dedicated INGEST_MANIFEST_PATH for this target. "
+                "To adopt it instead, first verify ownership and clear the "
+                "target, then move the existing manifest aside."
+            ),
+        )
+    return False
 
 
 def _expected_embedding_mode(config: app_config.AppConfig) -> str:

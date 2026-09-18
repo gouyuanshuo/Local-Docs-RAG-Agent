@@ -155,12 +155,24 @@ default is `data/corpus/sample`, and a `.env` value overrides it. Pointed at
 set's sources are missing, and design notes about the eval topics become
 distractors.
 
-**The index predates a change.** The index fingerprint covers the vector
-backend, the embedding provider, model, base URL, and dimensions, the embedding
-mode, and the chunk strategy, size, and overlap. Changing any of them, including
-adding or removing an embedding key, makes the next ask or eval rebuild the index.
-A change the fingerprint does not cover, such as documents moving to new paths,
-needs `local-docs-rag ingest`.
+**The index predates a change.** The index fingerprint covers resolved
+`DOCS_DIR`, normalized exclusion patterns, the vector backend, the embedding
+provider, model, base URL, and dimensions, the embedding mode, and the chunk
+strategy, size, and overlap. Changing any of them makes the next ask or eval
+rebuild the index. Normal edits to document contents still require
+`local-docs-rag ingest`; there is no filesystem watcher in the initial policy.
+
+**The ingest manifest belongs to a different storage target.** A manifest is
+bound to the resolved local `INDEX_PATH` or the canonical Qdrant endpoint and
+collection. Set `INGEST_MANIFEST_PATH` to a dedicated manifest for the new
+target. Only move an existing manifest aside to adopt a target after verifying
+ownership and clearing that target; otherwise its stale points are outside this
+manifest's deletion ownership.
+
+**A legacy Qdrant manifest cannot prove target ownership.** Legacy local
+manifests rebuild automatically. For Qdrant, first verify that the configured
+collection belongs to this corpus, clear it, then move the legacy manifest aside
+and run `local-docs-rag ingest` to create a versioned, target-bound one.
 
 **`DOCS_DIR does not exist`.** The directory is resolved relative to where the
 process starts. Run from the repository root, or use an absolute path.

@@ -28,6 +28,13 @@ pipeline -> rerank -> llm_rerank
 - Qdrant ingest/search refuse non-live embeddings.
 - After delete-then-upsert failure, `needs_reindex` is set; `ensure_index`
   must restore even when checksums match.
+- The versioned ingest manifest binds source ownership to a hashed storage
+  identity. A known target mismatch must fail before store mutation.
+- The index fingerprint includes the resolved document root and sorted unique
+  exclusion patterns. Same-target scope changes rebuild while retaining the
+  prior source list for stale-source deletion.
+- Legacy local manifests rebuild and acquire an identity. Legacy Qdrant
+  manifests require an explicit ownership decision before adoption.
 - Default corpus is `data/corpus/sample`; nothing under `docs/` is indexed.
 
 ## May change

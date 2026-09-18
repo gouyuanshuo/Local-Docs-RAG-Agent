@@ -165,11 +165,27 @@ The ingest order is deliberate:
 
 1. validate and read `DOCS_DIR` before writing anything
 2. load the typed manifest
-3. compare the retrieval/embedding fingerprint and calculate removed/changed sources
-4. chunk only the required sources
-5. attach and validate embeddings
-6. update the selected store
-7. atomically replace the manifest
+3. verify that its hashed storage identity owns the configured target
+4. compare the document-scope/retrieval fingerprint and calculate
+   removed/changed sources
+5. chunk only the required sources
+6. attach and validate embeddings
+7. update the selected store
+8. atomically replace the manifest
+
+The versioned manifest separates two concerns. The index fingerprint includes
+the resolved `DOCS_DIR`, sorted unique `DOCS_EXCLUDE_PATTERNS`, embedding mode
+and model, and chunk settings. Its storage identity is a SHA-256 digest of the
+resolved local `INDEX_PATH`, or the canonical credential-free Qdrant endpoint
+and collection. API keys, URL user information, queries, fragments, and raw
+credential-bearing URLs are never persisted in that identity.
+
+Changing scope on the same target rebuilds while the previous source list is
+still available, so newly excluded or removed Qdrant sources are deleted.
+Changing targets with the same manifest fails before any store mutation and
+requires a dedicated manifest or an explicit operator decision to clear and
+adopt a confirmed-owned target. Legacy local manifests rebuild safely; legacy
+Qdrant manifests cannot be adopted without that ownership decision.
 
 If a changed document becomes empty, it is still included in Qdrant replacement
 deletes so old points cannot survive.
@@ -225,7 +241,7 @@ at all. `core` must not import `rag`, `runtime`, `evals`, or `api`.
 | Source documents | user-selected `DOCS_DIR` | external filesystem |
 | Local chunks | `LocalJsonlChunkStore` | atomic JSONL file |
 | Qdrant chunks | `QdrantChunkStore` | remote collection |
-| Source checksums/chunk IDs/index fingerprint | `IngestManifest` | atomic JSON file |
+| Source checksums/chunk IDs/scope and storage identity | `IngestManifest` | atomic JSON file |
 | Provider health | provider instance | operation lifetime |
 | Retrieved hits | runtime context | single answer run |
 | Eval result | eval harness/presenter | run payload or report file |

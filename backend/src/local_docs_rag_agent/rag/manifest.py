@@ -1,10 +1,11 @@
-"""Typed record of what the previous ingest wrote.
+"""Versioned record of what the previous ingest wrote and where it wrote it.
 
 The manifest stores a checksum and the chunk ids for every source, plus the
-fingerprint of the retrieval settings the index was built under. Together these
-are what make an incremental ingest possible: unchanged sources are skipped,
-removed sources have their points deleted, and a settings change invalidates the
-whole index at once.
+fingerprint of the scope and retrieval settings the index was built under. Its
+hashed storage identity keeps one target's source ownership from being replayed
+against another target. Together these fields make an incremental ingest safe:
+unchanged sources are skipped, removed sources have their points deleted, and a
+scope or settings change invalidates the whole index at once.
 """
 
 from __future__ import annotations
@@ -14,6 +15,9 @@ import json
 import pathlib
 
 from local_docs_rag_agent.core import exceptions, file_io, models
+
+CURRENT_VERSION = 2
+LEGACY_VERSION = 1
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -66,11 +70,13 @@ class ManifestEntry:
 class IngestManifest:
     """What the last ingest wrote, and under which settings.
 
-    The fingerprint is what makes an incremental ingest safe: it
-    changes whenever a setting changes what a stored vector means, so a
-    reconfigured index is rebuilt rather than silently mixed.
+    The fingerprint changes whenever document scope or a setting changes what
+    a stored vector means. The storage identity separately proves which local
+    file or Qdrant collection owns the recorded deletion list.
     """
 
+    version: int = CURRENT_VERSION
+    storage_identity: str | None = None
     sources: dict[str, ManifestEntry] = dataclasses.field(default_factory=dict)
     index_fingerprint: str | None = None
     needs_reindex: tuple[str, ...] = ()
@@ -103,6 +109,22 @@ class IngestManifest:
             raise exceptions.DataFormatError(
                 f"Ingest manifest {path} must contain a sources object"
             )
+        version = payload.get("version", LEGACY_VERSION)
+        if (
+            not isinstance(version, int)
+            or isinstance(version, bool)
+            or version not in {LEGACY_VERSION, CURRENT_VERSION}
+        ):
+            raise exceptions.DataFormatError(
+                f"Ingest manifest {path} has an unsupported version"
+            )
+        storage_identity = payload.get("storage_identity")
+        if storage_identity is not None and (
+            not isinstance(storage_identity, str) or not storage_identity
+        ):
+            raise exceptions.DataFormatError(
+                f"Ingest manifest {path} has an invalid storage_identity"
+            )
         index_fingerprint = payload.get("index_fingerprint")
         if index_fingerprint is not None and not isinstance(
             index_fingerprint, str
@@ -114,6 +136,8 @@ class IngestManifest:
             payload.get("needs_reindex", []), path, "needs_reindex"
         )
         return cls(
+            version=version,
+            storage_identity=storage_identity,
             sources={
                 str(source_path): ManifestEntry.from_payload(
                     str(source_path),
@@ -132,6 +156,7 @@ class IngestManifest:
         indexed_sources: set[str],
         chunks: list[models.DocumentChunk],
         index_fingerprint: str,
+        storage_identity: str,
     ) -> IngestManifest:
         """Return the manifest that describes the ingest just performed.
 
@@ -140,6 +165,7 @@ class IngestManifest:
           indexed_sources: The documents this run actually re-chunked.
           chunks: Every chunk this run produced.
           index_fingerprint: Fingerprint of the settings it ran under.
+          storage_identity: Hashed identity of the store this run wrote.
 
         Returns:
           A new manifest. A document that was not re-chunked keeps the
@@ -172,13 +198,18 @@ class IngestManifest:
             )
         )
         return IngestManifest(
+            version=CURRENT_VERSION,
+            storage_identity=storage_identity,
             sources=next_sources,
             index_fingerprint=index_fingerprint,
             needs_reindex=remaining_dirty,
         )
 
     def marked_needs_reindex(
-        self, source_paths: tuple[str, ...]
+        self,
+        source_paths: tuple[str, ...],
+        *,
+        storage_identity: str,
     ) -> IngestManifest:
         """Return a copy that will reindex `source_paths` on the next ingest.
 
@@ -187,12 +218,15 @@ class IngestManifest:
 
         Args:
           source_paths: Sources whose Qdrant points may be missing.
+          storage_identity: Hashed identity of the store whose write failed.
 
         Returns:
           A new manifest. Existing checksums are left in place so the
           next ingest can still see which file it is repairing.
         """
         return IngestManifest(
+            version=CURRENT_VERSION,
+            storage_identity=storage_identity,
             sources=self.sources,
             index_fingerprint=self.index_fingerprint,
             needs_reindex=tuple(
@@ -203,6 +237,8 @@ class IngestManifest:
     def save(self, path: pathlib.Path) -> None:
         """Write the manifest to `path`, atomically and with sorted keys."""
         payload = {
+            "version": CURRENT_VERSION,
+            "storage_identity": self.storage_identity,
             "index_fingerprint": self.index_fingerprint,
             "needs_reindex": list(self.needs_reindex),
             "sources": {

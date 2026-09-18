@@ -104,6 +104,8 @@ Current theme:
 - [x] Audit Stage 1 after implementation: the combined review is clean after
       its two fix rounds; all gates, 185 tests, the frontend build, and a
       disposable no-key ingest/ask/eval/compare workflow pass
+- [x] Bind versioned ingest manifests to canonical document scope and hashed
+      storage identity, with conservative local/Qdrant legacy migration
 - [ ] Resolve the upstream Starlette/AnyIO `BlockingPortal` deprecation warning
       or add a narrowly justified filter after the dependency lock is selected
 
