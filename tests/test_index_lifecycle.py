@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import contextlib
 import importlib
+import inspect
 import multiprocessing
 import os
 import pathlib
 import select
+import sys
 import threading
 from typing import Any
 
@@ -826,6 +828,88 @@ def test_index_guard_cleans_interrupted_thread_lock_publication(
     assert exc_info.value is interruption
     assert interrupting_lock.lock.acquire(blocking=False) is True
     interrupting_lock.lock.release()
+    assert index_lock._ACTIVE_FILE_LOCKS == {}
+    with rag.index_guard(config):
+        pass
+
+
+def test_nested_pre_acquire_interruption_preserves_outer_lock(
+    tmp_path: pathlib.Path,
+) -> None:
+    config = _local_config(tmp_path)
+    index_lock = importlib.import_module("local_docs_rag_agent.rag.index_lock")
+    interruption = KeyboardInterrupt("nested acquisition interrupted")
+    source_lines, first_line = inspect.getsourcelines(
+        index_lock._acquire_resource
+    )
+    markers = (
+        "if not frame.state.thread_lock.acquire",
+        "depths[key] = depths[key] + 1",
+    )
+    target_line = next(
+        first_line + offset
+        for offset, source_line in enumerate(source_lines)
+        if any(marker in source_line for marker in markers)
+    )
+
+    def interrupt_nested(frame: Any, event: str, arg: Any) -> Any:
+        del arg
+        if (
+            frame.f_code is index_lock._acquire_resource.__code__
+            and event == "line"
+            and frame.f_lineno == target_line
+        ):
+            resource_frame = frame.f_locals["frame"]
+            depths = getattr(index_lock._THREAD_STATE, "depths", {})
+            if depths.get(resource_frame.resource.key, 0) > 0:
+                interrupted_keys.append(resource_frame.resource.key)
+                sys.settrace(None)
+                raise interruption
+        return interrupt_nested
+
+    caught: BaseException | None = None
+    outer_exit_error: BaseException | None = None
+    outer_continued = False
+    interrupted_keys: list[str] = []
+    contender_acquired = threading.Event()
+    contender_errors: list[BaseException] = []
+
+    def contend_for_interrupted_resource() -> None:
+        try:
+            state = index_lock._LOCK_STATES[interrupted_keys[0]]
+            if state.thread_lock.acquire(timeout=0.1):
+                contender_acquired.set()
+                state.thread_lock.release()
+        except BaseException as exc:  # pragma: no cover - assertion reports it
+            contender_errors.append(exc)
+
+    try:
+        with rag.index_guard(config):
+            sys.settrace(interrupt_nested)
+            try:
+                with rag.index_guard(config):
+                    pytest.fail("interrupted nested guard unexpectedly entered")
+            except KeyboardInterrupt as exc:
+                caught = exc
+            finally:
+                sys.settrace(None)
+            contender = threading.Thread(
+                target=contend_for_interrupted_resource
+            )
+            contender.start()
+            assert contender_acquired.wait(timeout=0.2) is False
+            contender.join(timeout=5.0)
+            assert not contender.is_alive()
+            outer_continued = True
+    except BaseException as exc:
+        outer_exit_error = exc
+    finally:
+        sys.settrace(None)
+
+    assert caught is interruption
+    assert outer_continued is True
+    assert contender_errors == []
+    assert outer_exit_error is None
     assert index_lock._ACTIVE_FILE_LOCKS == {}
     with rag.index_guard(config):
         pass

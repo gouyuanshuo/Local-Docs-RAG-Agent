@@ -53,6 +53,9 @@ index_lock -> config, core (and lazy storage identity lookup)
   one target does not serialize an unrelated target.
 - An interruption between thread/OS lock acquisition and bookkeeping rolls
   back the unpublished acquisition without replacing the active exception.
+- Same-thread recursion increments only logical guard depth and does not
+  reacquire the `RLock`, so a pre-publication nested interruption cannot
+  release ownership held by the outer guard.
 - Manifest and local-store lock artifacts live beside their resolved files.
   Qdrant store artifacts live in the per-user cache and contain only a hashed,
   credential-free identity. Persistent lock files are harmless.

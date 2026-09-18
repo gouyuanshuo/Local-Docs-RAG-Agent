@@ -53,6 +53,7 @@ class _LockResource:
 class _AcquiredResource:
     resource: _LockResource
     state: _LockState
+    thread_depth_before: int | None = None
     thread_lock_acquired: bool = False
     file_lock: portalocker.Lock | None = None
     file_lock_acquired: bool = False
@@ -170,6 +171,13 @@ def _acquire_resource(
     frame: _AcquiredResource,
     deadline: float,
 ) -> None:
+    depths = _thread_depths()
+    key = frame.resource.key
+    depth_before = depths.get(key, 0)
+    frame.thread_depth_before = depth_before
+    if depth_before:
+        depths[key] = depths[key] + 1
+        return
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise _timeout_error()
@@ -181,22 +189,19 @@ def _acquire_resource(
         if not frame.thread_lock_acquired:
             _release_unpublished_thread_lock(frame)
         raise
-    depths = _thread_depths()
-    key = frame.resource.key
-    if depths.get(key, 0) == 0:
-        try:
-            frame.resource.path.parent.mkdir(parents=True, exist_ok=True)
-        except OSError as exc:
-            raise _lock_io_error() from exc
-        frame.file_lock = portalocker.Lock(
-            frame.resource.path,
-            mode="a",
-            timeout=0.0,
-            check_interval=0.05,
-            fail_when_locked=True,
-        )
-        _acquire_file_lock(frame, deadline)
-    depths[key] = depths.get(key, 0) + 1
+    try:
+        frame.resource.path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise _lock_io_error() from exc
+    frame.file_lock = portalocker.Lock(
+        frame.resource.path,
+        mode="a",
+        timeout=0.0,
+        check_interval=0.05,
+        fail_when_locked=True,
+    )
+    _acquire_file_lock(frame, deadline)
+    depths[key] = 1
 
 
 def _acquire_file_lock(
@@ -268,7 +273,12 @@ def _release_resource(
 ) -> None:
     key = frame.resource.key
     depths = _thread_depths()
-    if frame.thread_lock_acquired and key in depths:
+    depth_before = frame.thread_depth_before
+    if (
+        depth_before is not None
+        and key in depths
+        and depths[key] > depth_before
+    ):
         next_depth = depths[key] - 1
         if next_depth:
             depths[key] = next_depth

@@ -190,7 +190,10 @@ acquisition unwinds every resource already acquired, and release failures do
 not prevent attempts to release the remaining resources. Thread-lock and
 operating-system-lock ownership are rolled back if an interruption lands
 between acquisition and bookkeeping publication; cleanup failures do not
-replace the active interruption.
+replace the active interruption. Same-thread recursion does not perform a
+second `RLock` or file-lock acquisition: it publishes only logical depth. An
+interruption before that nested depth publication therefore leaves the outer
+guard's physical ownership untouched.
 
 Manifest and local-store lock artifacts live beside their respective resolved
 files. A Qdrant store artifact lives in the current user's cache and is named
