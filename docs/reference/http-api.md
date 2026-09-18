@@ -127,7 +127,10 @@ Executes offline evaluation over gold test dataset at `EVAL_PATH`.
 #### `POST /api/eval/compare`
 Executes an evaluation comparison matrix across multiple swept axes
 (vector backends, chunk sizes, retrieval strategies, etc.) and returns
-a leaderboard.
+a leaderboard. Default requests plan 12 local cells (three chunk strategies by
+four retrieval strategies), or 24 when Qdrant is configured. The service
+validates every planned configuration before any cell ingests; invalid input is
+a request error, while provider and runtime failures remain per-cell outcomes.
 
 - **Request Body**:
   ```json

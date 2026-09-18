@@ -43,6 +43,12 @@ Supported options:
 Sweeps a multi-dimensional matrix of retrieval, chunking, and runtime
 configurations to generate comparative benchmarks.
 
+With default settings, it plans 12 local cells: three chunk strategies times
+four retrieval strategies. Configuring Qdrant adds its backend cells for 24
+total. The matrix is fully validated before the first cell ingests documents;
+an invalid combination is a request error, while provider and runtime failures
+remain per-cell results.
+
 ```bash
 local-docs-rag eval-compare \
   --vector-backend local \

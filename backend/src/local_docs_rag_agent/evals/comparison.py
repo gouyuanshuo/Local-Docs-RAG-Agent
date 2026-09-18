@@ -58,6 +58,21 @@ class MatrixAxis:
     default: Callable[[app_config.AppConfig], Sequence[object]]
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class EvalMatrixPlan:
+    """The fully validated configurations a comparison will execute.
+
+    Attributes:
+      axes: Resolved values for every matrix axis, keyed by request field.
+      variants: One validated configuration per Cartesian-product cell.
+      num_runs: The number of variants and therefore comparison cells.
+    """
+
+    axes: dict[str, list[object]]
+    variants: list[app_config.AppConfig]
+    num_runs: int
+
+
 def default_vector_backends(
     config: app_config.AppConfig,
 ) -> list[constants.VectorBackendName]:
@@ -180,6 +195,53 @@ def resolve_axes(
     return resolved
 
 
+def plan_eval_matrix(
+    config: app_config.AppConfig,
+    requested: Mapping[str, Sequence[object] | None] | None = None,
+) -> EvalMatrixPlan:
+    """Resolve and validate all configurations in an eval comparison.
+
+    Args:
+      config: The baseline settings each cell varies from.
+      requested: Values to sweep, keyed by axis name. An omitted axis takes
+        its default, which for most axes is the configured value held steady.
+
+    Returns:
+      The resolved axes, every validated `AppConfig` variant, and their count.
+
+    Raises:
+      ConfigurationError: If an axis is empty, the Cartesian product exceeds
+        `MAX_MATRIX_RUNS`, or any resulting `AppConfig` is invalid.
+    """
+    axes = resolve_axes(config, requested or {})
+    values = [axes[axis.name] for axis in AXES]
+    if any(not entry for entry in values):
+        raise exceptions.ConfigurationError(
+            "Eval comparison axes must not be empty"
+        )
+    num_combinations = math.prod(len(entry) for entry in values)
+    if num_combinations > MAX_MATRIX_RUNS:
+        raise exceptions.ConfigurationError(
+            f"Eval comparison requested {num_combinations} runs; "
+            f"maximum is {MAX_MATRIX_RUNS}",
+            action_hint="Reduce one or more comparison axes.",
+        )
+    variants = [
+        config.with_overrides(
+            **{
+                axis.field: value
+                for axis, value in zip(AXES, combination, strict=True)
+            }
+        )
+        for combination in itertools.product(*values)
+    ]
+    return EvalMatrixPlan(
+        axes=axes,
+        variants=variants,
+        num_runs=len(variants),
+    )
+
+
 def run_eval_matrix(
     config: app_config.AppConfig,
     requested: Mapping[str, Sequence[object] | None] | None = None,
@@ -199,40 +261,19 @@ def run_eval_matrix(
       ones that succeeded.
 
     Raises:
-      ConfigurationError: If an axis is empty, or the Cartesian product
-        would exceed `MAX_MATRIX_RUNS`, so one request cannot start an
-        unbounded run.
+      ConfigurationError: If an axis is empty, the Cartesian product would
+        exceed `MAX_MATRIX_RUNS`, or any planned configuration is invalid.
       DataFormatError: If the eval file contains no cases. The file is
         loaded before matrix ingestion can mutate an index.
     """
-    axes = resolve_axes(config, requested or {})
-    values = [axes[axis.name] for axis in AXES]
-    if any(not entry for entry in values):
-        raise exceptions.ConfigurationError(
-            "Eval comparison axes must not be empty"
-        )
-    num_combinations = math.prod(len(entry) for entry in values)
-    if num_combinations > MAX_MATRIX_RUNS:
-        raise exceptions.ConfigurationError(
-            f"Eval comparison requested {num_combinations} runs; "
-            f"maximum is {MAX_MATRIX_RUNS}",
-            action_hint="Reduce one or more comparison axes.",
-        )
+    plan = plan_eval_matrix(config, requested)
     harness.load_eval_cases(config.eval_path)
 
-    runs: list[dict[str, object]] = []
-    for combination in itertools.product(*values):
-        # `strict=True` is the guard the parallel lists never had: an axis
-        # added to `AXES` but missed here cannot bind to the wrong field.
-        overrides = {
-            axis.field: value
-            for axis, value in zip(AXES, combination, strict=True)
-        }
-        runs.append(_run_matrix_case(config.with_overrides(**overrides)))
+    runs = [_run_matrix_case(variant) for variant in plan.variants]
 
     payload: dict[str, object] = {
-        "num_runs": len(runs),
-        **axes,
+        "num_runs": plan.num_runs,
+        **plan.axes,
         "leaderboard": _build_leaderboard(runs),
         "runs": runs,
     }
@@ -393,12 +434,11 @@ def _build_leaderboard(
                 ),
             }
         )
-    # Ranked by reciprocal rank first, not by the hit rate. The hit rate
-    # joins every retrieved chunk before matching, so it cannot tell a
-    # configuration that puts the answer first from one that buries it
-    # fourth, and a wider `top_k` can only raise it. Ranking on it made the
-    # leaderboard prefer exactly the loose retrieval a second stage exists
-    # to tighten.
+    # Ranked by reciprocal rank first, not by the span hit rate. Span matching
+    # cannot tell a configuration that puts evidence first from one that
+    # buries it fourth, and a wider `top_k` can only raise it. Ranking on it
+    # made the leaderboard prefer exactly the loose retrieval a second stage
+    # exists to tighten.
     leaderboard.sort(
         key=lambda row: (
             _as_float(row["retrieval_reciprocal_rank"]),

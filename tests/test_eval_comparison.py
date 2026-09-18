@@ -75,6 +75,98 @@ def test_eval_matrix_rejects_empty_gold_before_ingest(
     assert not ingested
 
 
+def test_invalid_matrix_has_no_ingest_side_effects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[int] = []
+
+    def record_ingest(
+        config: app_config.AppConfig,
+    ) -> list[models.DocumentChunk]:
+        calls.append(config.chunk_size)
+        return []
+
+    monkeypatch.setattr(rag, "ingest_documents", record_ingest)
+    monkeypatch.setattr(harness, "run_eval", lambda config: [])
+
+    with pytest.raises(exceptions.ConfigurationError):
+        comparison.run_eval_matrix(
+            app_config.AppConfig.from_env(),
+            requested={
+                "vector_backends": ["local"],
+                "chunk_strategies": ["markdown"],
+                "retrieval_strategies": ["dense"],
+                "chunk_sizes": [800, 100],
+                "chunk_overlaps": [120],
+            },
+        )
+
+    assert calls == []
+
+
+def test_matrix_plan_reports_the_twelve_default_local_cells() -> None:
+    plan = comparison.plan_eval_matrix(app_config.AppConfig.from_env())
+
+    assert plan.axes["vector_backends"] == ["local"]
+    assert plan.axes["chunk_strategies"] == ["fixed", "paragraph", "markdown"]
+    assert plan.axes["retrieval_strategies"] == [
+        "blended",
+        "dense",
+        "lexical",
+        "hybrid_rrf",
+    ]
+    assert plan.num_runs == 12
+    assert len(plan.variants) == 12
+
+
+def test_matrix_plan_reports_twenty_four_cells_with_qdrant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("QDRANT_URL", "http://qdrant.invalid:6333")
+
+    plan = comparison.plan_eval_matrix(app_config.AppConfig.from_env())
+
+    assert plan.axes["vector_backends"] == ["local", "qdrant"]
+    assert plan.num_runs == 24
+    assert len(plan.variants) == 24
+
+
+def test_matrix_execution_uses_the_planned_axes_and_variants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = app_config.AppConfig.from_env()
+    requested: dict[str, list[object]] = {
+        "runtimes": ["basic"],
+        "vector_backends": ["local"],
+        "chunk_strategies": ["markdown"],
+        "retrieval_strategies": ["dense"],
+        "rerankers": ["none"],
+        "top_ks": [4, 5],
+        "chunk_sizes": [800],
+        "chunk_overlaps": [120],
+    }
+    plan = comparison.plan_eval_matrix(config, requested)
+    executed: list[app_config.AppConfig] = []
+
+    def record_run(config: app_config.AppConfig) -> dict[str, object]:
+        executed.append(config)
+        return {
+            "label": comparison.run_label(config),
+            "status": "skipped",
+            "reason": "test",
+        }
+
+    monkeypatch.setattr(comparison, "_run_matrix_case", record_run)
+
+    report = comparison.run_eval_matrix(config, requested)
+
+    assert report["num_runs"] == plan.num_runs == 2
+    assert {axis.name: report[axis.name] for axis in comparison.AXES} == (
+        plan.axes
+    )
+    assert executed == plan.variants
+
+
 # --- The axis table is the single definition ---------------------------------
 
 

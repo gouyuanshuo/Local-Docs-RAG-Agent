@@ -96,6 +96,7 @@ Current theme:
       leaderboard
 - [x] Keep retrieval and citation evidence matching within individual chunks
       and cited spans
+- [x] Validate the full eval-comparison matrix before any cell can ingest
 
 ### Structure and readability pass
 

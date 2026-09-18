@@ -8,7 +8,8 @@ Load gold, score one run, sweep a matrix, rank a leaderboard.
 - `harness.evidence_match_rate` / `reciprocal_rank` / `retrieval_precision`
 - `harness.failure_reasons`
 - `comparison.AXES` — single definition of sweepable axes
-- `comparison.run_eval_matrix` / `cell_degradation_reason` / `run_label`
+- `comparison.EvalMatrixPlan` / `plan_eval_matrix` / `run_eval_matrix`
+- `comparison.cell_degradation_reason` / `run_label`
 - Gold: `data/evals/sample_eval.jsonl`
 - Corpus: `data/corpus/sample/` (default `DOCS_DIR`)
 
@@ -29,6 +30,8 @@ Load gold, score one run, sweep a matrix, rank a leaderboard.
   leaderboard evidence. A disabled reranker may report `ready`; that means it
   was not selected, not that reranking ran live.
 - Matrix cap 128; empty axis is an error; Qdrant unreachable is `skipped`.
+- Matrix planning resolves every axis and validates every `AppConfig` variant
+  before a cell can ingest. Defaults plan 12 local cells, or 24 with Qdrant.
 - `AXES` drives CLI flags, request schema field names, and labels.
 
 ## May change
