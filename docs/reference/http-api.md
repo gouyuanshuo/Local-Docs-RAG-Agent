@@ -135,8 +135,14 @@ a request error, while provider and runtime failures remain per-cell outcomes.
 - **Request Body**:
   ```json
   {
-    "vector_backends": ["local", "qdrant"],
-    "retrieval_strategies": ["dense", "hybrid_rrf"]
+    "runtimes": ["basic"],
+    "chunk_strategies": ["markdown"],
+    "vector_backends": ["qdrant"],
+    "top_ks": [4],
+    "chunk_sizes": [800],
+    "chunk_overlaps": [120],
+    "retrieval_strategies": ["blended"],
+    "rerankers": ["none"]
   }
   ```
 - **Response**: `200 OK`
