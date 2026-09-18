@@ -428,6 +428,11 @@ def _run_qdrant_matrix_case(
                         cleanup_error,
                     )
                 else:
+                    _add_interruption_cleanup_note(
+                        cleanup_error,
+                        collection_name,
+                        cleanup_error,
+                    )
                     raise
     if result is None:
         raise AssertionError("Qdrant cell ended without a result")

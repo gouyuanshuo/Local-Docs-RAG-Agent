@@ -202,7 +202,9 @@ delete only that collection with Qdrant administration tooling. A cleanup
 failure also sets `run_metadata.orphan_recovery_required=true` and makes the
 cell an operational error. The raw cell retains its prior summary or reason and
 records `run_metadata.pre_cleanup_status`, but it is never ranked. Never guess
-a collection name from a label.
+a collection name from a label. If cleanup itself is interrupted, the original
+`KeyboardInterrupt` or `SystemExit` is re-raised with the same exact-name
+recovery direction in an exception note; no raw cell can safely be returned.
 Never delete by a wildcard or by the interactive collection's configured name.
 Comparison callers must use `initialize_owned_qdrant_index` before evaluation;
 it performs first ingest and returns the only token accepted by

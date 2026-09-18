@@ -396,6 +396,66 @@ def test_qdrant_interrupt_preserves_active_exception_on_cleanup_failure(
     assert any("SystemExit" in note for note in notes)
 
 
+def test_qdrant_cleanup_interrupt_after_completed_eval_has_recovery_note(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _comparison_config(tmp_path, vector_backend="qdrant")
+    token = object()
+
+    monkeypatch.setattr(
+        rag, "initialize_owned_qdrant_index", lambda config: token
+    )
+    monkeypatch.setattr(
+        harness,
+        "run_eval",
+        lambda config: [_eval_result(_live_diagnostics())],
+    )
+    monkeypatch.setattr(
+        rag,
+        "delete_owned_qdrant_index",
+        lambda config, ownership: (_ for _ in ()).throw(SystemExit("cleanup")),
+    )
+
+    with pytest.raises(SystemExit, match="cleanup") as raised:
+        comparison._run_matrix_case(config)
+
+    notes = getattr(raised.value, "__notes__", [])
+    assert any("disposable collection" in note for note in notes)
+    assert any("exact-name orphan recovery" in note for note in notes)
+
+
+def test_qdrant_cleanup_interrupt_after_cell_error_has_recovery_note(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _comparison_config(tmp_path, vector_backend="qdrant")
+    token = object()
+
+    monkeypatch.setattr(
+        rag, "initialize_owned_qdrant_index", lambda config: token
+    )
+    monkeypatch.setattr(
+        harness,
+        "run_eval",
+        lambda config: (_ for _ in ()).throw(RuntimeError("eval failure")),
+    )
+    monkeypatch.setattr(
+        rag,
+        "delete_owned_qdrant_index",
+        lambda config, ownership: (_ for _ in ()).throw(
+            KeyboardInterrupt("cleanup")
+        ),
+    )
+
+    with pytest.raises(KeyboardInterrupt, match="cleanup") as raised:
+        comparison._run_matrix_case(config)
+
+    notes = getattr(raised.value, "__notes__", [])
+    assert any("disposable collection" in note for note in notes)
+    assert any("exact-name orphan recovery" in note for note in notes)
+
+
 @pytest.mark.parametrize("outcome", ["ok", "degraded", "skipped", "error"])
 def test_qdrant_cleanup_failure_preserves_cell_outcome(
     outcome: str,

@@ -38,6 +38,8 @@ Load gold, score one run, sweep a matrix, rank a leaderboard.
   cells use an owned UUID-derived collection and temporary manifest; cleanup
   failures retain the exact disposable collection, cleanup diagnostics, and
   `pre_cleanup_status` in `run_metadata` while making the cell unrankable.
+  A cleanup-origin interruption is re-raised with exact-name orphan recovery
+  in an exception note, rather than replaced by a synthetic result.
 - Raw comparison reports carry a stable corpus/gold `dataset_identity` and
   per-cell semantic `configuration_identity`; neither includes temporary
   storage paths, document bodies, keys, provider URLs, or resolved-away
