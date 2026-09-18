@@ -15,6 +15,20 @@ from local_docs_rag_agent.core import models
 class ChunkStore(Protocol):
     """Persists document chunks and answers similarity queries over them."""
 
+    @property
+    def supports_incremental_updates(self) -> bool:
+        """Whether saves can update only changed and removed sources."""
+        ...
+
+    @property
+    def requires_live_embeddings(self) -> bool:
+        """Whether fallback embeddings must be rejected before saving."""
+        ...
+
+    def exists(self) -> bool:
+        """Report whether this store's configured index currently exists."""
+        ...
+
     def save(
         self,
         chunks: list[models.DocumentChunk],

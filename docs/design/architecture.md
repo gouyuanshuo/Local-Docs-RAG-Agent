@@ -105,7 +105,8 @@ match the live collection.
 - `rag/__init__.py`
   - the package facade; code outside `rag` imports from here, not from the modules below
 - `rag/base.py`
-  - the `ChunkStore` protocol, with no implementation attached
+  - the `ChunkStore` protocol and its explicit lifecycle capabilities, with no
+    implementation attached
 - `rag/discovery.py`
   - document discovery and reading, also used to answer "what can this agent see?"
 - `rag/chunker.py`
@@ -151,6 +152,19 @@ discovery -> chunker -> ingest -> pipeline -> store_factory -> base / local_stor
 `base` and `models` sit at the bottom and import nothing from the layers above them.
 Store construction lives in `store_factory` rather than `ingest`, so retrieval and the
 agent tools can build a store without importing the ingest pipeline.
+
+Generic ingest and readiness policy is expressed through three `ChunkStore`
+capabilities. `exists()` checks this store's exact configured target;
+`supports_incremental_updates` says whether unchanged sources can remain while
+removed and replaced source paths are applied; and `requires_live_embeddings`
+marks stores where fallback vectors are unsafe. The local JSONL store reports
+file existence, rewrites the complete corpus, and permits fallback embeddings.
+Qdrant reports collection existence, applies incremental source transitions,
+and requires live embeddings. A third store can participate in the same
+lifecycle without an `isinstance` check or a backend-name branch. Concrete
+factory selection, storage identity, and Qdrant's ownership-checked disposable
+collection operations remain explicit because they select or authorize a
+physical target rather than plan a generic save.
 
 `pipeline` sits at the top and is the only module that knows retrieval has two stages.
 That is what keeps a store unaware that reranking exists and a reranker unaware of which
@@ -240,8 +254,8 @@ requires a dedicated manifest or an explicit operator decision to clear and
 adopt a confirmed-owned target. Legacy local manifests rebuild safely; legacy
 Qdrant manifests cannot be adopted without that ownership decision.
 
-If a changed document becomes empty, it is still included in Qdrant replacement
-deletes so old points cannot survive.
+If a changed document becomes empty, it is still included in an incremental
+store's replacement deletes so old records cannot survive.
 
 If a Qdrant save deletes a source and then fails to upsert, the manifest records
 those paths in `needs_reindex` so a later ingest *or* `ensure_index` (Ask/eval)

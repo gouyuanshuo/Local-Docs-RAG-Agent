@@ -2,9 +2,9 @@
 
 This is the only place that turns `VECTOR_BACKEND` into a concrete store, so
 ingest, retrieval, the agent tools, and the connectivity scripts all reach the
-same backend with the same embedding provider. Adding a backend means adding a
-branch here and an implementation of `ChunkStore` — nothing else needs to know
-it exists.
+same backend with the same embedding provider. Adding a backend means declaring
+its lifecycle capabilities on an implementation of `ChunkStore` and adding a
+branch here; generic ingest and readiness code does not need its name or type.
 """
 
 from __future__ import annotations

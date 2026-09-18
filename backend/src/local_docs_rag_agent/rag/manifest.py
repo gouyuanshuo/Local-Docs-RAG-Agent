@@ -227,7 +227,7 @@ class IngestManifest:
         matching checksums be treated as "already indexed".
 
         Args:
-          source_paths: Sources whose Qdrant points may be missing.
+          source_paths: Sources whose stored records may be missing.
           storage_identity: Hashed identity of the store about to be mutated.
 
         Returns:

@@ -43,14 +43,28 @@ module-only imports, 80 columns, and a Google docstring on anything public.
 
 1. Add the name to `VectorBackendName` in `core/constants.py`.
 2. Implement `ChunkStore` from `rag/base.py` in its own module.
-3. Define replacement and deletion explicitly. An incremental backend must
-   honour `removed_source_paths` and `replaced_source_paths`, or points from a
-   deleted or rewritten document survive in the index.
-4. Normalize operational failures into `VectorStoreError` with a stable
+3. Declare the lifecycle capabilities truthfully:
+   - `exists()` reports whether this exact configured index target exists. It
+     must not report the availability of a different file, collection, or
+     service-wide resource.
+   - `supports_incremental_updates` is `True` only when `save` can preserve
+     unchanged sources while applying source-level deletion and replacement.
+     A `False` store receives the complete corpus and rewrites it.
+   - `requires_live_embeddings` is `True` when fallback vectors are unsafe for
+     the store. Ingest then rejects them before publishing a store mutation.
+4. Define replacement and deletion explicitly. An incremental backend must
+   honour both `removed_source_paths` and `replaced_source_paths`, including a
+   replacement that produces no chunks, or stale records survive. Those lists
+   are `None` for a full-replacement backend.
+5. Normalize operational failures into `VectorStoreError` with a stable
    `reason_code`. The comparison matrix branches on it to report an unreachable
    service as a `skipped` cell rather than an `error`.
-5. Construct it in `rag/store_factory.py` and export it from `rag/__init__.py`.
-6. Add lifecycle and retrieval tests.
+6. Construct it in `rag/store_factory.py` and export it from `rag/__init__.py`.
+   Do not add backend-name or concrete-type branches to generic ingest or
+   readiness code; storage identity and ownership are the deliberately
+   backend-specific exceptions.
+7. Add lifecycle tests for missing, unchanged, changed, removed, and
+   changed-to-empty sources, plus retrieval and normalized-failure tests.
 
 ## A runtime
 

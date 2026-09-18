@@ -28,6 +28,34 @@ class FallbackEmbeddingProvider(StubEmbeddingProvider):
         )
 
 
+def test_qdrant_store_reports_incremental_live_lifecycle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeQdrantClient:
+        def __init__(self, **kwargs: Any) -> None:
+            del kwargs
+            self.collection_names: list[str] = []
+
+        def collection_exists(self, collection_name: str) -> bool:
+            self.collection_names.append(collection_name)
+            return True
+
+    monkeypatch.setattr(qdrant_client, "QdrantClient", FakeQdrantClient)
+    store = qdrant_store.QdrantChunkStore(
+        url="https://qdrant.example",
+        api_key=None,
+        collection_name="test",
+        timeout_s=10,
+        embedding_provider=StubEmbeddingProvider(),
+    )
+
+    assert store.exists() is True
+    assert store.collection_exists() is True
+    assert store.supports_incremental_updates is True
+    assert store.requires_live_embeddings is True
+    assert store._client.collection_names == ["test", "test"]
+
+
 def test_qdrant_client_receives_proxy_trust_setting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

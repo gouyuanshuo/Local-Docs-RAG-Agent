@@ -98,3 +98,35 @@ def test_production_code_outside_rag_uses_the_rag_facade() -> None:
                     f" (use local_docs_rag_agent.rag facade)"
                 )
     assert violations == []
+
+
+def test_generic_ingest_lifecycle_uses_store_capabilities() -> None:
+    path = PACKAGE_ROOT / "rag" / "ingest.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    lifecycle_functions = {
+        node.name: node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name in {"_ingest_documents_locked", "_ensure_index_locked"}
+    }
+    violations: list[str] = []
+    for function_name, function in lifecycle_functions.items():
+        for node in ast.walk(function):
+            if isinstance(node, ast.Attribute) and node.attr in {
+                "vector_backend",
+                "collection_exists",
+                "QdrantChunkStore",
+            }:
+                violations.append(
+                    f"{function_name}:{node.lineno} uses {node.attr}"
+                )
+            if isinstance(node, ast.Name) and node.id == "isinstance":
+                violations.append(
+                    f"{function_name}:{node.lineno} uses isinstance"
+                )
+
+    assert set(lifecycle_functions) == {
+        "_ingest_documents_locked",
+        "_ensure_index_locked",
+    }
+    assert violations == []

@@ -35,6 +35,9 @@ class _FakeEmbeddingProvider:
 
 
 class _LifecycleStore:
+    supports_incremental_updates = False
+    requires_live_embeddings = False
+
     def __init__(self, manifest_path: pathlib.Path) -> None:
         self.manifest_path = manifest_path
         self.save_calls = 0
@@ -48,6 +51,9 @@ class _LifecycleStore:
 
     def collection_exists(self) -> bool:
         return True
+
+    def exists(self) -> bool:
+        return self.collection_exists()
 
     def save(
         self,
@@ -100,19 +106,25 @@ class _StatefulLifecycleStore(_LifecycleStore):
 
 
 class _OwnershipStore:
+    supports_incremental_updates = True
+    requires_live_embeddings = True
+
     def __init__(
         self,
         exists: bool,
         *,
         save_error: Exception | None = None,
     ) -> None:
-        self.exists = exists
+        self._exists = exists
         self.delete_calls = 0
         self.save_calls = 0
         self.save_error = save_error
 
     def collection_exists(self) -> bool:
-        return self.exists
+        return self._exists
+
+    def exists(self) -> bool:
+        return self.collection_exists()
 
     def save(
         self,
@@ -122,13 +134,13 @@ class _OwnershipStore:
     ) -> None:
         del chunks, removed_source_paths, replaced_source_paths
         self.save_calls += 1
-        self.exists = True
+        self._exists = True
         if self.save_error is not None:
             raise self.save_error
 
     def delete_collection(self) -> None:
         self.delete_calls += 1
-        self.exists = False
+        self._exists = False
 
     @property
     def embedding_status(self) -> models.ProviderStatus:
@@ -136,12 +148,18 @@ class _OwnershipStore:
 
 
 class _SharedOwnershipStore:
+    supports_incremental_updates = True
+    requires_live_embeddings = True
+
     def __init__(self, exists: Any) -> None:
-        self.exists = exists
+        self._exists_value = exists
 
     def collection_exists(self) -> bool:
-        with self.exists.get_lock():
-            return bool(self.exists.value)
+        with self._exists_value.get_lock():
+            return bool(self._exists_value.value)
+
+    def exists(self) -> bool:
+        return self.collection_exists()
 
     def save(
         self,
@@ -150,12 +168,12 @@ class _SharedOwnershipStore:
         replaced_source_paths: list[str] | None = None,
     ) -> None:
         del chunks, removed_source_paths, replaced_source_paths
-        with self.exists.get_lock():
-            self.exists.value = 1
+        with self._exists_value.get_lock():
+            self._exists_value.value = 1
 
     def delete_collection(self) -> None:
-        with self.exists.get_lock():
-            self.exists.value = 0
+        with self._exists_value.get_lock():
+            self._exists_value.value = 0
 
     @property
     def embedding_status(self) -> models.ProviderStatus:
@@ -190,6 +208,8 @@ def _install_store(
     *,
     qdrant: bool = False,
 ) -> None:
+    store.supports_incremental_updates = qdrant
+    store.requires_live_embeddings = qdrant
     if qdrant:
         monkeypatch.setattr(qdrant_store, "QdrantChunkStore", _LifecycleStore)
     monkeypatch.setattr(
@@ -682,7 +702,7 @@ def test_qdrant_ownership_initializer_creates_collection_before_return(
     ownership = rag.initialize_owned_qdrant_index(config)
 
     assert isinstance(ownership, rag.QdrantIndexOwnership)
-    assert store.exists is True
+    assert store.exists() is True
     assert store.save_calls == 1
     rag.delete_owned_qdrant_index(config, ownership)
 
@@ -717,7 +737,7 @@ def test_qdrant_ownership_initializer_cleans_partial_failed_creation(
     with pytest.raises(exceptions.VectorStoreError, match="forced"):
         rag.initialize_owned_qdrant_index(config)
 
-    assert store.exists is False
+    assert store.exists() is False
     assert store.delete_calls == 1
     store.save_error = None
     ownership = rag.initialize_owned_qdrant_index(config)
@@ -872,7 +892,7 @@ def test_qdrant_owned_cleanup_fails_closed_on_target_mismatch(
 
     rag.delete_owned_qdrant_index(run_config, ownership)
     assert stores[run_config.qdrant_collection].delete_calls == 1
-    assert stores[baseline_config.qdrant_collection].exists is True
+    assert stores[baseline_config.qdrant_collection].exists() is True
     with pytest.raises(exceptions.ConfigurationError, match="ownership"):
         rag.delete_owned_qdrant_index(run_config, ownership)
 

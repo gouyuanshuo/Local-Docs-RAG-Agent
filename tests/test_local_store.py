@@ -5,6 +5,7 @@ import pytest
 
 from local_docs_rag_agent.core import exceptions, models
 from local_docs_rag_agent.providers import base as provider_base
+from local_docs_rag_agent.rag import base as rag_base
 from local_docs_rag_agent.rag import local_store
 
 
@@ -15,6 +16,29 @@ class StubEmbeddingProvider(provider_base.EmbeddingProvider):
     @property
     def status(self) -> models.ProviderStatus:
         return models.ProviderStatus(provider="stub", mode="fallback")
+
+
+def test_chunk_store_protocol_declares_lifecycle_capabilities() -> None:
+    assert hasattr(rag_base.ChunkStore, "exists")
+    assert hasattr(rag_base.ChunkStore, "supports_incremental_updates")
+    assert hasattr(rag_base.ChunkStore, "requires_live_embeddings")
+
+
+def test_local_store_reports_full_replacement_lifecycle(
+    tmp_path: pathlib.Path,
+) -> None:
+    index_path = tmp_path / "chunks.jsonl"
+    store = local_store.LocalJsonlChunkStore(
+        index_path, StubEmbeddingProvider()
+    )
+
+    assert store.exists() is False
+    assert store.supports_incremental_updates is False
+    assert store.requires_live_embeddings is False
+
+    store.save([])
+
+    assert store.exists() is True
 
 
 def test_local_store_round_trip_uses_no_leftover_temporary_file(

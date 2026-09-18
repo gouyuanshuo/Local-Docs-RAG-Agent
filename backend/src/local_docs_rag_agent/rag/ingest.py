@@ -36,7 +36,6 @@ from local_docs_rag_agent.rag import (
     discovery,
     index_lock,
     manifest,
-    qdrant_store,
     store_factory,
 )
 
@@ -66,9 +65,8 @@ def ingest_documents(
       ConfigurationError: If the documents cannot be read, the storage target
         is invalid, or the manifest cannot safely own the configured target.
       ProviderUnavailableError: If the provider returns the wrong number
-        of vectors or an empty one, on any backend; or, on Qdrant, if
-        embeddings degraded to fallback, because hash vectors are not
-        comparable with the live vectors already in the collection.
+        of vectors or an empty one, or if a store that requires live
+        embeddings receives fallback vectors.
       VectorStoreError: If the store rejects the write.
     """
     with index_lock.index_guard(config):
@@ -105,25 +103,19 @@ def _ingest_documents_locked(
         source_checksums=source_checksums,
         previous_manifest=previous_manifest,
         index_all=(
-            # The local backend rewrites its whole file, so a partial plan buys
-            # nothing.
-            config.vector_backend == "local"
+            not store.supports_incremental_updates
             or legacy_rebuild
             or previous_manifest.repair_required
-            or (
-                isinstance(store, qdrant_store.QdrantChunkStore)
-                and not store.collection_exists()
-            )
+            or not store.exists()
             or previous_manifest.index_fingerprint != desired_fingerprint
         ),
     )
 
     chunks = _chunk_sources(config, source_texts, plan.sources_to_index)
     _attach_embeddings(chunks, embedding_provider)
-    if config.vector_backend == "qdrant" and chunks:
+    if store.requires_live_embeddings and chunks:
         _require_live_embeddings(embedding_provider)
 
-    is_qdrant = config.vector_backend == "qdrant"
     dirty_manifest = previous_manifest.marked_needs_reindex(
         plan.sources_to_index,
         storage_identity=desired_storage_identity,
@@ -132,12 +124,16 @@ def _ingest_documents_locked(
     store.save(
         chunks,
         removed_source_paths=(
-            list(plan.removed_sources) if is_qdrant else None
+            list(plan.removed_sources)
+            if store.supports_incremental_updates
+            else None
         ),
-        # Include changed-to-empty sources so their stale Qdrant points are
-        # deleted.
+        # Include changed-to-empty sources so an incremental store deletes
+        # their stale records.
         replaced_source_paths=(
-            list(plan.sources_to_index) if is_qdrant else None
+            list(plan.sources_to_index)
+            if store.supports_incremental_updates
+            else None
         ),
     )
     dirty_manifest.updated(
@@ -162,10 +158,10 @@ def _ingest_documents_locked(
 def ensure_index(config: app_config.AppConfig) -> None:
     """Ingest only if the index is missing, stale, or marked dirty.
 
-    Ask and eval call this rather than `ingest_documents`. A Qdrant save
-    that deleted points and then failed to upsert records those sources
-    in `needs_reindex`; skipping that flag would leave Ask serving an
-    index the manifest still calls complete.
+    Ask and eval call this rather than `ingest_documents`. An incremental
+    save that deleted records and then failed to replace them records those
+    sources in `needs_reindex`; skipping that flag would leave Ask serving
+    an index the manifest still calls complete.
 
     Args:
       config: The settings whose index should be present.
@@ -195,15 +191,8 @@ def _ensure_index_locked(config: app_config.AppConfig) -> None:
         )
     )
     needs_restore = stored.repair_required or bool(stored.needs_reindex)
-    if config.vector_backend == "qdrant":
-        if (
-            configuration_changed
-            or needs_restore
-            or _is_qdrant_collection_missing(config)
-        ):
-            ingest_documents(config)
-        return
-    if configuration_changed or needs_restore or not config.index_path.exists():
+    store = store_factory.build_store(config)
+    if configuration_changed or needs_restore or not store.exists():
         ingest_documents(config)
 
 
@@ -419,9 +408,9 @@ def _attach_embeddings(
 def _require_live_embeddings(
     embedding_provider: provider_base.EmbeddingProvider,
 ) -> None:
-    # Hash-fallback vectors are not comparable with the live vectors already
-    # stored in a Qdrant collection, so writing them would quietly corrupt
-    # retrieval quality.
+    # A store may compare incoming vectors with live-provider vectors already
+    # persisted there. Writing fallback vectors would quietly corrupt retrieval
+    # quality for such a store.
     status = embedding_provider.status
     if status.mode == "live":
         return
@@ -434,17 +423,9 @@ def _require_live_embeddings(
         "EMBEDDING_MODEL."
     )
     raise exceptions.ProviderUnavailableError(
-        "Qdrant ingest requires a live embedding provider",
+        "The configured vector store requires a live embedding provider",
         action_hint=(
             f"Provider {status.provider!r} is in {status.mode!r} mode "
             f"({reason}). {action_hint}"
         ),
-    )
-
-
-def _is_qdrant_collection_missing(config: app_config.AppConfig) -> bool:
-    store = store_factory.build_store(config)
-    return (
-        isinstance(store, qdrant_store.QdrantChunkStore)
-        and not store.collection_exists()
     )

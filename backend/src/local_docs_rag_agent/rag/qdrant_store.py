@@ -22,6 +22,9 @@ from local_docs_rag_agent.rag import retrieval, scoring
 class QdrantChunkStore:
     """Qdrant-backed chunk storage with normalized operational failures."""
 
+    supports_incremental_updates = True
+    requires_live_embeddings = True
+
     def __init__(
         self,
         url: str,
@@ -70,6 +73,18 @@ class QdrantChunkStore:
         self._embedding_provider = embedding_provider
         self._trust_env = trust_env
         self._settings = settings or retrieval.RetrievalSettings()
+
+    def exists(self) -> bool:
+        """Report whether the configured collection exists.
+
+        Returns:
+          True when the bound collection exists.
+
+        Raises:
+          VectorStoreError: If the service cannot be reached or refuses
+            the request.
+        """
+        return self.collection_exists()
 
     def collection_exists(self) -> bool:
         """Report whether the configured collection exists.

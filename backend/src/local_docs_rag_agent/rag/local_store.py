@@ -20,6 +20,9 @@ from local_docs_rag_agent.rag import retrieval
 class LocalJsonlChunkStore:
     """Small, inspectable on-disk store for local development."""
 
+    supports_incremental_updates = False
+    requires_live_embeddings = False
+
     def __init__(
         self,
         index_path: pathlib.Path,
@@ -37,6 +40,14 @@ class LocalJsonlChunkStore:
         self._index_path = index_path.resolve()
         self._embedding_provider = embedding_provider
         self._settings = settings or retrieval.RetrievalSettings()
+
+    def exists(self) -> bool:
+        """Report whether the resolved local index file exists.
+
+        Returns:
+          True when the bound index file exists.
+        """
+        return self._index_path.exists()
 
     def save(
         self,

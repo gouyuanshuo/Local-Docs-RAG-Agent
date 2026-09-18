@@ -29,7 +29,50 @@ class FakeEmbeddingProvider:
         return models.ProviderStatus(provider="fake", mode="live")
 
 
+class FakeFallbackEmbeddingProvider(FakeEmbeddingProvider):
+    @property
+    def status(self) -> models.ProviderStatus:
+        return models.ProviderStatus(provider="fake", mode="fallback")
+
+
+class FakeIncrementalStore:
+    """Non-Qdrant incremental store used to exercise the generic contract."""
+
+    supports_incremental_updates = True
+    requires_live_embeddings = True
+
+    def __init__(self, *, exists: bool) -> None:
+        self._exists = exists
+        self.chunks_by_source: dict[str, list[models.DocumentChunk]] = {}
+        self.save_history: list[
+            tuple[list[models.DocumentChunk], list[str], list[str]]
+        ] = []
+
+    def exists(self) -> bool:
+        return self._exists
+
+    def save(
+        self,
+        chunks: list[models.DocumentChunk],
+        removed_source_paths: list[str] | None = None,
+        replaced_source_paths: list[str] | None = None,
+    ) -> None:
+        removed = removed_source_paths or []
+        replaced = replaced_source_paths or []
+        self.save_history.append((list(chunks), list(removed), list(replaced)))
+        for source_path in {*removed, *replaced}:
+            self.chunks_by_source.pop(source_path, None)
+        for chunk in chunks:
+            self.chunks_by_source.setdefault(chunk.source_path, []).append(
+                chunk
+            )
+        self._exists = True
+
+
 class FakeQdrantStore:
+    supports_incremental_updates = True
+    requires_live_embeddings = True
+
     def __init__(self, collection_exists: bool) -> None:
         self._collection_exists = collection_exists
         self.save_calls = 0
@@ -39,6 +82,9 @@ class FakeQdrantStore:
 
     def collection_exists(self) -> bool:
         return self._collection_exists
+
+    def exists(self) -> bool:
+        return self.collection_exists()
 
     def save(
         self,
@@ -90,6 +136,24 @@ def _install_fakes(
     )
 
 
+def _install_incremental_fake(
+    monkeypatch: pytest.MonkeyPatch,
+    store: FakeIncrementalStore,
+    provider: FakeEmbeddingProvider | None = None,
+) -> None:
+    selected_provider = provider or FakeEmbeddingProvider()
+    monkeypatch.setattr(
+        provider_factory,
+        "build_embedding_provider",
+        lambda config: selected_provider,
+    )
+    monkeypatch.setattr(
+        store_factory,
+        "build_store",
+        lambda config, embedding_provider=None: store,
+    )
+
+
 def _current_manifest_payload(
     config: app_config.AppConfig,
     sources: dict[str, dict[str, object]],
@@ -103,6 +167,143 @@ def _current_manifest_payload(
         ),
         "sources": sources,
     }
+
+
+def _local_incremental_config(
+    tmp_path: pathlib.Path,
+    docs_dir: pathlib.Path,
+) -> app_config.AppConfig:
+    return app_config.AppConfig.from_env().with_overrides(
+        docs_dir=docs_dir,
+        docs_exclude_patterns=[],
+        index_path=tmp_path / "chunks.jsonl",
+        ingest_manifest_path=tmp_path / "manifest.json",
+        embedding_api_key="test-embedding-key",
+        vector_backend="local",
+        chunk_strategy="markdown",
+        chunk_size=800,
+        chunk_overlap=120,
+    )
+
+
+def test_third_incremental_store_obeys_all_source_transitions(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    first = docs_dir / "first.md"
+    second = docs_dir / "second.md"
+    first.write_text("First version", encoding="utf-8")
+    second.write_text("Second version", encoding="utf-8")
+    config = _local_incremental_config(tmp_path, docs_dir)
+    config.ingest_manifest_path.write_text(
+        json.dumps(
+            _current_manifest_payload(
+                config,
+                {
+                    first.as_posix(): {
+                        "checksum": ingest.source_checksum("First version"),
+                        "chunk_ids": ["missing-first"],
+                    },
+                    second.as_posix(): {
+                        "checksum": ingest.source_checksum("Second version"),
+                        "chunk_ids": ["missing-second"],
+                    },
+                },
+            )
+        ),
+        encoding="utf-8",
+    )
+    store = FakeIncrementalStore(exists=False)
+    _install_incremental_fake(monkeypatch, store)
+
+    missing = ingest.ingest_documents(config)
+    assert {chunk.source_path for chunk in missing} == {
+        first.as_posix(),
+        second.as_posix(),
+    }
+    assert store.save_history[-1][1] == []
+    assert store.save_history[-1][2] == [first.as_posix(), second.as_posix()]
+
+    unchanged = ingest.ingest_documents(config)
+    assert unchanged == []
+    assert store.save_history[-1] == ([], [], [])
+
+    first.write_text("First changed", encoding="utf-8")
+    changed = ingest.ingest_documents(config)
+    assert [chunk.source_path for chunk in changed] == [first.as_posix()]
+    assert store.save_history[-1][2] == [first.as_posix()]
+
+    second.unlink()
+    removed = ingest.ingest_documents(config)
+    assert removed == []
+    assert store.save_history[-1][1] == [second.as_posix()]
+    assert second.as_posix() not in store.chunks_by_source
+
+    first.write_text("   \n", encoding="utf-8")
+    emptied = ingest.ingest_documents(config)
+    assert emptied == []
+    assert store.save_history[-1][2] == [first.as_posix()]
+    assert store.chunks_by_source == {}
+
+
+def test_store_capability_requires_live_embeddings_independent_of_backend(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    (docs_dir / "sample.md").write_text("Evidence", encoding="utf-8")
+    config = _local_incremental_config(tmp_path, docs_dir).with_overrides(
+        embedding_api_key=None
+    )
+    store = FakeIncrementalStore(exists=False)
+    _install_incremental_fake(
+        monkeypatch,
+        store,
+        provider=FakeFallbackEmbeddingProvider(),
+    )
+
+    with pytest.raises(exceptions.ProviderUnavailableError):
+        ingest.ingest_documents(config)
+
+    assert store.save_history == []
+
+
+def test_ensure_index_uses_store_existence_capability(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    source = docs_dir / "sample.md"
+    source.write_text("Evidence", encoding="utf-8")
+    config = _local_incremental_config(tmp_path, docs_dir)
+    config.index_path.write_text("unrelated sentinel", encoding="utf-8")
+    config.ingest_manifest_path.write_text(
+        json.dumps(
+            _current_manifest_payload(
+                config,
+                {
+                    source.as_posix(): {
+                        "checksum": ingest.source_checksum("Evidence"),
+                        "chunk_ids": ["missing"],
+                    }
+                },
+            )
+        ),
+        encoding="utf-8",
+    )
+    store = FakeIncrementalStore(exists=False)
+    _install_incremental_fake(monkeypatch, store)
+
+    ingest.ensure_index(config)
+
+    assert store.exists() is True
+    assert [chunk.source_path for chunk in store.save_history[-1][0]] == [
+        source.as_posix()
+    ]
 
 
 def test_missing_collection_reingests_unchanged_manifest(

@@ -28,6 +28,12 @@ index_lock -> config, core (and lazy storage identity lookup)
 ## Invariants
 
 - Store does not know about rerank; reranker does not know the backend.
+- `ChunkStore.exists()` means the configured index target is ready to inspect;
+  `supports_incremental_updates` selects changed/removed-source saves; and
+  `requires_live_embeddings` rejects fallback vectors before mutation.
+- Generic ingest and readiness decisions use those capabilities, never a
+  backend name or concrete store type. Factory selection and Qdrant ownership
+  remain explicitly backend-specific.
 - Qdrant `blended` is the server's dense order (`blended ≡ dense`).
 - Qdrant ingest/search refuse non-live embeddings.
 - After delete-then-upsert failure, `needs_reindex` is set; `ensure_index`
@@ -67,6 +73,8 @@ index_lock -> config, core (and lazy storage identity lookup)
 
 - Chunk / ranking internals behind the facade.
 - New `Reranker` implementations (`none` / `llm` already exist).
+- New `ChunkStore` implementations that declare all lifecycle capabilities,
+  are constructed only by `store_factory`, and preserve manifest semantics.
 
 ## Must not
 

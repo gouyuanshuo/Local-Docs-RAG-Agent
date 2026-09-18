@@ -122,6 +122,8 @@ Current theme:
       dataset/configuration identities and exact-name Qdrant orphan metadata
 - [x] Expose eval-comparison dataset/configuration identities and typed Qdrant
       orphan-recovery metadata through the HTTP response schema
+- [x] Express index existence, incremental-update support, and live-embedding
+      requirements through the `ChunkStore` lifecycle contract
 - [ ] Resolve the upstream Starlette/AnyIO `BlockingPortal` deprecation warning
       or add a narrowly justified filter after the dependency lock is selected
 
