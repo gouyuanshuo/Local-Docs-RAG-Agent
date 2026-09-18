@@ -14,6 +14,23 @@ def test_empty_expectations_are_neutral_success() -> None:
     assert harness.source_match_rate([], []) == 1.0
 
 
+@pytest.mark.parametrize(
+    ("expected_items", "texts", "expected_rate"),
+    [
+        (["alpha beta"], ["alpha", "beta"], 0.0),
+        (["alpha beta"], ["beta", "alpha"], 0.0),
+        (["alpha beta"], ["Alpha Beta"], 1.0),
+        (["missing evidence"], ["alpha beta"], 0.0),
+        ([], ["alpha beta"], 1.0),
+    ],
+    ids=["boundary", "reversed", "case-insensitive", "missing", "empty"],
+)
+def test_evidence_match_rate_checks_each_chunk_or_span_independently(
+    expected_items: list[str], texts: list[str], expected_rate: float
+) -> None:
+    assert harness.evidence_match_rate(expected_items, texts) == expected_rate
+
+
 def test_eval_loader_reports_malformed_line(tmp_path: pathlib.Path) -> None:
     eval_path = tmp_path / "eval.jsonl"
     eval_path.write_text(
@@ -117,6 +134,96 @@ def test_eval_result_preserves_runtime_and_provider_diagnostics(
             "reason": "reranker_disabled",
         },
     }
+
+
+def test_eval_keeps_evidence_inside_chunks_and_spans(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    eval_path = tmp_path / "eval.jsonl"
+    eval_path.write_text(
+        json.dumps(
+            {
+                "question": "What is alpha beta?",
+                "expected_answer_keywords": ["alpha beta"],
+                "expected_retrieval_keywords": ["alpha beta"],
+                "expected_span_keywords": ["alpha beta"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    diagnostics = models.AnswerDiagnostics(
+        requested_runtime="basic",
+        actual_runtime="basic",
+        vector_backend="local",
+        chat_provider=models.ProviderStatus(provider="fake-chat", mode="live"),
+        embedding_provider=models.ProviderStatus(
+            provider="fake-embedding", mode="live"
+        ),
+        reranker=models.ProviderStatus(
+            provider="none", mode="ready", reason="reranker_disabled"
+        ),
+    )
+
+    def chunk(chunk_id: str, text: str) -> models.DocumentChunk:
+        return models.DocumentChunk(
+            chunk_id=chunk_id,
+            source_path="source.md",
+            title="Source",
+            text=text,
+            chunk_index=0,
+            start_char=0,
+            end_char=len(text),
+        )
+
+    def citation_span(chunk_id: str, text: str) -> models.CitationSpan:
+        return models.CitationSpan(
+            source_path="source.md",
+            chunk_id=chunk_id,
+            chunk_index=0,
+            start_char=0,
+            end_char=len(text),
+            text=text,
+        )
+
+    class FakeAgent:
+        def __init__(self, config: app_config.AppConfig) -> None:
+            del config
+
+        def answer(self, question: str) -> models.AgentAnswer:
+            alpha_span = citation_span("alpha", "alpha")
+            beta_span = citation_span("beta", "beta")
+            return models.AgentAnswer(
+                question=question,
+                answer="alpha beta",
+                citations=["source.md"],
+                citation_spans=[alpha_span, beta_span],
+                retrieved_chunks=[
+                    models.RetrievalHit(
+                        chunk=chunk("alpha", "alpha"),
+                        score=1.0,
+                        citation_span=alpha_span,
+                    ),
+                    models.RetrievalHit(
+                        chunk=chunk("beta", "beta"),
+                        score=0.5,
+                        citation_span=beta_span,
+                    ),
+                ],
+                diagnostics=diagnostics,
+            )
+
+    monkeypatch.setattr(agent, "LocalDocsAgent", FakeAgent)
+    config = app_config.AppConfig.from_env().with_overrides(
+        eval_path=eval_path,
+        vector_backend="local",
+    )
+
+    result = harness.run_eval(config)[0]
+
+    assert result.answer_keyword_hit_rate == 1.0
+    assert result.retrieval_span_hit_rate == 0.0
+    assert result.citation_span_hit_rate == 0.0
 
 
 # --- Rank-aware retrieval metrics --------------------------------------------

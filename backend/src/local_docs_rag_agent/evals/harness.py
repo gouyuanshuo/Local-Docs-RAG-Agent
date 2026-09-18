@@ -88,17 +88,11 @@ def run_eval(config: app_config.AppConfig) -> list[models.EvalResult]:
         response_time_ms = round((time.perf_counter() - started_at) * 1000, 2)
 
         answer_text = response.answer.lower()
-        citation_text = " ".join(
-            span.text for span in response.citation_spans
-        ).lower()
-        retrieved_text = " ".join(
-            hit.chunk.text for hit in response.retrieved_chunks
-        ).lower()
-        # Kept as a ranked list as well as a blob: the blob answers "was it
-        # retrieved at all", and only the list answers "how far down".
-        ranked_texts = [
-            hit.chunk.text.lower() for hit in response.retrieved_chunks
-        ]
+        citation_texts = [span.text for span in response.citation_spans]
+        retrieved_texts = [hit.chunk.text for hit in response.retrieved_chunks]
+        # Evidence matching checks containment within each chunk; the ordered
+        # list separately answers how far down the evidence appeared.
+        ranked_texts = [text.lower() for text in retrieved_texts]
         retrieved_sources = list(
             dict.fromkeys(
                 hit.chunk.source_path for hit in response.retrieved_chunks
@@ -116,8 +110,8 @@ def run_eval(config: app_config.AppConfig) -> list[models.EvalResult]:
             retrieval_source_hit_rate=source_match_rate(
                 case.expected_source_paths, retrieved_sources
             ),
-            retrieval_span_hit_rate=keyword_match_rate(
-                case.expected_retrieval_keywords, retrieved_text
+            retrieval_span_hit_rate=evidence_match_rate(
+                case.expected_retrieval_keywords, retrieved_texts
             ),
             retrieval_reciprocal_rank=reciprocal_rank(
                 case.expected_retrieval_keywords, ranked_texts
@@ -128,8 +122,8 @@ def run_eval(config: app_config.AppConfig) -> list[models.EvalResult]:
             citation_source_hit_rate=source_match_rate(
                 case.expected_source_paths, response.citations
             ),
-            citation_span_hit_rate=keyword_match_rate(
-                case.expected_span_keywords, citation_text
+            citation_span_hit_rate=evidence_match_rate(
+                case.expected_span_keywords, citation_texts
             ),
             response_time_ms=response_time_ms,
             diagnostics=response.diagnostics,
@@ -156,16 +150,37 @@ def keyword_match_rate(expected_items: list[str], observed_text: str) -> float:
     return hits / len(expected_items)
 
 
+def evidence_match_rate(expected_items: list[str], texts: list[str]) -> float:
+    """Return the share of evidence items found within individual texts.
+
+    Args:
+      expected_items: Evidence substrings the chunks or citation spans must
+        contain.
+      texts: Individual retrieved chunks or citation spans to inspect.
+
+    Returns:
+      The share of expected evidence items contained within one text each.
+      An empty expectation is neutral success.
+    """
+    if not expected_items:
+        return 1.0
+    observed = [text.lower() for text in texts]
+    found = sum(
+        any(item.lower() in text for text in observed)
+        for item in expected_items
+    )
+    return found / len(expected_items)
+
+
 def reciprocal_rank(
     expected_items: list[str], ranked_texts: list[str]
 ) -> float:
     """Return how near the top of the results the expected text was found.
 
-    This is the metric a reranker moves. `keyword_match_rate` joins every
-    retrieved chunk into one string before matching, so it answers only
-    whether the evidence was retrieved at all: reordering the same chunks
-    cannot change it, and widening `top_k` can only raise it. Reciprocal rank
-    reads the results as the ordered list they are.
+    This is the metric a reranker moves. `evidence_match_rate` answers only
+    whether an evidence item appeared within a retrieved chunk: reordering
+    the same chunks cannot change it, and widening `top_k` can only raise it.
+    Reciprocal rank reads the results as the ordered list they are.
 
     Args:
       expected_items: Keywords the retrieved evidence should contain.

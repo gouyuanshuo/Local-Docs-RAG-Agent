@@ -94,6 +94,8 @@ Current theme:
       resolved by the SDK decorator
 - [x] Reject empty eval gold and exclude unmeasured comparison cells from the
       leaderboard
+- [x] Keep retrieval and citation evidence matching within individual chunks
+      and cited spans
 
 ### Structure and readability pass
 

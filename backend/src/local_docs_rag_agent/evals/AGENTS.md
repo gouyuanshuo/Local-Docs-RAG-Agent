@@ -5,7 +5,8 @@ Load gold, score one run, sweep a matrix, rank a leaderboard.
 ## Public interface
 
 - `harness.load_eval_cases` / `run_eval`
-- `harness.reciprocal_rank` / `retrieval_precision` / `failure_reasons`
+- `harness.evidence_match_rate` / `reciprocal_rank` / `retrieval_precision`
+- `harness.failure_reasons`
 - `comparison.AXES` — single definition of sweepable axes
 - `comparison.run_eval_matrix` / `cell_degradation_reason` / `run_label`
 - Gold: `data/evals/sample_eval.jsonl`
@@ -15,6 +16,9 @@ Load gold, score one run, sweep a matrix, rank a leaderboard.
 
 - Every `expected_retrieval_keywords` item is a **contiguous substring** of
   a cited source (`tests/test_eval_gold.py`).
+- Retrieval and citation span evidence must occur within one retrieved chunk
+  or cited span; it must not bridge their boundaries. Answer keyword scoring
+  remains a whole-answer substring check.
 - Gold JSONL must contain at least one case; empty or whitespace-only files
   fail before a comparison starts ingestion.
 - Leaderboard sorts by `retrieval_reciprocal_rank` then precision, not by

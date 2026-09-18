@@ -5,9 +5,11 @@ computed, and what it cannot see. The last column matters as much as the
 second. Several of these metrics are blind to exactly the change you might be
 trying to measure.
 
-All keyword matching is a case-insensitive substring test. An empty expectation
-scores `1.0`, so a case can assert on some dimensions without being penalised
-for the ones it leaves out.
+All keyword matching is case-insensitive substring matching. Answer keywords
+are checked against the whole answer; retrieval and citation evidence is
+checked within each individual chunk or span. An empty expectation scores
+`1.0`, so a case can assert on some dimensions without being penalised for the
+ones it leaves out.
 
 ## Per case
 
@@ -17,11 +19,11 @@ Each eval case produces one result with these metrics:
 | --- | --- | --- |
 | `retrieval_reciprocal_rank` | Mean over `expected_retrieval_keywords` of `1 / position`, where position is the first retrieved chunk containing the keyword. A keyword found nowhere scores `0`. `1.0` means every keyword was in the first result | whether the answer used the evidence |
 | `retrieval_precision` | Share of retrieved chunks containing at least one expected retrieval keyword. `0` when something was expected and nothing was retrieved | where in the list the relevant chunks sit |
-| `retrieval_span_hit_rate` | Share of `expected_retrieval_keywords` found anywhere in the retrieved chunks, joined into one text | order entirely; it also rises as `TOP_K` widens |
+| `retrieval_span_hit_rate` | Share of `expected_retrieval_keywords` found within an individual retrieved chunk | order entirely; it also rises as `TOP_K` widens |
 | `retrieval_source_hit_rate` | Share of `expected_source_paths` among the retrieved chunks' sources | order, and whether the right part of the source was retrieved |
 | `answer_keyword_hit_rate` | Share of `expected_answer_keywords` found in the answer text | whether the answer is grounded or cited |
 | `citation_source_hit_rate` | Share of `expected_source_paths` among the answer's cited sources | which spans were cited |
-| `citation_span_hit_rate` | Share of `expected_span_keywords` found in the cited spans, joined into one text | order, and extra cited spans |
+| `citation_span_hit_rate` | Share of `expected_span_keywords` found within an individual cited span | order, and extra cited spans |
 | `response_time_ms` | Wall time to produce the answer, rounded to 2 decimals | nothing it claims to measure, but it includes provider latency |
 
 A result also carries the case's `question`, the `answer`, its `citations`, the
@@ -30,10 +32,9 @@ against, and its `failure_reasons`.
 
 ### Why two retrieval metrics were added
 
-`retrieval_span_hit_rate` joins the retrieved text before matching. It answers
-"was the evidence retrieved at all" well, but reordering the same chunks cannot
-change it, so a reranker scores exactly the same as no reranker. And because a
-wider window has more text to match, a larger `TOP_K` can only raise it.
+`retrieval_span_hit_rate` asks whether each evidence item appears within any
+complete retrieved chunk. It cannot see rank, so reordering the same chunks
+cannot change it, and a wider window can only raise it.
 `retrieval_reciprocal_rank` sees position, and `retrieval_precision` makes a
 padded window cost something. The same evidence at rank 1, 2, and 4 scores:
 
@@ -42,6 +43,13 @@ padded window cost something. The same evidence at rank 1, 2, and 4 scores:
 | position 1 | 1.00 | 1.00 |
 | position 2 | 1.00 | 0.50 |
 | position 4 | 1.00 | 0.25 |
+
+### Span metric semantics since 2026-09-19
+
+Reports created before 2026-09-19 joined chunks and cited spans before testing
+each evidence item. That could fabricate a hit across a chunk or span boundary.
+Current reports require the complete item within one chunk or span. Do not
+compare old and current span hit rates without labelling this semantics change.
 
 ## Failure reasons
 
