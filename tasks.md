@@ -101,6 +101,11 @@ Current theme:
 - [x] Validate the full eval-comparison matrix before any cell can ingest
 - [x] Exclude unknown provider or selected-reranker execution from comparison
       leaderboard eligibility
+- [x] Audit Stage 1 after implementation: the combined review is clean after
+      its two fix rounds; all gates, 185 tests, the frontend build, and a
+      disposable no-key ingest/ask/eval/compare workflow pass
+- [ ] Resolve the upstream Starlette/AnyIO `BlockingPortal` deprecation warning
+      or add a narrowly justified filter after the dependency lock is selected
 
 ### Structure and readability pass
 
