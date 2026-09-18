@@ -91,7 +91,9 @@ index_lock -> config, core (and lazy storage identity lookup)
   IPv4, or bracketed IPv6. Labels are 1–63 characters, the DNS name is at most
   253 characters, whitespace/control and illegal label characters are invalid,
   IPv6 literals are compressed, and port `0` is invalid. Every invalid form
-  reports the same credential-free configuration error.
+  reports the same credential-free configuration error. Non-ASCII names use
+  the direct `idna` dependency's IDNA2008 encoding, matching HTTPX/Qdrant;
+  trailing-dot hosts are rejected rather than collapsed with another target.
 - Qdrant operation errors omit raw URLs and exception messages and suppress
   unsafe chaining while retaining operation, collection, exception class,
   reason code, and recovery hints. Client-construction failures use the same

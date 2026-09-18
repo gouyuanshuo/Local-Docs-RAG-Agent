@@ -2817,6 +2817,45 @@ def test_qdrant_owned_cleanup_fails_closed_on_target_mismatch(
         rag.delete_owned_qdrant_index(run_config, ownership)
 
 
+def test_qdrant_owned_cleanup_distinguishes_idna2008_target(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    idn_config = _qdrant_config(tmp_path).with_overrides(
+        qdrant_url="https://fa\u00df.example",
+        qdrant_collection="idna-owned-target",
+    )
+    ascii_config = idn_config.with_overrides(qdrant_url="https://fass.example")
+    (idn_config.docs_dir / "sample.md").write_text(
+        "Evidence",
+        encoding="utf-8",
+    )
+    stores = {
+        idn_config.qdrant_url: _OwnershipStore(exists=False),
+        ascii_config.qdrant_url: _OwnershipStore(exists=True),
+    }
+    monkeypatch.setattr(qdrant_store, "QdrantChunkStore", _OwnershipStore)
+    monkeypatch.setattr(
+        store_factory,
+        "build_store",
+        lambda config, embedding_provider=None: stores[config.qdrant_url],
+    )
+    monkeypatch.setattr(
+        provider_factory,
+        "build_embedding_provider",
+        lambda config: _FakeEmbeddingProvider(),
+    )
+
+    ownership = rag.initialize_owned_qdrant_index(idn_config)
+
+    with pytest.raises(exceptions.ConfigurationError, match="ownership"):
+        rag.delete_owned_qdrant_index(ascii_config, ownership)
+    assert stores[ascii_config.qdrant_url].delete_calls == 0
+
+    rag.delete_owned_qdrant_index(idn_config, ownership)
+    assert stores[idn_config.qdrant_url].delete_calls == 1
+
+
 def test_qdrant_delete_failures_retain_ownership_for_successful_retry(
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,

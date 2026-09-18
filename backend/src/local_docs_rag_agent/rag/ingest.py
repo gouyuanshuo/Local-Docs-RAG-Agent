@@ -28,6 +28,8 @@ import json
 import pathlib
 from urllib import parse
 
+import idna
+
 from local_docs_rag_agent import config as app_config
 from local_docs_rag_agent.core import exceptions, models
 from local_docs_rag_agent.providers import base as provider_base
@@ -332,7 +334,12 @@ def _canonical_qdrant_host(hostname: str) -> str:
         address = ipaddress.IPv6Address(hostname)
         return f"[{address.compressed}]"
 
-    ascii_hostname = hostname.lower().encode("idna").decode("ascii")
+    lowercase_hostname = hostname.lower()
+    ascii_hostname = (
+        lowercase_hostname
+        if lowercase_hostname.isascii()
+        else idna.encode(lowercase_hostname).decode("ascii")
+    )
     if not ascii_hostname or len(ascii_hostname) > 253:
         raise ValueError
     labels = ascii_hostname.split(".")

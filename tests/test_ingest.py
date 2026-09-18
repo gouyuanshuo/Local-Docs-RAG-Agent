@@ -7,6 +7,7 @@ import traceback
 import types
 from typing import Any
 
+import httpx
 import pytest
 import qdrant_client
 
@@ -1050,6 +1051,14 @@ def test_validate_storage_target_malformed_url_traceback_excludes_credentials(
             "private?key=query-secret"
         ),
         (
+            "http://validation-user:validation-password@\U0001f4a9.example/"
+            "private?key=query-secret"
+        ),
+        (
+            "http://validation-user:validation-password@a\u200cb.example/"
+            "private?key=query-secret"
+        ),
+        (
             "http://validation-user:validation-password@bad..invalid/"
             "private?key=query-secret"
         ),
@@ -1075,6 +1084,10 @@ def test_validate_storage_target_malformed_url_traceback_excludes_credentials(
         ),
         (
             "http://validation-user:validation-password@bad%41.invalid/"
+            "private?key=query-secret"
+        ),
+        (
+            "http://validation-user:validation-password@example./"
             "private?key=query-secret"
         ),
     ],
@@ -1145,6 +1158,14 @@ def test_validate_storage_target_rejects_invalid_hostname_without_side_effects(
             "https://B\u00dcCHER.example/cluster",
             "https://xn--bcher-kva.example:6333/cluster",
         ),
+        (
+            "https://fa\u00df.example/cluster",
+            "https://xn--fa-hia.example:6333/cluster",
+        ),
+        (
+            "https://\u03b2\u03cc\u03bb\u03bf\u03c2.com/cluster",
+            "https://xn--nxasmm1c.com:6333/cluster",
+        ),
     ],
 )
 def test_validate_storage_target_accepts_canonical_qdrant_hosts(
@@ -1164,6 +1185,52 @@ def test_validate_storage_target_accepts_canonical_qdrant_hosts(
     assert ingest.storage_identity(config) == ingest.storage_identity(
         equivalent
     )
+
+
+def test_qdrant_idna2008_identity_does_not_collapse_sharp_s(
+    tmp_path: pathlib.Path,
+) -> None:
+    config = _qdrant_config(
+        tmp_path,
+        tmp_path / "docs",
+        tmp_path / "manifest.json",
+    ).with_overrides(qdrant_url="https://fa\u00df.example/cluster")
+    ascii_word = config.with_overrides(
+        qdrant_url="https://fass.example/cluster"
+    )
+
+    assert ingest.storage_identity(config) != ingest.storage_identity(
+        ascii_word
+    )
+
+
+@pytest.mark.parametrize(
+    "configured_url",
+    [
+        "https://LOCALHOST:6333/cluster",
+        "https://QDRANT.EXAMPLE:6333/cluster",
+        "http://127.0.0.1:6333/cluster",
+        "https://fa\u00df.example:6333/cluster",
+        "https://B\u00dcCHER.example:6333/cluster",
+        "https://\u03b2\u03cc\u03bb\u03bf\u03c2.com:6333/cluster",
+        "https://xn--fa-hia.example:6333/cluster",
+    ],
+)
+def test_qdrant_canonical_host_matches_httpx_and_client(
+    configured_url: str,
+) -> None:
+    canonical_url = ingest._canonical_qdrant_url(configured_url)
+    httpx_url = httpx.URL(configured_url)
+    client = qdrant_client.QdrantClient(
+        url=configured_url,
+        check_compatibility=False,
+    )
+    try:
+        remote_client: Any = client._client
+        assert httpx.URL(canonical_url).raw_host == httpx_url.raw_host
+        assert canonical_url == remote_client.rest_uri
+    finally:
+        client.close()
 
 
 def test_manifest_storage_identity_does_not_persist_qdrant_credentials(
