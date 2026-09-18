@@ -167,6 +167,56 @@ def test_qdrant_delete_collection_normalizes_client_failure(
     assert "delete_collection" in str(exc_info.value)
 
 
+def test_qdrant_delete_collection_rejects_false_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeQdrantClient:
+        def __init__(self, **kwargs: Any) -> None:
+            del kwargs
+
+        def delete_collection(self, collection_name: str) -> bool:
+            del collection_name
+            return False
+
+    monkeypatch.setattr(qdrant_client, "QdrantClient", FakeQdrantClient)
+    store = qdrant_store.QdrantChunkStore(
+        url="https://qdrant.example",
+        api_key=None,
+        collection_name="run-owned",
+        timeout_s=10,
+        embedding_provider=StubEmbeddingProvider(),
+    )
+
+    with pytest.raises(exceptions.VectorStoreError) as exc_info:
+        store.delete_collection()
+
+    assert exc_info.value.reason_code == "operation_failed"
+    assert "delete_collection" in str(exc_info.value)
+
+
+def test_qdrant_delete_collection_accepts_true_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeQdrantClient:
+        def __init__(self, **kwargs: Any) -> None:
+            del kwargs
+
+        def delete_collection(self, collection_name: str) -> bool:
+            del collection_name
+            return True
+
+    monkeypatch.setattr(qdrant_client, "QdrantClient", FakeQdrantClient)
+    store = qdrant_store.QdrantChunkStore(
+        url="https://qdrant.example",
+        api_key=None,
+        collection_name="run-owned",
+        timeout_s=10,
+        embedding_provider=StubEmbeddingProvider(),
+    )
+
+    store.delete_collection()
+
+
 def test_qdrant_load_paginates_until_offset_is_exhausted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

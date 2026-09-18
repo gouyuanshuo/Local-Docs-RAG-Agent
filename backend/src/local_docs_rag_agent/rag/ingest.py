@@ -349,10 +349,9 @@ def _build_ingest_plan(
     index_all: bool,
 ) -> IngestPlan:
     previous_sources = previous_manifest.sources
-    removed_sources = tuple(
-        sorted(set(previous_sources) - set(source_checksums))
-    )
     dirty_sources = set(previous_manifest.needs_reindex)
+    owned_sources = set(previous_sources) | dirty_sources
+    removed_sources = tuple(sorted(owned_sources - set(source_checksums)))
     changed_sources = tuple(
         sorted(
             source_path

@@ -1,8 +1,9 @@
-"""Fail-closed ownership tokens for disposable Qdrant index cleanup."""
+"""Atomic initialization and fail-closed cleanup for disposable Qdrant."""
 
 from __future__ import annotations
 
 import dataclasses
+import os
 import threading
 import uuid
 
@@ -18,7 +19,7 @@ from local_docs_rag_agent.rag import (
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class QdrantIndexOwnership:
-    """Opaque proof that this process claimed one absent Qdrant collection."""
+    """Opaque proof that this process initialized one Qdrant collection."""
 
     _nonce: str
     _storage_identity: str
@@ -27,30 +28,35 @@ class QdrantIndexOwnership:
 
 _CLAIMS_GUARD = threading.Lock()
 _CLAIMS: dict[str, tuple[str, str]] = {}
+_CLAIMS_PROCESS_ID = os.getpid()
 
 
-def claim_qdrant_index_ownership(
+def initialize_owned_qdrant_index(
     config: app_config.AppConfig,
 ) -> QdrantIndexOwnership:
-    """Claim cleanup ownership of an absent configured Qdrant collection.
+    """Create and claim an absent disposable Qdrant collection atomically.
 
     Args:
       config: A Qdrant configuration naming a disposable collection.
 
     Returns:
-      An opaque process-local token required for exact-target cleanup.
+      An opaque process-local token required for exact-target cleanup after
+      the first ingest has created the collection.
 
     Raises:
       ConfigurationError: If the backend is not Qdrant, the collection already
-        exists, or this process already holds a claim for the same target.
-      VectorStoreError: If collection readiness cannot be checked.
+        exists, this process already owns the target, or first ingest cannot
+        create a collection.
+      ProviderUnavailableError: If first ingest cannot embed the documents.
+      VectorStoreError: If collection readiness or first ingest fails.
     """
+    _ensure_current_process()
     _require_qdrant(config)
     with index_lock.index_guard(config):
         store = _qdrant_store(config)
         if store.collection_exists():
             raise exceptions.ConfigurationError(
-                "Cannot claim Qdrant index ownership: collection already "
+                "Cannot initialize Qdrant index ownership: collection already "
                 "exists",
                 action_hint=(
                     "Generate a new unique run-owned collection name. Never "
@@ -66,28 +72,53 @@ def claim_qdrant_index_ownership(
                 )
             nonce = uuid.uuid4().hex
             _CLAIMS[nonce] = (storage_identity, collection_name)
-        return QdrantIndexOwnership(
+        ownership = QdrantIndexOwnership(
             _nonce=nonce,
             _storage_identity=storage_identity,
             _collection_name=collection_name,
         )
+        try:
+            ingest.ingest_documents(config)
+            if not store.collection_exists():
+                raise exceptions.ConfigurationError(
+                    "First ingest did not create the owned Qdrant collection",
+                    action_hint=(
+                        "Use a non-empty comparison dataset and retry with a "
+                        "new unique collection name."
+                    ),
+                )
+        except Exception as exc:
+            try:
+                if store.collection_exists():
+                    store.delete_collection()
+            except Exception:
+                exc.add_note(
+                    "Partial Qdrant collection cleanup also failed; use "
+                    "exact-name orphan recovery."
+                )
+            finally:
+                _discard_claim(ownership)
+            raise
+        return ownership
 
 
 def delete_owned_qdrant_index(
     config: app_config.AppConfig,
     ownership: QdrantIndexOwnership,
 ) -> None:
-    """Delete exactly the disposable Qdrant collection `ownership` claimed.
+    """Delete exactly the disposable Qdrant collection that was initialized.
 
     Args:
-      config: The same target configuration used when claiming ownership.
-      ownership: Opaque token returned by `claim_qdrant_index_ownership`.
+      config: The same target configuration used during initialization.
+      ownership: Opaque token returned by
+        `initialize_owned_qdrant_index`.
 
     Raises:
       ConfigurationError: If the backend, target identity, collection, token,
         or process-local claim does not match exactly.
       VectorStoreError: If Qdrant readiness or deletion fails.
     """
+    _ensure_current_process()
     _require_qdrant(config)
     with index_lock.index_guard(config):
         storage_identity = ingest.storage_identity(config)
@@ -113,6 +144,11 @@ def delete_owned_qdrant_index(
             _CLAIMS.pop(ownership._nonce, None)
 
 
+def _discard_claim(ownership: QdrantIndexOwnership) -> None:
+    with _CLAIMS_GUARD:
+        _CLAIMS.pop(ownership._nonce, None)
+
+
 def _require_qdrant(config: app_config.AppConfig) -> None:
     if config.vector_backend != "qdrant":
         raise exceptions.ConfigurationError(
@@ -129,3 +165,22 @@ def _qdrant_store(
             "Qdrant ownership requires a Qdrant collection store"
         )
     return store
+
+
+def _ensure_current_process() -> None:
+    if os.getpid() != _CLAIMS_PROCESS_ID:
+        _reset_after_fork()
+
+
+def _reset_after_fork() -> None:
+    global _CLAIMS
+    global _CLAIMS_GUARD
+    global _CLAIMS_PROCESS_ID
+
+    _CLAIMS_PROCESS_ID = os.getpid()
+    _CLAIMS_GUARD = threading.Lock()
+    _CLAIMS = {}
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_after_fork)

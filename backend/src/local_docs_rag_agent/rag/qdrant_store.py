@@ -94,10 +94,14 @@ class QdrantChunkStore:
         never this concrete method directly.
 
         Raises:
-          VectorStoreError: If Qdrant rejects the deletion.
+          VectorStoreError: If Qdrant rejects the deletion or reports False.
         """
         try:
-            self._client.delete_collection(self._collection_name)
+            deleted = self._client.delete_collection(self._collection_name)
+            if deleted is not True:
+                raise RuntimeError(
+                    "Qdrant reported that the collection was not deleted"
+                )
         except Exception as exc:
             raise self._operation_error("delete_collection", exc) from exc
 

@@ -189,10 +189,14 @@ Qdrant lifecycle work from multiple hosts needs an external distributed lock
 or a single designated owner; the local lock cannot coordinate hosts.
 
 **A disposable Qdrant comparison collection was orphaned.** This can happen if
-the process dies and loses its ownership token. Use the exact UUID-derived
-collection name recorded for the run, verify its comparison prefix, and delete
-only that collection with Qdrant administration tooling. Never delete by a
-wildcard or by the interactive collection's configured name.
+the process dies and loses its ownership token, or if first ingest and the
+initializer's guarded partial-collection cleanup both fail. Use the exact
+UUID-derived collection name recorded for the run, verify its comparison
+prefix, and delete only that collection with Qdrant administration tooling.
+Never delete by a wildcard or by the interactive collection's configured name.
+Comparison callers must use `initialize_owned_qdrant_index` before evaluation;
+it performs first ingest and returns the only token accepted by
+`delete_owned_qdrant_index`. Do not pre-create the collection separately.
 
 **`DOCS_DIR does not exist`.** The directory is resolved relative to where the
 process starts. Run from the repository root, or use an absolute path.

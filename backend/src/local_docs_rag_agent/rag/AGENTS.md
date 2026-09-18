@@ -9,8 +9,8 @@ package, import **only** `local_docs_rag_agent.rag` (the facade).
 - `ingest_documents` / `ensure_index` — lifecycle; `ensure_index` honors
   `needs_reindex`
 - `index_guard` — same-user, single-host lifecycle critical section
-- `claim_qdrant_index_ownership` / `delete_owned_qdrant_index` — fail-closed
-  ownership seam for disposable Qdrant collections
+- `initialize_owned_qdrant_index` / `delete_owned_qdrant_index` — atomic
+  first-ingest and fail-closed cleanup for disposable Qdrant collections
 - `build_store` / `retrieval_settings`
 - `chunk_text`, `collect_document_paths`, `read_source_texts`
 - `rank_chunks`, `RetrievalSettings`, `ChunkStore`, store types, `Reranker`
@@ -36,6 +36,9 @@ index_lock -> config, core (and lazy storage identity lookup)
   manifest is published only after the store mutation succeeds.
 - Ingest and retrieval readiness/query hold the same reentrant thread plus
   cross-process guard. Reranking runs after the guard is released.
+- After `fork`, child lock/ownership registries are reset and inherited lock
+  descriptors are closed without unlocking the parent's guard. Contention on
+  one target does not serialize an unrelated target.
 - Local lock artifacts live beside the resolved index file. Qdrant lock
   artifacts live in the per-user cache and contain only a hashed,
   credential-free storage identity. Persistent lock files are harmless.
@@ -43,6 +46,10 @@ index_lock -> config, core (and lazy storage identity lookup)
   multi-host deployments require external coordination.
 - The versioned ingest manifest binds source ownership to a hashed storage
   identity. A known target mismatch must fail before store mutation.
+- Dirty source paths remain deletion-owned until a successful repair removes
+  or republishes them, even if they leave document scope before recovery.
+- Qdrant ownership initialization holds the guard through absence check and
+  first ingest. It returns a cleanup token only after collection creation.
 - Qdrant storage identity uses effective REST port `6333` when the URL omits a
   port. Explicit ports, including `80` and `443`, remain distinct targets.
 - Qdrant endpoint parsing reports a fixed credential-free configuration error;

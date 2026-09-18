@@ -180,6 +180,14 @@ remain after normal exit or process death; they are identity markers, not proof
 that a lock is held, and can be left in place. The operating system releases
 the advisory lock when the owning process exits.
 
+POSIX fork children reset inherited thread, lock, and ownership registries.
+They close inherited copies of active lock descriptors directly, without an
+unlock operation that could release the parent's shared open-file-description
+lock. A child therefore reacquires the operating-system lock as a new process,
+and unwinding an inherited guard frame cannot unlock its parent. File-lock
+acquisition uses short nonblocking attempts so contention on one target does
+not hold the fork bookkeeping mutex while another target waits.
+
 This does not coordinate different hosts. Deployments with Qdrant writers or
 readers on more than one host must provide an external distributed lock or
 otherwise guarantee a single lifecycle owner. The application must not claim
@@ -204,6 +212,9 @@ It enters `ensure_index` reentrantly, captures the embedding status, and
 releases the guard before reranking or answer generation. If a process dies
 after step 8, the next reader sees `repair_required` and deterministically
 rebuilds current sources and replays idempotent stale/replacement deletes.
+Paths in `needs_reindex` remain deletion-owned even when a newly written source
+is removed or excluded before repair. They are cleared only after the repair's
+delete succeeds and the clean manifest is published.
 
 The versioned manifest separates two concerns. The index fingerprint includes
 the resolved `DOCS_DIR`, sorted unique `DOCS_EXCLUDE_PATTERNS`, embedding mode
@@ -238,19 +249,27 @@ with a matching checksum still attempts restore instead of claiming the source
 is already indexed.
 
 Disposable Qdrant lifecycle uses an ownership-checked facade seam rather than
-exposing deletion on `ChunkStore`. A claim succeeds only when its uniquely
-named collection is absent and returns an opaque process-issued token bound to
-the exact credential-free target identity and collection. Cleanup recomputes
-and verifies every field under the same index guard before deleting. It refuses
-pre-existing, mismatched, forged, or reused claims, so the configured
-interactive collection cannot be deleted through a run-owned token.
+exposing deletion on `ChunkStore`. `initialize_owned_qdrant_index` holds the
+target guard continuously across the absence check, process claim, first full
+ingest, and verified collection creation. Only then does it return an opaque
+process-issued token bound to the exact credential-free target identity and
+collection. A second same-host initializer sees the created collection and is
+rejected. If first ingest fails, initialization removes a partially created
+collection under the guard when possible and returns no token. Cleanup
+recomputes and verifies every field under the same guard before deleting. It
+refuses pre-existing, mismatched, fork-inherited, forged, or reused tokens, so
+the configured interactive collection cannot be deleted through a run-owned
+token. A Qdrant client `False` deletion result is failure and retains the token
+for retry.
 
 A process death loses the in-memory cleanup token and can leave a disposable
 collection orphaned. Record each UUID-derived run collection name in comparison
-output. Recovery is a targeted operator action: verify the recorded run prefix
-and exact collection name in Qdrant, then delete only that collection with
-Qdrant administration tooling. Never wildcard-delete collections. A multi-host
-claim/create race still requires the external coordination described above.
+output. Initialization can also orphan a partial collection if both first
+ingest and its guarded cleanup fail. Recovery is a targeted operator action:
+verify the recorded run prefix and exact collection name in Qdrant, then delete
+only that collection with Qdrant administration tooling. Never wildcard-delete
+collections. A multi-host initialization race still requires the external
+coordination described above.
 
 ### Domain layer (`core/`)
 

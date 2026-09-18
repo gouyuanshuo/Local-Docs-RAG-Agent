@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import hashlib
+import os
 import pathlib
 import sys
 import threading
@@ -28,16 +29,21 @@ LOCK_TIMEOUT_SECONDS = 10.0
 _REMOTE_LOCK_ROOT = (
     pathlib.Path.home() / ".cache" / "local-docs-rag-agent" / "locks"
 )
+_PROCESS_ID = os.getpid()
 _REGISTRY_GUARD = threading.Lock()
+_ACTIVE_LOCKS_GUARD = threading.Lock()
 _THREAD_STATE = threading.local()
 
 
 @dataclasses.dataclass(slots=True)
 class _LockState:
     thread_lock: Any = dataclasses.field(default_factory=threading.RLock)
+    process_id: int = dataclasses.field(default_factory=os.getpid)
+    users: int = 0
 
 
 _LOCK_STATES: dict[str, _LockState] = {}
+_ACTIVE_FILE_LOCKS: dict[int, portalocker.Lock] = {}
 
 
 @contextlib.contextmanager
@@ -58,35 +64,50 @@ def index_guard(config: app_config.AppConfig) -> Iterator[None]:
       ConfigurationError: If the lock cannot be acquired before the finite
         timeout or its lock artifact cannot be opened or updated.
     """
+    _ensure_current_process()
     key = _lock_key(config)
-    state = _lock_state(key)
+    state = _retain_lock_state(key)
     deadline = time.monotonic() + LOCK_TIMEOUT_SECONDS
-    if not state.thread_lock.acquire(timeout=LOCK_TIMEOUT_SECONDS):
-        raise _timeout_error()
-    depths = _thread_depths()
-    reentrant = depths.get(key, 0) > 0
+    thread_lock_acquired = False
     file_lock: portalocker.Lock | None = None
     file_lock_acquired = False
     try:
+        if not state.thread_lock.acquire(timeout=LOCK_TIMEOUT_SECONDS):
+            raise _timeout_error()
+        thread_lock_acquired = True
+        depths = _thread_depths()
+        reentrant = depths.get(key, 0) > 0
         if not reentrant:
             lock_path = _lock_path(config, key)
             try:
                 lock_path.parent.mkdir(parents=True, exist_ok=True)
             except OSError as exc:
                 raise _lock_io_error() from exc
-            remaining = max(0.0, deadline - time.monotonic())
             file_lock = portalocker.Lock(
                 lock_path,
                 mode="a",
-                timeout=remaining,
-                check_interval=min(0.05, remaining or 0.05),
+                timeout=0.0,
+                check_interval=0.05,
+                fail_when_locked=True,
             )
-            try:
-                file_lock.acquire()
-            except portalocker.exceptions.LockException:
-                raise _timeout_error() from None
-            except OSError as exc:
-                raise _lock_io_error() from exc
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise _timeout_error()
+                try:
+                    with _ACTIVE_LOCKS_GUARD:
+                        file_lock.acquire(
+                            timeout=0.0,
+                            check_interval=0.05,
+                            fail_when_locked=True,
+                        )
+                        _ACTIVE_FILE_LOCKS[id(file_lock)] = file_lock
+                except portalocker.exceptions.LockException:
+                    time.sleep(min(0.05, remaining))
+                    continue
+                except OSError as exc:
+                    raise _lock_io_error() from exc
+                break
             file_lock_acquired = True
         depths[key] = depths.get(key, 0) + 1
         try:
@@ -101,13 +122,21 @@ def index_guard(config: app_config.AppConfig) -> Iterator[None]:
         active_error = sys.exception()
         try:
             if file_lock is not None and file_lock_acquired:
-                try:
-                    file_lock.release()
-                except (OSError, portalocker.exceptions.LockException) as exc:
-                    if active_error is None:
-                        raise _lock_io_error() from exc
+                with _ACTIVE_LOCKS_GUARD:
+                    try:
+                        file_lock.release()
+                    except (
+                        OSError,
+                        portalocker.exceptions.LockException,
+                    ) as exc:
+                        if active_error is None:
+                            raise _lock_io_error() from exc
+                    finally:
+                        _ACTIVE_FILE_LOCKS.pop(id(file_lock), None)
         finally:
-            state.thread_lock.release()
+            if thread_lock_acquired:
+                state.thread_lock.release()
+            _release_lock_state(key, state)
 
 
 def _lock_key(config: app_config.AppConfig) -> str:
@@ -131,9 +160,23 @@ def _lock_path(
     return _REMOTE_LOCK_ROOT / f"{key}.lock"
 
 
-def _lock_state(key: str) -> _LockState:
+def _retain_lock_state(key: str) -> _LockState:
     with _REGISTRY_GUARD:
-        return _LOCK_STATES.setdefault(key, _LockState())
+        state = _LOCK_STATES.get(key)
+        if state is None or state.process_id != _PROCESS_ID:
+            state = _LockState()
+            _LOCK_STATES[key] = state
+        state.users += 1
+        return state
+
+
+def _release_lock_state(key: str, state: _LockState) -> None:
+    with _REGISTRY_GUARD:
+        if _LOCK_STATES.get(key) is not state:
+            return
+        state.users -= 1
+        if state.users == 0:
+            _LOCK_STATES.pop(key, None)
 
 
 def _thread_depths() -> dict[str, int]:
@@ -162,4 +205,50 @@ def _lock_io_error() -> exceptions.ConfigurationError:
             "Check permissions for the index directory or per-user lock "
             "cache, then retry."
         ),
+    )
+
+
+def _ensure_current_process() -> None:
+    if os.getpid() != _PROCESS_ID:
+        _reset_after_fork()
+
+
+def _before_fork() -> None:
+    _REGISTRY_GUARD.acquire()
+    _ACTIVE_LOCKS_GUARD.acquire()
+
+
+def _after_fork_parent() -> None:
+    _ACTIVE_LOCKS_GUARD.release()
+    _REGISTRY_GUARD.release()
+
+
+def _reset_after_fork() -> None:
+    global _ACTIVE_FILE_LOCKS
+    global _ACTIVE_LOCKS_GUARD
+    global _LOCK_STATES
+    global _PROCESS_ID
+    global _REGISTRY_GUARD
+    global _THREAD_STATE
+
+    for inherited_lock in _ACTIVE_FILE_LOCKS.values():
+        file_handle = inherited_lock.fh
+        if file_handle is None:
+            continue
+        with contextlib.suppress(OSError):
+            file_handle.close()
+        inherited_lock.fh = None
+    _PROCESS_ID = os.getpid()
+    _REGISTRY_GUARD = threading.Lock()
+    _ACTIVE_LOCKS_GUARD = threading.Lock()
+    _THREAD_STATE = threading.local()
+    _LOCK_STATES = {}
+    _ACTIVE_FILE_LOCKS = {}
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(
+        before=_before_fork,
+        after_in_parent=_after_fork_parent,
+        after_in_child=_reset_after_fork,
     )
