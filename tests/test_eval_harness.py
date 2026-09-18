@@ -35,6 +35,17 @@ def test_eval_loader_reports_malformed_line(tmp_path: pathlib.Path) -> None:
         harness.load_eval_cases(eval_path)
 
 
+@pytest.mark.parametrize("text", ["", " \n\n"])
+def test_eval_loader_rejects_empty_gold(
+    tmp_path: pathlib.Path, text: str
+) -> None:
+    eval_path = tmp_path / "empty.jsonl"
+    eval_path.write_text(text, encoding="utf-8")
+
+    with pytest.raises(exceptions.DataFormatError, match="no cases"):
+        harness.load_eval_cases(eval_path)
+
+
 def test_eval_result_preserves_runtime_and_provider_diagnostics(
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,

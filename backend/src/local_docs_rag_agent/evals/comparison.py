@@ -202,6 +202,8 @@ def run_eval_matrix(
       ConfigurationError: If an axis is empty, or the Cartesian product
         would exceed `MAX_MATRIX_RUNS`, so one request cannot start an
         unbounded run.
+      DataFormatError: If the eval file contains no cases. The file is
+        loaded before matrix ingestion can mutate an index.
     """
     axes = resolve_axes(config, requested or {})
     values = [axes[axis.name] for axis in AXES]
@@ -216,6 +218,7 @@ def run_eval_matrix(
             f"maximum is {MAX_MATRIX_RUNS}",
             action_hint="Reduce one or more comparison axes.",
         )
+    harness.load_eval_cases(config.eval_path)
 
     runs: list[dict[str, object]] = []
     for combination in itertools.product(*values):
@@ -287,21 +290,26 @@ def cell_degradation_reason(
     """Return why a finished cell must not enter the leaderboard.
 
     Chat, embedding, and reranker fallback, and a runtime that did not
-    actually serve the requested name, are visible data on Ask. Ranking
-    those cells as `ok` would treat fallback as success.
+    actually serve the requested name, are visible data on Ask. A disabled
+    reranker reports `ready`, which is valid because that stage did not run;
+    missing diagnostics are not equivalent evidence of a live run. Ranking
+    either fallback or unmeasured cells as `ok` would misstate the result.
 
     Args:
       results: Per-case eval outcomes, including diagnostics.
 
     Returns:
-      A stable comma-separated reason, or None when every case ran live
-      on the requested runtime.
+      A stable comma-separated reason, or None when every case supplied
+      live diagnostics for the requested runtime. A disabled reranker may
+      report `ready` because it was not selected.
     """
+    if not results:
+        return "no_eval_cases"
     reasons: list[str] = []
     for result in results:
         diagnostics = result.diagnostics
         if diagnostics is None:
-            continue
+            return "missing_diagnostics"
         if diagnostics.requested_runtime != diagnostics.actual_runtime:
             reasons.append("runtime_fallback")
         if diagnostics.chat_provider.mode == "fallback":

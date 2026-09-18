@@ -123,13 +123,18 @@ Each cell of `eval-compare` ends in one of four statuses:
 | Status | Meaning | On the leaderboard |
 | --- | --- | --- |
 | `ok` | Every case ran live on the requested runtime | yes |
-| `degraded` | At least one case fell back: `runtime_fallback`, `chat_fallback`, `embedding_fallback`, or `reranker_fallback`, comma-separated | no |
+| `degraded` | At least one case fell back: `runtime_fallback`, `chat_fallback`, `embedding_fallback`, or `reranker_fallback`; or it had `no_eval_cases` or `missing_diagnostics` | no |
 | `skipped` | It could not run here: `missing_qdrant_url`, `qdrant_unreachable`, or `missing_qdrant_client` | no |
 | `error` | It failed, as `<Exception>: <message>` | no |
 
 An empty leaderboard after a keyless run is correct. A comparison of fallback
 cells measures hash vectors and extractive answers, not retrieval quality, so
 it has no winner.
+
+Gold must contain at least one JSONL case. An empty or whitespace-only file is
+rejected before the matrix ingests documents. A disabled reranker may report
+`ready`: it was not selected, so that is neither fallback nor proof that a
+reranker ran live. Missing diagnostics are never treated as live evidence.
 
 A request expanding past 128 combinations, or naming an empty axis, is refused
 as a configuration error before anything runs.

@@ -15,10 +15,15 @@ Load gold, score one run, sweep a matrix, rank a leaderboard.
 
 - Every `expected_retrieval_keywords` item is a **contiguous substring** of
   a cited source (`tests/test_eval_gold.py`).
+- Gold JSONL must contain at least one case; empty or whitespace-only files
+  fail before a comparison starts ingestion.
 - Leaderboard sorts by `retrieval_reciprocal_rank` then precision, not by
   joined-string span hit rate.
 - Chat/embedding/runtime fallback or `requested != actual` → cell
   `degraded`, **not** on the leaderboard. No-key/hash compare has no winner.
+- Empty result lists and results without diagnostics are `degraded`, never
+  leaderboard evidence. A disabled reranker may report `ready`; that means it
+  was not selected, not that reranking ran live.
 - Matrix cap 128; empty axis is an error; Qdrant unreachable is `skipped`.
 - `AXES` drives CLI flags, request schema field names, and labels.
 

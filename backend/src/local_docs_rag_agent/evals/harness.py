@@ -36,8 +36,9 @@ def load_eval_cases(eval_path: pathlib.Path) -> list[models.EvalCase]:
 
     Raises:
       DataFormatError: If the file cannot be read or a line is not
-        a valid case. The message names the line number, so a bad
-        eval file can be repaired without bisecting it.
+        a valid case, or contains no cases. The message names the line
+        number when applicable, so a bad eval file can be repaired without
+        bisecting it.
     """
     cases: list[models.EvalCase] = []
     line_number: int | str = "unknown"
@@ -61,6 +62,10 @@ def load_eval_cases(eval_path: pathlib.Path) -> list[models.EvalCase]:
         raise exceptions.DataFormatError(
             f"Could not read eval file {eval_path} at line {line_number}: {exc}"
         ) from exc
+    if not cases:
+        raise exceptions.DataFormatError(
+            f"Eval file {eval_path} contains no cases"
+        )
     return cases
 
 

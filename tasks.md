@@ -92,6 +92,8 @@ Current theme:
 
 - [x] Repair real Agents SDK tool registration when postponed annotations are
       resolved by the SDK decorator
+- [x] Reject empty eval gold and exclude unmeasured comparison cells from the
+      leaderboard
 
 ### Structure and readability pass
 

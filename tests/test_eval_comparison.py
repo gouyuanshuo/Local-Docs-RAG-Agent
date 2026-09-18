@@ -47,6 +47,34 @@ def test_eval_matrix_rejects_an_empty_axis() -> None:
         )
 
 
+def test_eval_matrix_rejects_empty_gold_before_ingest(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    eval_path = tmp_path / "empty.jsonl"
+    eval_path.write_text(" \n", encoding="utf-8")
+    ingested = False
+
+    def record_ingest(
+        config: app_config.AppConfig,
+    ) -> list[models.DocumentChunk]:
+        del config
+        nonlocal ingested
+        ingested = True
+        return []
+
+    monkeypatch.setattr(rag, "ingest_documents", record_ingest)
+
+    with pytest.raises(exceptions.DataFormatError, match="no cases"):
+        comparison.run_eval_matrix(
+            config=app_config.AppConfig.from_env().with_overrides(
+                eval_path=eval_path
+            )
+        )
+
+    assert not ingested
+
+
 # --- The axis table is the single definition ---------------------------------
 
 
@@ -134,7 +162,9 @@ def test_qdrant_is_only_compared_when_a_url_is_configured(
     ]
 
 
-def _eval_result(diagnostics: models.AnswerDiagnostics) -> models.EvalResult:
+def _eval_result(
+    diagnostics: models.AnswerDiagnostics | None,
+) -> models.EvalResult:
     return models.EvalResult(
         question="q",
         answer="a",
@@ -216,6 +246,16 @@ def test_leaderboard_ranks_reciprocal_rank_ahead_of_span_hit_rate() -> None:
         "high-rr-low-span",
         "low-rr-high-span",
     ]
+
+
+def test_zero_results_are_not_rankable() -> None:
+    assert comparison.cell_degradation_reason([]) == "no_eval_cases"
+
+
+def test_missing_diagnostics_are_not_rankable() -> None:
+    assert comparison.cell_degradation_reason([_eval_result(None)]) == (
+        "missing_diagnostics"
+    )
 
 
 def test_fallback_cell_is_degraded_and_absent_from_leaderboard(

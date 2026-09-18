@@ -113,6 +113,11 @@ and the reasons attached to it, are in
 Only `ok` cells enter the leaderboard. A cell that ran on fallback measured hash
 vectors or extractive answers rather than retrieval quality, so it is reported
 but not ranked, and a comparison run without keys has an empty leaderboard.
+An empty result list or a result without diagnostics is likewise reported as
+`degraded`, not ranked. Gold itself must contain at least one case; an empty
+gold file is rejected before comparison ingestion begins. A disabled reranker
+may report `ready`, which means the stage was not selected rather than verified
+live execution.
 
 Each row repeats the cell's `label`, `retrieval_reciprocal_rank`,
 `retrieval_precision`, `retrieval_span_hit_rate`, `retrieval_source_hit_rate`,
