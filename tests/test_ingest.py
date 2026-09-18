@@ -1026,6 +1026,146 @@ def test_validate_storage_target_malformed_url_traceback_excludes_credentials(
     assert "validation-password" not in formatted
 
 
+@pytest.mark.parametrize(
+    "bad_url",
+    [
+        (
+            "http://validation-user:validation-password@bad host.invalid/"
+            "private?key=query-secret"
+        ),
+        (
+            "http://validation-user:validation-password@bad\thost.invalid/"
+            "private?key=query-secret"
+        ),
+        (
+            "http://validation-user:validation-password@bad\x01host.invalid/"
+            "private?key=query-secret"
+        ),
+        (
+            "http://validation-user:validation-password@bad_host.invalid/"
+            "private?key=query-secret"
+        ),
+        (
+            "http://validation-user:validation-password@\u200c.invalid/"
+            "private?key=query-secret"
+        ),
+        (
+            "http://validation-user:validation-password@bad..invalid/"
+            "private?key=query-secret"
+        ),
+        (
+            "http://validation-user:validation-password@-bad.invalid/"
+            "private?key=query-secret"
+        ),
+        (
+            "http://validation-user:validation-password@bad-.invalid/"
+            "private?key=query-secret"
+        ),
+        (
+            "http://validation-user:validation-password@"
+            f"{'a' * 64}.invalid/private?key=query-secret"
+        ),
+        (
+            "http://validation-user:validation-password@"
+            f"{'.'.join(['a' * 63] * 4)}/private?key=query-secret"
+        ),
+        (
+            "http://validation-user:validation-password@999.1.1.1/"
+            "private?key=query-secret"
+        ),
+        (
+            "http://validation-user:validation-password@bad%41.invalid/"
+            "private?key=query-secret"
+        ),
+    ],
+)
+def test_validate_storage_target_rejects_invalid_hostname_without_side_effects(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    bad_url: str,
+) -> None:
+    config = _qdrant_config(
+        tmp_path,
+        tmp_path / "docs",
+        tmp_path / "manifest.json",
+    ).with_overrides(qdrant_url=bad_url)
+
+    def unexpected_call(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise AssertionError("target validation performed a side effect")
+
+    with monkeypatch.context() as guarded:
+        guarded.setattr(pathlib.Path, "resolve", unexpected_call)
+        guarded.setattr(pathlib.Path, "stat", unexpected_call)
+        guarded.setattr(pathlib.Path, "open", unexpected_call)
+        guarded.setattr(builtins, "open", unexpected_call)
+        guarded.setattr(qdrant_client, "QdrantClient", unexpected_call)
+        with pytest.raises(exceptions.ConfigurationError) as exc_info:
+            rag.validate_storage_target(config)
+
+    rendered = "\n".join(
+        (
+            str(exc_info.value),
+            repr(exc_info.value),
+            "".join(traceback.format_exception(exc_info.value)),
+        )
+    )
+    assert str(exc_info.value) == (
+        "QDRANT_URL must be a valid HTTP(S) endpoint"
+    )
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__suppress_context__ is True
+    for secret in (
+        "validation-user",
+        "validation-password",
+        "private",
+        "query-secret",
+        bad_url,
+    ):
+        assert secret not in rendered
+
+
+@pytest.mark.parametrize(
+    ("configured_url", "equivalent_url"),
+    [
+        ("https://LOCALHOST/cluster", "https://localhost:6333/cluster"),
+        (
+            "https://QDRANT.EXAMPLE/cluster",
+            "https://qdrant.example:6333/cluster",
+        ),
+        (
+            "http://127.0.0.1/cluster",
+            "http://127.0.0.1:6333/cluster",
+        ),
+        (
+            "https://[2001:0DB8:0000:0000:0000:0000:0000:0001]/cluster",
+            "https://[2001:db8::1]:6333/cluster",
+        ),
+        (
+            "https://B\u00dcCHER.example/cluster",
+            "https://xn--bcher-kva.example:6333/cluster",
+        ),
+    ],
+)
+def test_validate_storage_target_accepts_canonical_qdrant_hosts(
+    tmp_path: pathlib.Path,
+    configured_url: str,
+    equivalent_url: str,
+) -> None:
+    config = _qdrant_config(
+        tmp_path,
+        tmp_path / "docs",
+        tmp_path / "manifest.json",
+    ).with_overrides(qdrant_url=configured_url)
+    equivalent = config.with_overrides(qdrant_url=equivalent_url)
+
+    rag.validate_storage_target(config)
+
+    assert ingest.storage_identity(config) == ingest.storage_identity(
+        equivalent
+    )
+
+
 def test_manifest_storage_identity_does_not_persist_qdrant_credentials(
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,

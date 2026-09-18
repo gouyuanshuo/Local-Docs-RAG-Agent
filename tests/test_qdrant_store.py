@@ -7,9 +7,10 @@ from typing import Any
 import pytest
 import qdrant_client
 
+from local_docs_rag_agent import config as app_config
 from local_docs_rag_agent.core import exceptions, models
 from local_docs_rag_agent.providers import base as provider_base
-from local_docs_rag_agent.rag import qdrant_store
+from local_docs_rag_agent.rag import qdrant_store, store_factory
 
 
 class StubEmbeddingProvider(provider_base.EmbeddingProvider):
@@ -79,6 +80,65 @@ def test_qdrant_client_receives_proxy_trust_setting(
 
     assert captured["trust_env"] is False
     assert captured["timeout"] == 12
+
+
+def test_qdrant_factory_sanitizes_client_constructor_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configured_url = (
+        "https://startup-user:startup-password@qdrant.example/path-secret"
+        "?key=query-secret#fragment-secret"
+    )
+    api_key = "api-key-secret"
+    raw_marker = "raw-client-startup-message"
+
+    class FailingQdrantClient:
+        def __init__(self, **kwargs: Any) -> None:
+            raise RuntimeError(
+                f"connection reset {raw_marker} with kwargs={kwargs!r}"
+            )
+
+    monkeypatch.setattr(qdrant_client, "QdrantClient", FailingQdrantClient)
+    config = app_config.AppConfig.from_env().with_overrides(
+        vector_backend="qdrant",
+        qdrant_url=configured_url,
+        qdrant_api_key=api_key,
+        qdrant_collection="safe-startup-collection",
+        external_http_trust_env=False,
+    )
+
+    with pytest.raises(exceptions.VectorStoreError) as exc_info:
+        store_factory.build_store(
+            config,
+            embedding_provider=StubEmbeddingProvider(),
+        )
+
+    rendered = "\n".join(
+        (
+            str(exc_info.value),
+            repr(exc_info.value),
+            "".join(traceback.format_exception(exc_info.value)),
+        )
+    )
+    assert exc_info.value.reason_code == "unreachable"
+    assert "client_init" in str(exc_info.value)
+    assert "safe-startup-collection" in str(exc_info.value)
+    assert "RuntimeError" in str(exc_info.value)
+    assert "already disabled" in str(exc_info.value)
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__suppress_context__ is True
+    for secret in (
+        "startup-user",
+        "startup-password",
+        "path-secret",
+        "query-secret",
+        "fragment-secret",
+        api_key,
+        configured_url,
+        raw_marker,
+        "kwargs",
+    ):
+        assert secret not in rendered
 
 
 def test_winerror_10054_is_normalized_as_unreachable() -> None:

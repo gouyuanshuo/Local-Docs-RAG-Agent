@@ -9,6 +9,7 @@ import pathlib
 import select
 import sys
 import threading
+import traceback
 from typing import Any
 
 import portalocker
@@ -2319,6 +2320,64 @@ def test_qdrant_ownership_initializer_rejects_local_and_existing_target(
     with pytest.raises(exceptions.ConfigurationError, match="already exists"):
         rag.initialize_owned_qdrant_index(config)
     assert store.delete_calls == 0
+
+
+def test_qdrant_ownership_initializer_sanitizes_client_startup_failure(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configured_url = (
+        "https://owner-user:owner-password@qdrant.example/owner-path"
+        "?token=owner-query#owner-fragment"
+    )
+    config = _qdrant_config(tmp_path).with_overrides(
+        qdrant_url=configured_url,
+        qdrant_api_key="owner-api-key",
+        qdrant_collection="safe-owned-startup",
+        external_http_trust_env=False,
+    )
+    raw_marker = "raw-owned-client-startup-message"
+
+    class FailingQdrantClient:
+        def __init__(self, **kwargs: Any) -> None:
+            raise RuntimeError(
+                f"{raw_marker}; client kwargs leaked: {kwargs!r}"
+            )
+
+    monkeypatch.setattr(qdrant_client, "QdrantClient", FailingQdrantClient)
+    monkeypatch.setattr(
+        provider_factory,
+        "build_embedding_provider",
+        lambda config: _FakeEmbeddingProvider(),
+    )
+
+    with pytest.raises(exceptions.VectorStoreError) as exc_info:
+        rag.initialize_owned_qdrant_index(config)
+
+    rendered = "\n".join(
+        (
+            str(exc_info.value),
+            repr(exc_info.value),
+            "".join(traceback.format_exception(exc_info.value)),
+        )
+    )
+    assert exc_info.value.reason_code == "operation_failed"
+    assert "client_init" in str(exc_info.value)
+    assert "safe-owned-startup" in str(exc_info.value)
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__suppress_context__ is True
+    for secret in (
+        "owner-user",
+        "owner-password",
+        "owner-path",
+        "owner-query",
+        "owner-fragment",
+        "owner-api-key",
+        configured_url,
+        raw_marker,
+        "kwargs leaked",
+    ):
+        assert secret not in rendered
 
 
 def test_qdrant_ownership_initializer_creates_collection_before_return(

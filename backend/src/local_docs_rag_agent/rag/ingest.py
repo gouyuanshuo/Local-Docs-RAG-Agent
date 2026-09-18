@@ -303,17 +303,19 @@ def _storage_target_payload(
 
 def _canonical_qdrant_url(url: str) -> str:
     try:
+        if any(
+            character.isspace() or ord(character) < 32 or ord(character) == 127
+            for character in url
+        ):
+            raise ValueError
         parsed = parse.urlsplit(url)
         scheme = parsed.scheme.lower()
         hostname = parsed.hostname
         port = parsed.port
         if scheme not in {"http", "https"} or hostname is None or port == 0:
             raise ValueError
-        normalized_host = hostname.lower()
-        if ":" in normalized_host:
-            normalized_host = ipaddress.IPv6Address(normalized_host).compressed
-            normalized_host = f"[{normalized_host}]"
-    except ValueError:
+        normalized_host = _canonical_qdrant_host(hostname)
+    except (TypeError, UnicodeError, ValueError):
         raise exceptions.ConfigurationError(
             "QDRANT_URL must be a valid HTTP(S) endpoint"
         ) from None
@@ -321,6 +323,35 @@ def _canonical_qdrant_url(url: str) -> str:
     netloc = f"{normalized_host}:{effective_port}"
     path = parsed.path.rstrip("/")
     return parse.urlunsplit((scheme, netloc, path, "", ""))
+
+
+def _canonical_qdrant_host(hostname: str) -> str:
+    if not hostname:
+        raise ValueError
+    if ":" in hostname:
+        address = ipaddress.IPv6Address(hostname)
+        return f"[{address.compressed}]"
+
+    ascii_hostname = hostname.lower().encode("idna").decode("ascii")
+    if not ascii_hostname or len(ascii_hostname) > 253:
+        raise ValueError
+    labels = ascii_hostname.split(".")
+    if any(
+        not label
+        or len(label) > 63
+        or not label[0].isalnum()
+        or not label[-1].isalnum()
+        or any(
+            not character.isalnum() and character != "-" for character in label
+        )
+        for label in labels
+    ):
+        raise ValueError
+    if all(
+        character.isdigit() or character == "." for character in ascii_hostname
+    ):
+        return str(ipaddress.IPv4Address(ascii_hostname))
+    return ascii_hostname
 
 
 def _validate_manifest_storage(

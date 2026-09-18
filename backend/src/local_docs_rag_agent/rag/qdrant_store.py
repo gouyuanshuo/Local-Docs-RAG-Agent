@@ -52,7 +52,8 @@ class QdrantChunkStore:
 
         Raises:
           VectorStoreError: With `dependency_missing` when the optional
-            `qdrant-client` package is not installed.
+            `qdrant-client` package is not installed, or with a normalized
+            operation code when client construction fails.
         """
         try:
             import qdrant_client
@@ -66,12 +67,22 @@ class QdrantChunkStore:
                 ),
             ) from exc
 
-        self._client: Any = qdrant_client.QdrantClient(
-            url=url,
-            api_key=api_key,
-            timeout=timeout_s,
-            trust_env=trust_env,
-        )
+        try:
+            client = qdrant_client.QdrantClient(
+                url=url,
+                api_key=api_key,
+                timeout=timeout_s,
+                trust_env=trust_env,
+            )
+        except Exception as exc:
+            raise qdrant_operation_error(
+                operation="client_init",
+                url=url,
+                collection_name=collection_name,
+                exc=exc,
+                trust_env=trust_env,
+            ) from None
+        self._client: Any = client
         self._url = url
         self._collection_name = collection_name
         self._embedding_provider = embedding_provider

@@ -279,8 +279,13 @@ and collection. API keys, URL user information, queries, fragments, and raw
 credential-bearing URLs are never persisted in that identity. Qdrant's
 effective REST port is `6333` when omitted; explicit ports such as `80` and
 `443` remain distinct storage targets. IPv6 literals use their compressed
-form, port `0` is rejected, and malformed endpoint errors do not echo URL
-credentials.
+form. Hostnames may be localhost, valid single- or multi-label DNS names,
+IDNA-normalized international names, IPv4, or bracketed IPv6. DNS labels are
+1–63 ASCII letters/digits/hyphens after IDNA conversion, cannot begin or end
+with a hyphen, and the whole name is at most 253 characters. Empty labels,
+whitespace/control characters, malformed numeric IP addresses, illegal label
+characters, invalid IDNA, invalid ports, and port `0` are rejected. Malformed
+endpoint errors do not echo URL credentials.
 
 The local store resolves its configured index path once when it is built. Its
 reads, atomic writes, existence checks, and the manifest identity therefore
@@ -338,7 +343,8 @@ with Qdrant administration tooling. Never wildcard-delete collections. A
 multi-host initialization race still requires the external coordination
 described above.
 
-Normalized Qdrant failures never expose the raw configured URL, raw client
+Normalized Qdrant failures, including client construction under operation
+`client_init`, never expose the raw configured URL, API key, raw client
 message, or unsafe exception cause/context. They retain the operation,
 collection, exception class, stable reason code, reachability classification,
 and actionable proxy/network hints. Safe diagnostics created by explicit

@@ -194,9 +194,21 @@ collection belongs to this corpus, clear it, then move the legacy manifest aside
 and run `local-docs-rag ingest` to create a versioned, target-bound one.
 
 **`QDRANT_URL must be a valid HTTP(S) endpoint`.** Check the scheme, brackets
-around IPv6 literals, and port. Port `0` is invalid; omitting the port selects
-Qdrant's REST port `6333`. The diagnostic intentionally does not echo the URL,
-because URL user information or query parameters may contain credentials.
+around IPv6 literals, hostname, and port. The host may be localhost, a valid
+single- or multi-label DNS name, an international DNS name that converts to
+valid IDNA, IPv4, or bracketed IPv6. DNS labels cannot be empty, over 63
+characters, begin/end with a hyphen, or contain characters other than ASCII
+letters, digits, and hyphens after IDNA conversion; the whole DNS name is at
+most 253 characters. Whitespace/control characters and malformed numeric IP
+addresses are invalid. Port `0` is invalid; omitting the port selects Qdrant's
+REST port `6333`. The diagnostic intentionally does not echo the URL, because
+URL user information or query parameters may contain credentials.
+
+**Qdrant fails during client startup.** Constructor failures use the same
+credential-safe operation normalization as later requests and identify the
+operation as `client_init`. Check the reason code and action hint. The outward
+diagnostic deliberately omits the raw configured URL, API key, raw client
+message, and unsafe exception chain.
 
 **Timed out waiting for the index lifecycle lock.** Another thread or process
 on this host is using the same canonical manifest or storage target. Retry

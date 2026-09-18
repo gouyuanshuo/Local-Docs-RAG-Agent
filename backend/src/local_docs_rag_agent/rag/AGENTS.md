@@ -86,11 +86,16 @@ index_lock -> config, core (and lazy storage identity lookup)
   note and structured `qdrant_orphaned_collection` marker.
 - Qdrant storage identity uses effective REST port `6333` when the URL omits a
   port. Explicit ports, including `80` and `443`, remain distinct targets.
-- Qdrant endpoint parsing reports a fixed credential-free configuration error;
-  IPv6 literals are compressed and port `0` is invalid.
+- Qdrant endpoint parsing accepts `http`/`https` endpoints whose host is
+  localhost, a valid single- or multi-label DNS name, an IDNA-normalized name,
+  IPv4, or bracketed IPv6. Labels are 1–63 characters, the DNS name is at most
+  253 characters, whitespace/control and illegal label characters are invalid,
+  IPv6 literals are compressed, and port `0` is invalid. Every invalid form
+  reports the same credential-free configuration error.
 - Qdrant operation errors omit raw URLs and exception messages and suppress
   unsafe chaining while retaining operation, collection, exception class,
-  reason code, and recovery hints.
+  reason code, and recovery hints. Client-construction failures use the same
+  normalization with operation `client_init`.
 - Explicitly marked internal Qdrant validation diagnostics bypass raw-client
   normalization unchanged; arbitrary client/domain exceptions do not.
 - The local store resolves its bound index path once before I/O, matching the
