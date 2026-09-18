@@ -7,34 +7,30 @@ without an API key; a key only turns degraded answers into live ones.
 
 | Tool | Version | Why |
 | --- | --- | --- |
-| Python | 3.13 (3.11+ supported) | CI runs 3.13 |
+| Python | 3.11 or 3.13 | CI runs both supported boundaries |
+| uv | 0.12.16 | resolves and restores `uv.lock` |
 | Node.js | 22 | CI runs 22 |
-| pnpm | 10 | the frontend is a pnpm workspace |
+| pnpm | 10.18.0 | matches `packageManager` and CI |
 
 On Windows, `py -3` can resolve to the free-threaded interpreter (`3.13t`),
 which breaks the `pydantic-core` wheel. Ask for the regular build explicitly
 with `py -3.13`.
 
-## 1. Create a virtual environment
+## 1. Restore the backend
 
-```powershell
-py -3.13 -m venv .venv
-.\.venv\Scripts\Activate.ps1
+```text
+uv python install 3.13
+uv sync --locked --all-extras --python 3.13
 ```
 
-```bash
-python3.13 -m venv .venv
-source .venv/bin/activate
-```
+This creates `.venv` and installs the exact universal resolution in `uv.lock`.
+The lock covers Python 3.11+ and all three extras. Use `--python 3.11` to work
+at the other CI-tested boundary. Do not replace `--locked` with an unlocked
+install during an ordinary restore.
 
-## 2. Install the backend
-
-```bash
-python -m pip install -e ".[agents,qdrant,dev]"
-```
-
-The extras are optional, and the package imports and runs without either of the
-first two. Each one is imported lazily, inside the only code that needs it.
+The first two extras remain optional to package users. They are installed in a
+development restore so tests exercise the real integrations. Each is imported
+lazily, inside the only code that needs it.
 
 | Extra | Installs | Needed for |
 | --- | --- | --- |
@@ -42,15 +38,15 @@ first two. Each one is imported lazily, inside the only code that needs it.
 | `qdrant` | `qdrant-client` | `VECTOR_BACKEND=qdrant` |
 | `dev` | `ruff`, `mypy`, `pytest`, `pytest-cov` | the quality gates |
 
-## 3. Install the frontend
+## 2. Restore the frontend
 
 From the repository root, not from `frontend/`:
 
 ```bash
-pnpm install
+pnpm install --frozen-lockfile
 ```
 
-## 4. Configure
+## 3. Configure
 
 ```powershell
 copy .env.example .env
@@ -75,7 +71,7 @@ whole pipeline work. Two things are worth knowing before you change anything:
 - The Qdrant backend refuses fallback embeddings, so it needs a working
   embedding key. The local backend does not.
 
-## 5. Run it
+## 4. Run it
 
 Backend, with reload:
 
@@ -84,10 +80,11 @@ pnpm run dev:backend
 ```
 
 This runs uvicorn on `http://127.0.0.1:8000` using the Windows virtual
-environment path. Elsewhere, run the same command directly:
+environment path. Elsewhere, run it through the locked environment:
 
 ```bash
-python -m uvicorn local_docs_rag_agent.api.app:app --reload --host 127.0.0.1 --port 8000
+uv run --locked --all-extras python -m uvicorn \
+  local_docs_rag_agent.api.app:app --reload --host 127.0.0.1 --port 8000
 ```
 
 `local-docs-rag-api` serves the same app on the same address without reload.
@@ -100,12 +97,13 @@ pnpm run dev
 
 Vite serves the UI on `http://127.0.0.1:5173`.
 
-## 6. First question
+## 5. First question
 
 ```bash
-local-docs-rag ingest
-local-docs-rag ask "How is attention explained in lecture 5?"
-local-docs-rag eval
+uv run --locked --all-extras local-docs-rag ingest
+uv run --locked --all-extras local-docs-rag ask \
+  "How is attention explained in lecture 5?"
+uv run --locked --all-extras local-docs-rag eval
 ```
 
 Read the `diagnostics` block in the answer before the answer itself:
@@ -119,7 +117,7 @@ Read the `diagnostics` block in the answer before the answer itself:
 An answer produced under `fallback` is labelled as one on purpose. The project
 never reports a degraded run as a successful one.
 
-## 7. Check your setup
+## 6. Check your setup
 
 Run the quality gates from [AGENTS.md](../../AGENTS.md#quality-gates). They are
 offline and deterministic, so they pass on a fresh clone with no keys at all.

@@ -13,9 +13,71 @@ concurrency:
 
 jobs:
   backend:
-    name: Backend quality gates
+    name: Backend quality gates (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.12.16"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Restore locked backend environment
+        run: >-
+          uv sync --locked --all-extras
+          --python "${{ matrix.python-version }}"
+
+      - name: Ruff
+        run: >-
+          uv run --locked --all-extras python -m ruff check
+          backend/src tests scripts
+
+      - name: Ruff format
+        run: >-
+          uv run --locked --all-extras python -m ruff format --check
+          backend/src tests scripts
+
+      # DOC201 (a documented return value) is still a preview rule, so it runs
+      # on its own rather than putting every other rule into preview mode.
+      - name: Ruff docstring returns
+        run: >-
+          uv run --locked --all-extras python -m ruff check
+          --preview --select DOC201
+          backend/src scripts
+
+      - name: Mypy
+        run: uv run --locked --all-extras python -m mypy
+
+      - name: Agents SDK registration regression
+        run: >-
+          uv run --locked --all-extras python -m pytest
+          tests/test_agents_runtime.py -q -k real_sdk
+
+      - name: Pytest
+        run: uv run --locked --all-extras python -m pytest
+
+      - name: Compile Python package
+        run: >-
+          uv run --locked --all-extras python -m compileall -q backend/src
+
+  package:
+    name: Wheel build and install smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -24,33 +86,23 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: "3.13"
-          cache: pip
-          cache-dependency-path: pyproject.toml
 
-      - name: Install backend dependencies
-        run: python -m pip install --upgrade pip && python -m pip install -e ".[agents,qdrant,dev]"
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.12.16"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
 
-      - name: Ruff
-        run: python -m ruff check backend/src tests scripts
+      - name: Build wheel with pinned isolated requirements
+        run: uv build --wheel --out-dir dist
 
-      - name: Ruff format
-        run: python -m ruff format --check backend/src tests scripts
-
-      # DOC201 (a documented return value) is still a preview rule, so it runs
-      # on its own rather than putting every other rule into preview mode.
-      - name: Ruff docstring returns
-        run: >-
-          python -m ruff check --preview --select DOC201
-          backend/src scripts
-
-      - name: Mypy
-        run: python -m mypy
-
-      - name: Pytest
-        run: python -m pytest
-
-      - name: Compile Python package
-        run: python -m compileall -q backend/src
+      - name: Install and import wheel
+        run: |
+          uv venv --python 3.13 .wheel-smoke
+          uv pip install --python .wheel-smoke/bin/python --no-deps dist/*.whl
+          .wheel-smoke/bin/python -c \
+            "import local_docs_rag_agent; print(local_docs_rag_agent.__version__)"
 
   frontend:
     name: Frontend build

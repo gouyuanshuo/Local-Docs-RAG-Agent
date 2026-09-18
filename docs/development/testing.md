@@ -7,12 +7,18 @@ changed, never that a network or a quota did.
 ## Running tests
 
 - Everything: the pytest gate in [AGENTS.md](../../AGENTS.md#quality-gates).
-- One module's tests: `python -m pytest tests/test_rerank.py -q`
+- One module's tests:
+  `uv run --locked --all-extras python -m pytest tests/test_rerank.py -q`
 - With coverage:
-  `python -m pytest --cov=local_docs_rag_agent --cov-report=term-missing`
 
-The frontend has no unit tests. Its gate is `pnpm run build`, which type-checks
-with `tsc -b` before building.
+  ```text
+  uv run --locked --all-extras python -m pytest \
+    --cov=local_docs_rag_agent --cov-report=term-missing
+  ```
+
+Restore first with `uv sync --locked --all-extras`. The frontend has no unit
+tests. Restore it with `pnpm install --frozen-lockfile`; its gate is
+`pnpm run build`, which type-checks with `tsc -b` before building.
 
 ## Where tests live
 
@@ -55,6 +61,10 @@ gone.
 - `tests/test_rerank.py` does the same for the reranker with
   `types.SimpleNamespace` objects exposing `responses.create` and
   `chat.completions.create`.
+- `test_real_sdk_registers_tools` in `tests/test_agents_runtime.py` imports the
+  installed Agents SDK and registers the production tools against an offline
+  client. Keep this as a real-SDK regression; replacing that SDK with the fake
+  runner helper would hide decorator compatibility failures.
 
 ## Patch a name where it is defined
 

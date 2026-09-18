@@ -1,5 +1,10 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+# Isolated wheel builds do not consult uv.lock. Keep their resolver input exact.
+requires = [
+    "packaging==26.3",
+    "setuptools==84.0.0",
+    "wheel==0.48.0",
+]
 build-backend = "setuptools.build_meta"
 
 [project]

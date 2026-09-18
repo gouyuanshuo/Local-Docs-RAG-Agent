@@ -51,7 +51,7 @@ is recorded on the chat provider's status.
 
 | Reason | Cause | Fix |
 | --- | --- | --- |
-| `runtime_fallback:agents_sdk_unavailable` | The `agents` extra is not installed | `python -m pip install -e ".[agents]"` |
+| `runtime_fallback:agents_sdk_unavailable` | The locked development environment is not restored | `uv sync --locked --all-extras` |
 | `runtime_fallback:missing_llm_api_key` | The Agents SDK needs a chat key | Set the chat key |
 | `runtime_fallback:agents_sdk_error:<Exception>` | Tool registration or the agent run raised | Reproduce with the exception name; it deliberately omits request details, and the basic answer is still returned |
 | `runtime_fallback:empty_agent_output` | The agent produced no final output | Check the model and `AGENTS_MAX_TURNS` |

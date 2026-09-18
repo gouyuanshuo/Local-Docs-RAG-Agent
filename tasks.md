@@ -106,6 +106,9 @@ Current theme:
       disposable no-key ingest/ask/eval/compare workflow pass
 - [x] Bind versioned ingest manifests to canonical document scope and hashed
       storage identity, with conservative local/Qdrant legacy migration
+- [x] Lock all backend extras and isolated build requirements; restore them
+      with uv 0.12.16 in Python 3.11/3.13 CI, while preserving the frozen
+      Node 22 and pnpm 10.18.0 frontend path
 - [ ] Resolve the upstream Starlette/AnyIO `BlockingPortal` deprecation warning
       or add a narrowly justified filter after the dependency lock is selected
 

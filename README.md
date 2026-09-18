@@ -196,10 +196,9 @@ The files you will reach for most often:
 ## Quick start
 
 ```powershell
-py -3.13 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -e ".[agents,qdrant,dev]"
-pnpm install
+uv python install 3.13
+uv sync --locked --all-extras --python 3.13
+pnpm install --frozen-lockfile
 copy .env.example .env
 pnpm run dev:backend   # API on http://127.0.0.1:8000
 pnpm run dev           # UI on http://127.0.0.1:5173

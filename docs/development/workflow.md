@@ -49,9 +49,26 @@ table says what each gate guards and where CI runs it.
 | Compile | the package compiles | Backend → Compile Python package |
 | Frontend build | strict TypeScript (`tsc -b`) and a production Vite build | Frontend → Build frontend |
 
-CI installs the backend with `pip install -e ".[agents,qdrant,dev]"` on Python
-3.13, and the frontend with `pnpm install --frozen-lockfile` on Node 22 and
-pnpm 10.18.0.
+CI restores the backend with uv 0.12.16 from the universal `uv.lock` and runs
+every gate on Python 3.11 and 3.13. The Agents SDK registration regression uses
+the installed SDK from that restore, not a substitute module. CI restores the
+frontend with `pnpm install --frozen-lockfile` on Node 22 and pnpm 10.18.0.
+
+## Dependency changes
+
+`pyproject.toml` declares Python dependencies and `uv.lock` records the
+complete resolution for every extra. To change a dependency intentionally:
+
+1. Edit the manifest and run `uv lock` with uv 0.12.16.
+2. Review both files and run `uv sync --locked --all-extras` twice, with the
+   quality gates between the restores.
+3. Confirm the second restore leaves `uv.lock` unchanged.
+4. Commit the manifest and lock together.
+
+Roll back by reverting the manifest and lock pair together. Reverting only
+one side makes a locked restore fail or silently preserves the wrong policy.
+Isolated wheel builds do not read `uv.lock`, so their exact build requirements
+stay pinned in `[build-system]` and are checked by the wheel smoke job.
 
 Live checks against real providers and Qdrant are not gates. They live in
 `scripts/`, never run in CI, and are reported separately from the offline

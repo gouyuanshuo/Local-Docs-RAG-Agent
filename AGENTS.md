@@ -106,15 +106,26 @@ local variable must never shadow an imported module.
 ## Quality gates
 
 ```text
-python -m ruff check backend/src tests scripts
-python -m ruff format --check backend/src tests scripts
-python -m mypy
-python -m pytest
-python -m compileall -q backend/src
+uv sync --locked --all-extras
+uv run --locked --all-extras python -m ruff check backend/src tests scripts
+uv run --locked --all-extras python -m ruff format --check \
+  backend/src tests scripts
+uv run --locked --all-extras python -m ruff check \
+  --preview --select DOC201 backend/src scripts
+uv run --locked --all-extras python -m mypy
+uv run --locked --all-extras python -m pytest
+uv run --locked --all-extras python -m compileall -q backend/src
 ```
 
-Frontend changes: `pnpm run build`. CI matches this (plus `DOC201` preview on
-`backend/src` and `scripts`).
+Use uv 0.12.16. The universal `uv.lock` covers every extra and Python 3.11+;
+CI runs the backend gates on 3.11 and 3.13. Frontend changes also require
+`pnpm install --frozen-lockfile` and `pnpm run build` with Node 22 and pnpm
+10.18.0.
+
+Refresh dependencies intentionally with `uv lock` under uv 0.12.16, then run
+the locked restore and gates. Review and commit `pyproject.toml` and `uv.lock`
+together. Roll back a dependency change by reverting that manifest/lock pair
+together; never restore only one side.
 
 ## Commit convention
 
