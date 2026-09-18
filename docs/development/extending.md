@@ -59,12 +59,29 @@ module-only imports, 80 columns, and a Google docstring on anything public.
 5. Normalize operational failures into `VectorStoreError` with a stable
    `reason_code`. The comparison matrix branches on it to report an unreachable
    service as a `skipped` cell rather than an `error`.
-6. Construct it in `rag/store_factory.py` and export it from `rag/__init__.py`.
+6. Add an explicit case to `rag/ingest.storage_identity`. Canonicalize only
+   non-secret target data, strip credentials, and never let a new backend fall
+   through to another backend's identity. An unsupported or incompletely wired
+   backend must fail closed before it can claim or mutate storage.
+7. Define the backend's legacy-manifest ownership policy in
+   `_validate_manifest_storage`. Decide deliberately whether an identity-less
+   legacy manifest can rebuild and adopt this target, or must require an
+   explicit operator ownership decision; do not inherit another backend's
+   policy by fallthrough.
+8. Add a matching key and lock-file path mapping in `rag/index_lock.py`. Use the
+   same canonical target as storage identity and I/O, choose an appropriate
+   local or per-user remote location, and keep credentials out of both the key
+   and persistent lock artifact.
+9. Construct it in `rag/store_factory.py` and export it from `rag/__init__.py`.
    Do not add backend-name or concrete-type branches to generic ingest or
-   readiness code; storage identity and ownership are the deliberately
-   backend-specific exceptions.
-7. Add lifecycle tests for missing, unchanged, changed, removed, and
-   changed-to-empty sources, plus retrieval and normalized-failure tests.
+   readiness code; factory selection, storage identity, legacy ownership, and
+   lock mapping are the deliberately backend-specific exceptions.
+10. Add lifecycle tests for missing, unchanged, changed, removed, and
+    changed-to-empty sources, plus retrieval and normalized-failure tests. Add
+    identity/lock tests proving equivalent forms of the same target
+    intentionally collide, distinct backends or targets do not collide,
+    secrets never enter persisted identity/lock data, and unsupported or
+    unwired backend names fail closed.
 
 ## A runtime
 
