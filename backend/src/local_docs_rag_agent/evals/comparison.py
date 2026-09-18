@@ -222,7 +222,8 @@ def plan_eval_matrix(
 
     Raises:
       ConfigurationError: If an axis is empty, the Cartesian product exceeds
-        `MAX_MATRIX_RUNS`, or any resulting `AppConfig` is invalid.
+        `MAX_MATRIX_RUNS`, any resulting `AppConfig` is invalid, or an
+        executable storage target is unsafe.
     """
     axes = resolve_axes(config, requested or {})
     values = [axes[axis.name] for axis in AXES]
@@ -246,6 +247,9 @@ def plan_eval_matrix(
         )
         for combination in itertools.product(*values)
     ]
+    for variant in variants:
+        if _skip_reason(variant) is None:
+            rag.validate_storage_target(variant)
     return EvalMatrixPlan(
         axes=axes,
         variants=variants,
@@ -273,7 +277,8 @@ def run_eval_matrix(
 
     Raises:
       ConfigurationError: If an axis is empty, the Cartesian product would
-        exceed `MAX_MATRIX_RUNS`, or any planned configuration is invalid.
+        exceed `MAX_MATRIX_RUNS`, any planned configuration is invalid, or an
+        executable storage target is unsafe.
       DataFormatError: If the eval file contains no cases. The file is
         loaded before matrix ingestion can mutate an index.
     """
@@ -391,7 +396,12 @@ def _run_qdrant_matrix_case(
                 result = _error_result(common, config, exc)
 
             if ownership is None:
-                if _has_partial_cleanup_failure(cell_error):
+                orphaned_collection = (
+                    rag.qdrant_orphaned_collection(cell_error)
+                    if cell_error is not None
+                    else None
+                )
+                if orphaned_collection == collection_name:
                     metadata["orphan_recovery_required"] = True
                     return _initializer_cleanup_error_result(
                         common,
@@ -540,18 +550,6 @@ def _initializer_cleanup_error_result(
             f"{_exception_description(cell_error)}"
         ),
     }
-
-
-def _has_partial_cleanup_failure(exc: BaseException | None) -> bool:
-    """Return whether an initializer reports a failed partial cleanup note."""
-    if exc is None:
-        return False
-    return any(
-        "partial" in note.lower()
-        and "cleanup" in note.lower()
-        and "fail" in note.lower()
-        for note in getattr(exc, "__notes__", ())
-    )
 
 
 def _exception_description(exc: BaseException) -> str:

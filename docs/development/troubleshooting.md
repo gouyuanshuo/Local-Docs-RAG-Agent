@@ -154,6 +154,13 @@ an intentionally unused stage.
 A request expanding past 128 combinations, or naming an empty axis, is refused
 as a configuration error before anything runs.
 
+**A comparison rejects a Qdrant URL before producing a report.** Every planned
+local or configured-Qdrant target is checked before gold loading, dataset
+hashing, provider construction, index initialization, or output writing. A
+missing Qdrant URL is different: its cell remains `missing_qdrant_url` and is
+skipped. A malformed nonempty URL is a request-level configuration error; its
+safe diagnostic deliberately omits URL credentials, paths, and queries.
+
 **Did an eval comparison change my interactive local index?** No. Each local
 cell runs with a separate temporary index and ingest manifest, which are
 removed after success or failure. The comparison's `retrieval_config` still

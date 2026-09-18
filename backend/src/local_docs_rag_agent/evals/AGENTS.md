@@ -33,13 +33,19 @@ Load gold, score one run, sweep a matrix, rank a leaderboard.
   must also be `live`; only `ready` with `reranker_disabled` is rankable.
 - Matrix cap 128; empty axis is an error; Qdrant unreachable is `skipped`.
 - Matrix planning resolves every axis and validates every `AppConfig` variant
-  before a cell can ingest. Defaults plan 12 local cells, or 24 with Qdrant.
+  and every executable storage target before a cell can ingest. A missing
+  Qdrant URL remains the documented planned `missing_qdrant_url` skip; a
+  nonempty malformed URL fails planning before gold loading or side effects.
+  Defaults plan 12 local cells, or 24 with Qdrant.
 - Every local matrix cell uses a fresh temporary index and manifest. Qdrant
   cells use an owned UUID-derived collection and temporary manifest; cleanup
   failures retain the exact disposable collection, cleanup diagnostics, and
   `pre_cleanup_status` in `run_metadata` while making the cell unrankable.
   A cleanup-origin interruption is re-raised with exact-name orphan recovery
   in an exception note, rather than replaced by a synthetic result.
+- Initializer orphan recovery uses the RAG facade's structured
+  `qdrant_orphaned_collection` marker only. Free-form exception notes never
+  establish deletion/orphan ownership.
 - Raw comparison reports carry a stable corpus/gold `dataset_identity` and
   per-cell semantic `configuration_identity`; neither includes temporary
   storage paths, document bodies, keys, provider URLs, or resolved-away

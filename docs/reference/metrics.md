@@ -132,6 +132,11 @@ A cell's `status` is `ok`, `degraded`, `skipped`, or `error`. What each means,
 and the reasons attached to it, are in
 [troubleshooting](../development/troubleshooting.md#the-comparison-matrix).
 
+Before gold is loaded or a cell can touch storage, planning validates every
+executable storage target through the RAG facade. A missing Qdrant URL remains
+the explicit `missing_qdrant_url` skipped cell; a nonempty malformed Qdrant URL
+is a safe request-level configuration error rather than a partial comparison.
+
 ### Leaderboard
 
 Only `ok` cells enter the leaderboard. A cell that ran on fallback measured hash

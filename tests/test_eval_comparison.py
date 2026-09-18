@@ -3,13 +3,14 @@ from __future__ import annotations
 import dataclasses
 import json
 import pathlib
+import traceback
 
 import pytest
 
 from local_docs_rag_agent import cli, rag
 from local_docs_rag_agent import config as app_config
 from local_docs_rag_agent.api import schemas
-from local_docs_rag_agent.core import constants, exceptions, models
+from local_docs_rag_agent.core import constants, exceptions, file_io, models
 from local_docs_rag_agent.evals import comparison, harness
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -149,6 +150,136 @@ def test_invalid_matrix_has_no_ingest_side_effects(
     assert calls == []
 
 
+def test_malformed_qdrant_target_fails_before_comparison_side_effects(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sentinel_user = "comparison-user-sentinel"
+    sentinel_password = "comparison-password-sentinel"
+    sentinel_path = "comparison-path-sentinel"
+    sentinel_query = "comparison-query-sentinel"
+    config = _comparison_config(tmp_path).with_overrides(
+        qdrant_url=(
+            f"http://{sentinel_user}:{sentinel_password}@example.invalid"
+            f"\N{FULLWIDTH SOLIDUS}{sentinel_path}?key={sentinel_query}"
+        )
+    )
+    output_path = tmp_path / "comparison-report.json"
+    validated: list[constants.VectorBackendName] = []
+    side_effects: list[str] = []
+    validate = rag.validate_storage_target
+
+    def record_validation(config: app_config.AppConfig) -> None:
+        validated.append(config.vector_backend)
+        validate(config)
+
+    def record_side_effect(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        side_effects.append("called")
+
+    monkeypatch.setattr(rag, "validate_storage_target", record_validation)
+    monkeypatch.setattr(harness, "load_eval_cases", record_side_effect)
+    monkeypatch.setattr(rag, "read_source_texts", record_side_effect)
+    monkeypatch.setattr(rag, "ingest_documents", record_side_effect)
+    monkeypatch.setattr(
+        rag, "initialize_owned_qdrant_index", record_side_effect
+    )
+    monkeypatch.setattr(harness, "run_eval", record_side_effect)
+    monkeypatch.setattr(file_io, "atomic_write_text", record_side_effect)
+
+    with pytest.raises(exceptions.ConfigurationError) as exc_info:
+        comparison.run_eval_matrix(
+            config,
+            {
+                **_single_backend_request("local"),
+                "vector_backends": ["local", "qdrant"],
+            },
+            output_path=output_path,
+        )
+
+    formatted = "".join(traceback.format_exception(exc_info.value))
+    for sentinel in (
+        sentinel_user,
+        sentinel_password,
+        sentinel_path,
+        sentinel_query,
+    ):
+        assert sentinel not in str(exc_info.value)
+        assert sentinel not in repr(exc_info.value)
+        assert sentinel not in formatted
+    assert validated == ["local", "qdrant"]
+    assert side_effects == []
+    assert not output_path.exists()
+
+
+def test_missing_qdrant_url_stays_a_planned_skipped_cell(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _comparison_config(tmp_path).with_overrides(
+        vector_backend="qdrant",
+        qdrant_url=None,
+    )
+
+    def unexpected_validation(config: app_config.AppConfig) -> None:
+        del config
+        raise AssertionError("missing URL must remain skipped")
+
+    monkeypatch.setattr(rag, "validate_storage_target", unexpected_validation)
+
+    plan = comparison.plan_eval_matrix(
+        config,
+        _single_backend_request("qdrant"),
+    )
+
+    assert len(plan.variants) == 1
+    assert comparison._run_matrix_case(plan.variants[0])["status"] == "skipped"
+
+
+def test_normalized_qdrant_failure_does_not_leak_client_context(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_url = (
+        "http://client-user-sentinel:client-password-sentinel@"
+        "example.invalid/client-path-sentinel?key=client-query-sentinel"
+    )
+    raw_message = "client-message-sentinel"
+    config = _comparison_config(tmp_path, vector_backend="qdrant")
+
+    def normalized_failure(config: app_config.AppConfig) -> object:
+        del config
+        try:
+            raise RuntimeError(f"{raw_message}: {raw_url}")
+        except RuntimeError as exc:
+            raise exceptions.VectorStoreError(
+                "Qdrant operation failed",
+                reason_code="operation_failed",
+            ) from exc
+
+    monkeypatch.setattr(
+        rag, "initialize_owned_qdrant_index", normalized_failure
+    )
+
+    report = comparison.run_eval_matrix(
+        config,
+        _single_backend_request("qdrant"),
+    )
+
+    serialized = json.dumps(report)
+    for sentinel in (
+        "client-user-sentinel",
+        "client-password-sentinel",
+        "client-path-sentinel",
+        "client-query-sentinel",
+        raw_message,
+    ):
+        assert sentinel not in serialized
+    runs = report["runs"]
+    assert isinstance(runs, list)
+    assert runs[0]["error"] == "VectorStoreError: Qdrant operation failed"
+
+
 def test_local_matrix_cells_isolate_interactive_storage_on_success_and_error(
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -277,7 +408,7 @@ def test_qdrant_initializer_failure_does_not_claim_cleanup(
     assert metadata["disposable_qdrant_collection"] != "interactive"
 
 
-def test_qdrant_initializer_partial_cleanup_note_requires_recovery(
+def test_qdrant_initializer_cleanup_words_do_not_claim_an_orphan(
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -300,10 +431,34 @@ def test_qdrant_initializer_partial_cleanup_note_requires_recovery(
     assert "Partial Qdrant collection cleanup also failed" in str(run["error"])
     metadata = run["run_metadata"]
     assert isinstance(metadata, dict)
-    collection = metadata["disposable_qdrant_collection"]
-    assert isinstance(collection, str)
-    assert collection in str(run["error"])
+    assert "orphan_recovery_required" not in metadata
+
+
+def test_qdrant_initializer_structured_orphan_marker_requires_recovery(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _comparison_config(tmp_path, vector_backend="qdrant")
+    initialized: list[str] = []
+
+    def initialize(config: app_config.AppConfig) -> object:
+        initialized.append(config.qdrant_collection)
+        raise RuntimeError("initializer failure")
+
+    monkeypatch.setattr(rag, "initialize_owned_qdrant_index", initialize)
+    monkeypatch.setattr(
+        rag,
+        "qdrant_orphaned_collection",
+        lambda exc: initialized[0],
+    )
+
+    run = comparison._run_matrix_case(config)
+
+    assert run["status"] == "error"
+    metadata = run["run_metadata"]
+    assert isinstance(metadata, dict)
     assert metadata["orphan_recovery_required"] is True
+    assert metadata["disposable_qdrant_collection"] == initialized[0]
 
 
 def test_qdrant_cleanup_failure_reports_exact_orphan_collection(
