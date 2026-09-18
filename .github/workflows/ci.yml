@@ -95,14 +95,36 @@ jobs:
           cache-dependency-glob: uv.lock
 
       - name: Build wheel with pinned isolated requirements
-        run: uv build --wheel --out-dir dist
+        run: |
+          mkdir -p "$RUNNER_TEMP/wheel-dist"
+          uv build --wheel --out-dir "$RUNNER_TEMP/wheel-dist"
 
       - name: Install and import wheel
         run: |
-          uv venv --python 3.13 .wheel-smoke
-          uv pip install --python .wheel-smoke/bin/python --no-deps dist/*.whl
-          .wheel-smoke/bin/python -c \
-            "import local_docs_rag_agent; print(local_docs_rag_agent.__version__)"
+          wheel="$RUNNER_TEMP/wheel-dist"
+          wheel="$wheel/local_docs_rag_agent-0.1.0-py3-none-any.whl"
+          smoke="$RUNNER_TEMP/wheel-smoke"
+          run_dir="$RUNNER_TEMP/wheel-run"
+          mkdir -p "$run_dir"
+          uv venv --python 3.13 "$smoke"
+          uv pip install --python "$smoke/bin/python" --no-deps "$wheel"
+          cd "$run_dir"
+          "$smoke/bin/python" - <<'PY'
+          import os
+          import pathlib
+
+          import local_docs_rag_agent
+
+          module = pathlib.Path(local_docs_rag_agent.__file__).resolve()
+          smoke = pathlib.Path(
+              os.environ["RUNNER_TEMP"], "wheel-smoke"
+          ).resolve()
+          checkout = pathlib.Path(os.environ["GITHUB_WORKSPACE"]).resolve()
+          assert module.is_relative_to(smoke), module
+          assert not module.is_relative_to(checkout), module
+          assert local_docs_rag_agent.__version__ == "0.1.0"
+          print(module)
+          PY
 
   frontend:
     name: Frontend build
