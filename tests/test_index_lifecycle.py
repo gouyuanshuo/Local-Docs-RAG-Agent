@@ -11,6 +11,7 @@ import sys
 import threading
 from typing import Any
 
+import portalocker
 import pytest
 import qdrant_client
 
@@ -270,6 +271,34 @@ def _initialize_contender(
         results.put("rejected")
     else:
         results.put("initialized")
+
+
+def _try_file_lock_process(lock_path: str, results: Any) -> None:
+    lock = portalocker.Lock(
+        lock_path,
+        mode="a",
+        timeout=0.0,
+        fail_when_locked=True,
+    )
+    try:
+        lock.acquire()
+    except portalocker.exceptions.LockException:
+        results.put("blocked")
+    else:
+        results.put("acquired")
+        lock.release()
+
+
+def _enter_guard_from_thread(
+    config: app_config.AppConfig,
+    entered: threading.Event,
+    errors: list[BaseException],
+) -> None:
+    try:
+        with rag.index_guard(config):
+            entered.set()
+    except BaseException as exc:  # pragma: no cover - assertion reports it
+        errors.append(exc)
 
 
 def test_index_guard_is_public_reentrant_and_excludes_second_thread(
@@ -833,8 +862,10 @@ def test_index_guard_cleans_interrupted_thread_lock_publication(
         pass
 
 
-def test_nested_pre_acquire_interruption_preserves_outer_lock(
+@pytest.mark.parametrize("phase", ["before_increment", "after_increment"])
+def test_nested_depth_interruption_preserves_outer_lock(
     tmp_path: pathlib.Path,
+    phase: str,
 ) -> None:
     config = _local_config(tmp_path)
     index_lock = importlib.import_module("local_docs_rag_agent.rag.index_lock")
@@ -842,14 +873,28 @@ def test_nested_pre_acquire_interruption_preserves_outer_lock(
     source_lines, first_line = inspect.getsourcelines(
         index_lock._acquire_resource
     )
-    markers = (
+    before_markers = (
         "if not frame.state.thread_lock.acquire",
         "depths[key] = depths[key] + 1",
     )
-    target_line = next(
+    increment_offset = next(
+        offset
+        for offset, source_line in enumerate(source_lines)
+        if any(marker in source_line for marker in before_markers)
+    )
+    target_offset = increment_offset
+    if phase == "after_increment":
+        target_offset = next(
+            offset
+            for offset, source_line in enumerate(source_lines)
+            if offset > increment_offset and source_line.strip() == "return"
+        )
+    target_line = first_line + target_offset
+
+    assert target_line == next(
         first_line + offset
         for offset, source_line in enumerate(source_lines)
-        if any(marker in source_line for marker in markers)
+        if offset == target_offset
     )
 
     def interrupt_nested(frame: Any, event: str, arg: Any) -> Any:
@@ -893,6 +938,7 @@ def test_nested_pre_acquire_interruption_preserves_outer_lock(
                 caught = exc
             finally:
                 sys.settrace(None)
+            assert set(index_lock._thread_depths().values()) == {1}
             contender = threading.Thread(
                 target=contend_for_interrupted_resource
             )
@@ -913,6 +959,401 @@ def test_nested_pre_acquire_interruption_preserves_outer_lock(
     assert index_lock._ACTIVE_FILE_LOCKS == {}
     with rag.index_guard(config):
         pass
+
+
+@pytest.mark.parametrize("phase", ["before_restore", "after_restore"])
+def test_depth_release_interruption_restores_exact_state(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+) -> None:
+    config = _local_config(tmp_path)
+    shared_root = tmp_path / "shared"
+    shared_root.mkdir()
+    shared = _local_config(shared_root).with_overrides(
+        index_path=config.index_path
+    )
+    index_lock = importlib.import_module("local_docs_rag_agent.rag.index_lock")
+    resources, _ = index_lock._lock_resources(config)
+    target = next(
+        resource.key
+        for resource in resources
+        if "local-store" in resource.path.name
+    )
+    interruption = KeyboardInterrupt(f"{phase} logical depth restoration")
+
+    class _InterruptingDepths(dict[str, int]):
+        armed = True
+
+        def pop(self, key: str, *args: Any) -> int:
+            if key != target or not self.armed:
+                return super().pop(key, *args)
+            self.armed = False
+            if phase == "after_restore":
+                super().pop(key, *args)
+            raise interruption
+
+    monkeypatch.setattr(index_lock, "LOCK_TIMEOUT_SECONDS", 0.2)
+    with pytest.raises(KeyboardInterrupt) as exc_info, rag.index_guard(config):
+        current = dict(index_lock._thread_depths())
+        index_lock._THREAD_STATE.depths = _InterruptingDepths(current)
+
+    assert exc_info.value is interruption
+    assert index_lock._thread_depths().get(target, 0) == 0
+    assert index_lock._ACTIVE_FILE_LOCKS == {}
+    assert index_lock._LOCK_STATES == {}
+    entered = threading.Event()
+    release_contender = threading.Event()
+    errors: list[BaseException] = []
+
+    def hold_shared_target() -> None:
+        try:
+            with rag.index_guard(shared):
+                entered.set()
+                release_contender.wait(timeout=5.0)
+        except BaseException as exc:  # pragma: no cover - assertion reports it
+            errors.append(exc)
+
+    contender = threading.Thread(target=hold_shared_target)
+    contender.start()
+    assert entered.wait(timeout=2.0) is True
+    with (
+        pytest.raises(exceptions.ConfigurationError) as timeout_info,
+        rag.index_guard(config),
+    ):
+        pytest.fail("stale logical depth bypassed the physical lock")
+    assert "timed out" in str(timeout_info.value).lower()
+    release_contender.set()
+    contender.join(timeout=5.0)
+    assert not contender.is_alive()
+    assert errors == []
+
+
+@pytest.mark.parametrize("phase", ["before_release", "after_release"])
+def test_file_release_interruption_frees_os_lock(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+) -> None:
+    config = _local_config(tmp_path)
+    index_lock = importlib.import_module("local_docs_rag_agent.rag.index_lock")
+    interruption = KeyboardInterrupt(f"{phase} file lock release")
+    original_lock = index_lock.portalocker.Lock
+    armed = True
+    interrupted_paths: list[str] = []
+
+    class _InterruptingFileLock:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self._inner = original_lock(*args, **kwargs)
+            self.path = str(args[0])
+
+        @property
+        def fh(self) -> Any:
+            return self._inner.fh
+
+        @fh.setter
+        def fh(self, value: Any) -> None:
+            self._inner.fh = value
+
+        def acquire(self, *args: Any, **kwargs: Any) -> Any:
+            return self._inner.acquire(*args, **kwargs)
+
+        def release(self) -> None:
+            nonlocal armed
+            if armed:
+                armed = False
+                interrupted_paths.append(self.path)
+                if phase == "after_release":
+                    self._inner.release()
+                raise interruption
+            self._inner.release()
+
+    monkeypatch.setattr(index_lock.portalocker, "Lock", _InterruptingFileLock)
+
+    with pytest.raises(KeyboardInterrupt) as exc_info, rag.index_guard(config):
+        pass
+
+    escaped = exc_info.value
+    assert escaped is interruption
+    assert escaped.__traceback__ is not None
+    assert index_lock._ACTIVE_FILE_LOCKS == {}
+    context = multiprocessing.get_context("spawn")
+    results = context.Queue()
+    contender = context.Process(
+        target=_try_file_lock_process,
+        args=(interrupted_paths[0], results),
+    )
+    contender.start()
+    contender.join(timeout=5.0)
+    assert contender.exitcode == 0
+    assert results.get(timeout=1.0) == "acquired"
+
+
+@pytest.mark.parametrize("phase", ["before_release", "after_release"])
+def test_thread_release_interruption_cleans_state_and_unlocks(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+) -> None:
+    config = _local_config(tmp_path)
+    index_lock = importlib.import_module("local_docs_rag_agent.rag.index_lock")
+    resources, _ = index_lock._lock_resources(config)
+    target = resources[-1]
+    interruption = KeyboardInterrupt(f"{phase} thread lock release")
+
+    class _InterruptingThreadLock:
+        def __init__(self) -> None:
+            self.inner = threading.RLock()
+            self.armed = True
+
+        def acquire(self, *, timeout: float) -> bool:
+            return self.inner.acquire(timeout=timeout)
+
+        def release(self) -> None:
+            if self.armed:
+                self.armed = False
+                if phase == "after_release":
+                    self.inner.release()
+                raise interruption
+            self.inner.release()
+
+    lock = _InterruptingThreadLock()
+    index_lock._LOCK_STATES[target.key] = index_lock._LockState(
+        thread_lock=lock
+    )
+    monkeypatch.setattr(index_lock, "LOCK_TIMEOUT_SECONDS", 0.2)
+
+    with pytest.raises(KeyboardInterrupt) as exc_info, rag.index_guard(config):
+        pass
+
+    assert exc_info.value is interruption
+    assert index_lock._ACTIVE_FILE_LOCKS == {}
+    assert index_lock._LOCK_STATES == {}
+    old_lock_acquired = threading.Event()
+
+    def acquire_old_lock() -> None:
+        if lock.inner.acquire(timeout=0.2):
+            old_lock_acquired.set()
+            lock.inner.release()
+
+    old_lock_contender = threading.Thread(target=acquire_old_lock)
+    old_lock_contender.start()
+    assert old_lock_acquired.wait(timeout=2.0) is True
+    old_lock_contender.join(timeout=5.0)
+    assert not old_lock_contender.is_alive()
+    entered = threading.Event()
+    errors: list[BaseException] = []
+    contender = threading.Thread(
+        target=_enter_guard_from_thread,
+        args=(config, entered, errors),
+    )
+    contender.start()
+    assert entered.wait(timeout=2.0) is True
+    contender.join(timeout=5.0)
+    assert not contender.is_alive()
+    assert errors == []
+
+
+@pytest.mark.parametrize("phase", ["before_release", "after_release"])
+def test_registry_release_interruption_is_retried(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+) -> None:
+    config = _local_config(tmp_path)
+    index_lock = importlib.import_module("local_docs_rag_agent.rag.index_lock")
+    inner = index_lock._REGISTRY_GUARD
+    interruption = KeyboardInterrupt(f"{phase} registry release")
+
+    class _InterruptingRegistryGuard:
+        armed = False
+        releases_before_interrupt = 0
+
+        def acquire(self) -> bool:
+            return bool(inner.acquire())
+
+        def release(self) -> None:
+            if self.armed:
+                if self.releases_before_interrupt:
+                    self.releases_before_interrupt -= 1
+                else:
+                    self.armed = False
+                    if phase == "after_release":
+                        inner.release()
+                    raise interruption
+            inner.release()
+
+        def __enter__(self) -> _InterruptingRegistryGuard:
+            self.acquire()
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            del args
+            self.release()
+
+    guard = _InterruptingRegistryGuard()
+    monkeypatch.setattr(index_lock, "_REGISTRY_GUARD", guard)
+
+    with pytest.raises(KeyboardInterrupt) as exc_info, rag.index_guard(config):
+        guard.armed = True
+        guard.releases_before_interrupt = 1
+
+    assert exc_info.value is interruption
+    entered = threading.Event()
+    errors: list[BaseException] = []
+    contender = threading.Thread(
+        target=_enter_guard_from_thread,
+        args=(config, entered, errors),
+        daemon=True,
+    )
+    contender.start()
+    assert entered.wait(timeout=2.0) is True
+    contender.join(timeout=5.0)
+    assert not contender.is_alive()
+    assert errors == []
+    assert index_lock._LOCK_STATES == {}
+
+
+@pytest.mark.parametrize("phase", ["before_retain", "after_retain"])
+def test_retention_interruption_is_transactional(
+    tmp_path: pathlib.Path,
+    phase: str,
+) -> None:
+    config = _local_config(tmp_path)
+    index_lock = importlib.import_module("local_docs_rag_agent.rag.index_lock")
+    source_lines, first_line = inspect.getsourcelines(
+        index_lock._retain_lock_state
+    )
+    markers = {
+        "before_retain": ("state.users += 1", "state.retainers.add"),
+        "after_retain": ("return state", "return"),
+    }
+    target_line = next(
+        first_line + offset
+        for offset, source_line in enumerate(source_lines)
+        if any(marker in source_line for marker in markers[phase])
+    )
+    interruption = KeyboardInterrupt(f"{phase} state retention")
+
+    def interrupt_retain(frame: Any, event: str, arg: Any) -> Any:
+        del arg
+        if (
+            frame.f_code is index_lock._retain_lock_state.__code__
+            and event == "line"
+            and frame.f_lineno == target_line
+        ):
+            sys.settrace(None)
+            raise interruption
+        return interrupt_retain
+
+    sys.settrace(interrupt_retain)
+    try:
+        with (
+            pytest.raises(KeyboardInterrupt) as exc_info,
+            rag.index_guard(config),
+        ):
+            pytest.fail("interrupted guard unexpectedly entered")
+    finally:
+        sys.settrace(None)
+
+    assert exc_info.value is interruption
+    assert index_lock._LOCK_STATES == {}
+    assert index_lock._ACTIVE_FILE_LOCKS == {}
+    with rag.index_guard(config):
+        pass
+
+
+def test_reciprocal_partial_overlap_nesting_fails_immediately(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    first_root.mkdir()
+    second_root.mkdir()
+    first = _local_config(first_root)
+    second = _local_config(second_root)
+    first_inner = first.with_overrides(index_path=second.index_path)
+    second_inner = second.with_overrides(index_path=first.index_path)
+    barrier = threading.Barrier(2)
+    errors: list[BaseException] = []
+    entered: list[str] = []
+    index_lock = importlib.import_module("local_docs_rag_agent.rag.index_lock")
+    monkeypatch.setattr(index_lock, "LOCK_TIMEOUT_SECONDS", 0.2)
+
+    def nest(
+        label: str,
+        outer: app_config.AppConfig,
+        inner: app_config.AppConfig,
+    ) -> None:
+        try:
+            with rag.index_guard(outer):
+                barrier.wait(timeout=5.0)
+                with rag.index_guard(inner):
+                    entered.append(label)
+        except BaseException as exc:
+            errors.append(exc)
+
+    first_thread = threading.Thread(
+        target=nest,
+        args=("first", first, first_inner),
+    )
+    second_thread = threading.Thread(
+        target=nest,
+        args=("second", second, second_inner),
+    )
+    first_thread.start()
+    second_thread.start()
+    first_thread.join(timeout=5.0)
+    second_thread.join(timeout=5.0)
+
+    assert not first_thread.is_alive()
+    assert not second_thread.is_alive()
+    assert entered == []
+    assert len(errors) == 2
+    assert all(isinstance(exc, exceptions.ConfigurationError) for exc in errors)
+    assert all("unsafe nested" in str(exc).lower() for exc in errors)
+    assert all(
+        isinstance(exc, exceptions.ConfigurationError) and exc.action_hint
+        for exc in errors
+    )
+    assert index_lock._LOCK_STATES == {}
+    assert index_lock._ACTIVE_FILE_LOCKS == {}
+
+
+def test_monotonic_disjoint_nested_guards_remain_allowed(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    outer = _local_config(tmp_path)
+    inner_root = tmp_path / "inner"
+    inner_root.mkdir()
+    inner = _local_config(inner_root)
+    index_lock = importlib.import_module("local_docs_rag_agent.rag.index_lock")
+    outer_resources = (
+        index_lock._LockResource("a", tmp_path / "a.lock"),
+        index_lock._LockResource("b", tmp_path / "b.lock"),
+    )
+    inner_resources = (
+        index_lock._LockResource("c", tmp_path / "c.lock"),
+        index_lock._LockResource("d", tmp_path / "d.lock"),
+    )
+
+    def resources_for(
+        config: app_config.AppConfig,
+    ) -> tuple[tuple[Any, ...], pathlib.Path]:
+        if config is outer:
+            return outer_resources, config.ingest_manifest_path
+        assert config is inner
+        return inner_resources, config.ingest_manifest_path
+
+    monkeypatch.setattr(index_lock, "_lock_resources", resources_for)
+
+    with rag.index_guard(outer), rag.index_guard(inner):
+        assert set(index_lock._thread_depths()) == {"a", "b", "c", "d"}
+
+    assert index_lock._LOCK_STATES == {}
+    assert index_lock._ACTIVE_FILE_LOCKS == {}
 
 
 def test_index_guard_attempts_every_release_after_one_release_fails(

@@ -203,6 +203,12 @@ active owner. Qdrant lifecycle work from multiple hosts needs an external
 distributed lock or a single designated owner; local locks cannot coordinate
 hosts.
 
+**Unsafe nested index lifecycle guard.** The current thread tried to enter a
+different configuration whose lock resources partially overlap those it
+already owns, or whose new resources violate global lock order. Exit the outer
+guard before entering the other configuration. Exact same-configuration
+reentry remains supported for retrieval calling `ensure_index`.
+
 **`INDEX_PATH` and `INGEST_MANIFEST_PATH` identify the same file.** Choose two
 distinct canonical files. This includes symlinks or hard links that identify
 one target. The check happens before manifest or store mutation; do not work

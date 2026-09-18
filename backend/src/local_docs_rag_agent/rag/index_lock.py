@@ -31,8 +31,8 @@ _REMOTE_LOCK_ROOT = (
     pathlib.Path.home() / ".cache" / "local-docs-rag-agent" / "locks"
 )
 _PROCESS_ID = os.getpid()
-_REGISTRY_GUARD = threading.Lock()
-_ACTIVE_LOCKS_GUARD = threading.Lock()
+_REGISTRY_GUARD = threading.RLock()
+_ACTIVE_LOCKS_GUARD = threading.RLock()
 _THREAD_STATE = threading.local()
 
 
@@ -40,7 +40,7 @@ _THREAD_STATE = threading.local()
 class _LockState:
     thread_lock: Any = dataclasses.field(default_factory=threading.RLock)
     process_id: int = dataclasses.field(default_factory=os.getpid)
-    users: int = 0
+    retainers: set[object] = dataclasses.field(default_factory=set)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -52,7 +52,8 @@ class _LockResource:
 @dataclasses.dataclass(slots=True)
 class _AcquiredResource:
     resource: _LockResource
-    state: _LockState
+    state: _LockState | None = None
+    retention_token: object = dataclasses.field(default_factory=object)
     thread_depth_before: int | None = None
     thread_lock_acquired: bool = False
     file_lock: portalocker.Lock | None = None
@@ -85,15 +86,14 @@ def index_guard(config: app_config.AppConfig) -> Iterator[pathlib.Path]:
     """
     _ensure_current_process()
     resources, manifest_path = _lock_resources(config)
+    _validate_nested_order(resources)
     deadline = time.monotonic() + LOCK_TIMEOUT_SECONDS
     acquired: list[_AcquiredResource] = []
     try:
         for resource in resources:
-            frame = _AcquiredResource(
-                resource=resource,
-                state=_retain_lock_state(resource.key),
-            )
+            frame = _AcquiredResource(resource=resource)
             acquired.append(frame)
+            _retain_lock_state(frame)
             _acquire_resource(frame, deadline)
         yield manifest_path
     finally:
@@ -101,9 +101,12 @@ def index_guard(config: app_config.AppConfig) -> Iterator[pathlib.Path]:
         release_error: BaseException | None = None
         for frame in reversed(acquired):
             try:
-                _release_resource(frame, active_error or release_error)
+                _release_resource(frame)
             except BaseException as exc:
-                release_error = exc
+                if release_error is None:
+                    release_error = exc
+                with contextlib.suppress(BaseException):
+                    _release_resource(frame)
         if active_error is None and release_error is not None:
             raise release_error
 
@@ -181,6 +184,7 @@ def _acquire_resource(
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise _timeout_error()
+    assert frame.state is not None
     try:
         if not frame.state.thread_lock.acquire(timeout=remaining):
             raise _timeout_error()
@@ -214,7 +218,7 @@ def _acquire_file_lock(
         if remaining <= 0:
             raise _timeout_error()
         try:
-            with _ACTIVE_LOCKS_GUARD:
+            with _active_locks_section():
                 frame.file_lock.acquire(
                     timeout=0.0,
                     check_interval=0.05,
@@ -236,6 +240,7 @@ def _acquire_file_lock(
 
 
 def _release_unpublished_thread_lock(frame: _AcquiredResource) -> None:
+    assert frame.state is not None
     with contextlib.suppress(BaseException):
         frame.state.thread_lock.release()
 
@@ -246,7 +251,7 @@ def _rollback_file_lock_acquisition(frame: _AcquiredResource) -> None:
         return
     registered = False
     try:
-        with _ACTIVE_LOCKS_GUARD:
+        with _active_locks_section():
             registered = id(file_lock) in _ACTIVE_FILE_LOCKS
             _ACTIVE_FILE_LOCKS.pop(id(file_lock), None)
     except BaseException:
@@ -267,59 +272,187 @@ def _rollback_file_lock_acquisition(frame: _AcquiredResource) -> None:
     frame.file_lock_acquired = False
 
 
-def _release_resource(
-    frame: _AcquiredResource,
-    active_error: BaseException | None,
-) -> None:
+def _release_resource(frame: _AcquiredResource) -> None:
+    release_error: BaseException | None = None
+    for release in (
+        _restore_thread_depth,
+        _release_file_lock,
+        _release_thread_lock,
+        _release_lock_state,
+    ):
+        try:
+            release(frame)
+        except BaseException as exc:
+            if release_error is None:
+                release_error = exc
+    if release_error is not None:
+        raise release_error
+
+
+def _restore_thread_depth(frame: _AcquiredResource) -> None:
     key = frame.resource.key
     depths = _thread_depths()
     depth_before = frame.thread_depth_before
-    if (
-        depth_before is not None
-        and key in depths
-        and depths[key] > depth_before
-    ):
-        next_depth = depths[key] - 1
-        if next_depth:
-            depths[key] = next_depth
-        else:
-            depths.pop(key, None)
+    if depth_before is None or depths.get(key, 0) <= depth_before:
+        return
+    if depth_before:
+        depths[key] = depth_before
+    else:
+        depths.pop(key, None)
+
+
+def _release_file_lock(frame: _AcquiredResource) -> None:
+    file_lock = frame.file_lock
+    if file_lock is None:
+        return
+    registered = id(file_lock) in _ACTIVE_FILE_LOCKS
+    if not frame.file_lock_acquired and not registered:
+        return
     try:
-        if frame.file_lock is not None and frame.file_lock_acquired:
-            with _ACTIVE_LOCKS_GUARD:
-                try:
-                    frame.file_lock.release()
-                except (
-                    OSError,
-                    portalocker.exceptions.LockException,
-                ) as exc:
-                    if active_error is None:
-                        raise _lock_io_error() from exc
-                finally:
-                    _ACTIVE_FILE_LOCKS.pop(id(frame.file_lock), None)
-    finally:
-        if frame.thread_lock_acquired:
-            frame.state.thread_lock.release()
-        _release_lock_state(key, frame.state)
+        with _active_locks_section():
+            file_lock.release()
+            frame.file_lock_acquired = False
+            _ACTIVE_FILE_LOCKS.pop(id(file_lock), None)
+    except (OSError, portalocker.exceptions.LockException) as exc:
+        _force_release_file_lock(frame)
+        raise _lock_io_error() from exc
+    except BaseException:
+        _force_release_file_lock(frame)
+        raise
 
 
-def _retain_lock_state(key: str) -> _LockState:
-    with _REGISTRY_GUARD:
+def _force_release_file_lock(frame: _AcquiredResource) -> None:
+    file_lock = frame.file_lock
+    if file_lock is None:
+        return
+    with contextlib.suppress(BaseException), _active_locks_section():
+        try:
+            file_lock.release()
+        except BaseException:
+            file_handle = getattr(file_lock, "fh", None)
+            if file_handle is not None:
+                with contextlib.suppress(BaseException):
+                    file_handle.close()
+                with contextlib.suppress(BaseException):
+                    file_lock.fh = None
+        frame.file_lock_acquired = False
+        _ACTIVE_FILE_LOCKS.pop(id(file_lock), None)
+
+
+def _release_thread_lock(frame: _AcquiredResource) -> None:
+    if not frame.thread_lock_acquired:
+        return
+    assert frame.state is not None
+    try:
+        frame.state.thread_lock.release()
+        frame.thread_lock_acquired = False
+    except BaseException:
+        _force_release_thread_lock(frame)
+        raise
+
+
+def _force_release_thread_lock(frame: _AcquiredResource) -> None:
+    if not frame.thread_lock_acquired or frame.state is None:
+        return
+    try:
+        frame.state.thread_lock.release()
+    except RuntimeError as exc:
+        if _already_released_error(exc):
+            frame.thread_lock_acquired = False
+    except BaseException:
+        return
+    else:
+        frame.thread_lock_acquired = False
+
+
+def _already_released_error(error: RuntimeError) -> bool:
+    message = str(error).lower()
+    return any(
+        marker in message
+        for marker in ("un-acquired", "unowned", "unlocked lock")
+    )
+
+
+def _retain_lock_state(frame: _AcquiredResource) -> None:
+    key = frame.resource.key
+    with _registry_section():
         state = _LOCK_STATES.get(key)
         if state is None or state.process_id != _PROCESS_ID:
             state = _LockState()
-            _LOCK_STATES[key] = state
-        state.users += 1
-        return state
+        frame.state = state
+        state.retainers.add(frame.retention_token)
+        _LOCK_STATES[key] = state
+        return
 
 
-def _release_lock_state(key: str, state: _LockState) -> None:
-    with _REGISTRY_GUARD:
+def _release_lock_state(frame: _AcquiredResource) -> None:
+    key = frame.resource.key
+    state = frame.state
+    if state is None:
+        return
+    with _registry_section():
         if _LOCK_STATES.get(key) is not state:
             return
-        state.users -= 1
-        if state.users == 0:
+        state.retainers.discard(frame.retention_token)
+        if not state.retainers:
             _LOCK_STATES.pop(key, None)
+
+
+@contextlib.contextmanager
+def _registry_section() -> Iterator[None]:
+    with _mutex_section(_REGISTRY_GUARD):
+        yield
+
+
+@contextlib.contextmanager
+def _active_locks_section() -> Iterator[None]:
+    with _mutex_section(_ACTIVE_LOCKS_GUARD):
+        yield
+
+
+@contextlib.contextmanager
+def _mutex_section(lock: Any) -> Iterator[None]:
+    try:
+        with lock:
+            yield
+    except BaseException:
+        with contextlib.suppress(BaseException):
+            _retry_ambiguous_lock_release(lock)
+        raise
+
+
+def _retry_ambiguous_lock_release(lock: Any) -> None:
+    try:
+        lock.release()
+    except RuntimeError as exc:
+        if not _already_released_error(exc):
+            raise
+
+
+def _validate_nested_order(resources: tuple[_LockResource, ...]) -> None:
+    held = {key for key, depth in _thread_depths().items() if depth > 0}
+    if not held:
+        return
+    requested = {resource.key for resource in resources}
+    overlap = held & requested
+    new = requested - held
+    if overlap and new:
+        raise _unsafe_nested_error(
+            "partially overlaps resources held by the current thread"
+        )
+    if new and min(new) < max(held):
+        raise _unsafe_nested_error("would acquire resources out of order")
+
+
+def _unsafe_nested_error(reason: str) -> exceptions.ConfigurationError:
+    return exceptions.ConfigurationError(
+        f"Unsafe nested index lifecycle guard: {reason}",
+        action_hint=(
+            "Exit the current index guard before entering a configuration "
+            "with different lifecycle resources, or acquire disjoint "
+            "configurations in canonical resource order."
+        ),
+    )
 
 
 def _thread_depths() -> dict[str, int]:
@@ -382,8 +515,8 @@ def _reset_after_fork() -> None:
             file_handle.close()
         inherited_lock.fh = None
     _PROCESS_ID = os.getpid()
-    _REGISTRY_GUARD = threading.Lock()
-    _ACTIVE_LOCKS_GUARD = threading.Lock()
+    _REGISTRY_GUARD = threading.RLock()
+    _ACTIVE_LOCKS_GUARD = threading.RLock()
     _THREAD_STATE = threading.local()
     _LOCK_STATES = {}
     _ACTIVE_FILE_LOCKS = {}

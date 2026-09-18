@@ -56,6 +56,13 @@ index_lock -> config, core (and lazy storage identity lookup)
 - Same-thread recursion increments only logical guard depth and does not
   reacquire the `RLock`, so a pre-publication nested interruption cannot
   release ownership held by the outer guard.
+- Logical depth, thread locks, file locks, and registry retention are restored
+  idempotently after release interruptions. Per-frame retention tokens prevent
+  a cleanup retry from decrementing another guard's ownership.
+- Nested guards may reenter the same resource set. Partial overlap is rejected
+  before retention, and disjoint nested sets must preserve global resource
+  order; callers should normally exit one configuration's guard before
+  entering another.
 - Manifest and local-store lock artifacts live beside their resolved files.
   Qdrant store artifacts live in the per-user cache and contain only a hashed,
   credential-free identity. Persistent lock files are harmless.

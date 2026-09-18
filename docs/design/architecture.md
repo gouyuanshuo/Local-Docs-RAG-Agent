@@ -193,7 +193,18 @@ between acquisition and bookkeeping publication; cleanup failures do not
 replace the active interruption. Same-thread recursion does not perform a
 second `RLock` or file-lock acquisition: it publishes only logical depth. An
 interruption before that nested depth publication therefore leaves the outer
-guard's physical ownership untouched.
+guard's physical ownership untouched. Release restores each frame's exact
+prior logical depth and retries ambiguous physical cleanup while preserving the
+original exception. Unique retention tokens make registry cleanup idempotent,
+so a retry cannot release another frame's ownership.
+
+Reentry of the same resource set is supported. A nested guard that partially
+overlaps the current thread's resources is rejected before retaining anything,
+because reciprocal partial overlap cannot preserve a global order. Disjoint
+nested guards are permitted only when their complete key set follows every
+resource already held. In application code, exit the current configuration's
+guard before entering a different configuration unless that monotonic order is
+already established.
 
 Manifest and local-store lock artifacts live beside their respective resolved
 files. A Qdrant store artifact lives in the current user's cache and is named
