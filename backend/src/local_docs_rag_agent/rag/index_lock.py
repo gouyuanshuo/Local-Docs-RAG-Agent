@@ -1,11 +1,11 @@
 """Single-host serialization for manifest and storage lifecycle resources.
 
 The operating-system lock coordinates processes while an explicit reentrant
-thread lock closes the gap left by advisory locks inside one process. Manifest
-and local-store locks live beside their canonical files; remote locks use a
-credential-free identity in the user's cache. Resources are globally ordered,
-and only the owning thread may enter recursively. Lock files are stable
-identity markers and may safely outlive a run.
+thread lock closes the gap left by advisory locks inside one process. Local
+locks live beside their canonical files and are keyed only by physical target;
+remote locks use a credential-free identity in the user's cache. Resources are
+globally ordered, and only the owning thread may enter recursively. Lock files
+are stable identity markers and may safely outlive a run.
 """
 
 from __future__ import annotations
@@ -49,6 +49,14 @@ class _LockResource:
     path: pathlib.Path
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class _BoundIndexTargets:
+    config: app_config.AppConfig
+    manifest_path: pathlib.Path
+    storage_identity: str
+    local_index_path: pathlib.Path | None
+
+
 @dataclasses.dataclass(slots=True)
 class _AcquiredResource:
     resource: _LockResource
@@ -90,8 +98,16 @@ def index_guard(config: app_config.AppConfig) -> Iterator[pathlib.Path]:
         acquired before the finite timeout, or a lock artifact cannot be
         opened or updated.
     """
+    with _bound_index_guard(config) as targets:
+        yield targets.manifest_path
+
+
+@contextlib.contextmanager
+def _bound_index_guard(
+    config: app_config.AppConfig,
+) -> Iterator[_BoundIndexTargets]:
     _ensure_current_process()
-    resources, manifest_path = _lock_resources(config)
+    resources, targets = _lock_resources(config)
     _validate_nested_order(resources)
     deadline = time.monotonic() + LOCK_TIMEOUT_SECONDS
     acquired: list[_AcquiredResource] = []
@@ -101,7 +117,7 @@ def index_guard(config: app_config.AppConfig) -> Iterator[pathlib.Path]:
             acquired.append(frame)
             _retain_lock_state(frame)
             _acquire_resource(frame, deadline)
-        yield manifest_path
+        yield targets
     finally:
         active_error = sys.exception()
         release_error: BaseException | None = None
@@ -119,15 +135,17 @@ def index_guard(config: app_config.AppConfig) -> Iterator[pathlib.Path]:
 
 def _lock_resources(
     config: app_config.AppConfig,
-) -> tuple[tuple[_LockResource, ...], pathlib.Path]:
+) -> tuple[tuple[_LockResource, ...], _BoundIndexTargets]:
     # Imported lazily to avoid an ingest -> index_lock -> ingest cycle.
     from local_docs_rag_agent.rag import ingest, manifest
 
     ingest.validate_storage_target(config)
     manifest_path = manifest.canonical_path(config.ingest_manifest_path)
-    manifest_resource = _local_resource("manifest", manifest_path)
+    manifest_resource = _local_resource(manifest_path)
+    local_index_path: pathlib.Path | None = None
     if config.vector_backend == "local":
         index_path = config.index_path.resolve()
+        local_index_path = index_path
         if _paths_alias(index_path, manifest_path):
             raise exceptions.ConfigurationError(
                 "INDEX_PATH and INGEST_MANIFEST_PATH must identify different "
@@ -137,11 +155,18 @@ def _lock_resources(
                     "the ingest manifest, then retry."
                 ),
             )
-        storage_resource = _local_resource("local-store", index_path)
-    else:
-        storage_key = _resource_key(
-            "remote-store", ingest.storage_identity(config)
+        bound_config = config.with_overrides(
+            index_path=index_path,
+            ingest_manifest_path=manifest_path,
         )
+        storage_identity = ingest._bound_local_storage_identity(index_path)
+        storage_resource = _local_resource(index_path)
+    else:
+        bound_config = config.with_overrides(
+            ingest_manifest_path=manifest_path,
+        )
+        storage_identity = ingest.storage_identity(bound_config)
+        storage_key = _resource_key("remote-store", storage_identity)
         storage_resource = _LockResource(
             key=storage_key,
             path=_REMOTE_LOCK_ROOT / f"{storage_key}.lock",
@@ -150,7 +175,12 @@ def _lock_resources(
         tuple(
             sorted((manifest_resource, storage_resource), key=lambda x: x.key)
         ),
-        manifest_path,
+        _BoundIndexTargets(
+            config=bound_config,
+            manifest_path=manifest_path,
+            storage_identity=storage_identity,
+            local_index_path=local_index_path,
+        ),
     )
 
 
@@ -163,11 +193,11 @@ def _paths_alias(first: pathlib.Path, second: pathlib.Path) -> bool:
         return False
 
 
-def _local_resource(kind: str, target: pathlib.Path) -> _LockResource:
-    key = _resource_key(kind, str(target))
+def _local_resource(target: pathlib.Path) -> _LockResource:
+    key = _resource_key("local-target", str(target))
     return _LockResource(
         key=key,
-        path=target.parent / f".local-docs-rag-agent-{kind}-{key}.lock",
+        path=target.parent / f".local-docs-rag-agent-target-{key}.lock",
     )
 
 

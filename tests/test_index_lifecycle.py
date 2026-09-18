@@ -235,6 +235,11 @@ def _install_store(
         "build_store",
         lambda config, embedding_provider=None: store,
     )
+    monkeypatch.setattr(
+        store_factory,
+        "_build_bound_store",
+        lambda targets, embedding_provider=None: store,
+    )
 
 
 def _guard_process(
@@ -441,6 +446,61 @@ def test_index_guard_serializes_partial_overlap_between_threads(
     assert errors == []
 
 
+@pytest.mark.parametrize("alias_kind", ["direct", "symlinks"])
+def test_index_guard_serializes_cross_role_target_between_threads(
+    tmp_path: pathlib.Path,
+    alias_kind: str,
+) -> None:
+    shared_target = tmp_path / "shared-state.json"
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    first_root.mkdir()
+    second_root.mkdir()
+    first_index = shared_target
+    second_manifest = shared_target
+    if alias_kind == "symlinks":
+        first_index = first_root / "shared-index-link.jsonl"
+        second_manifest = second_root / "shared-manifest-link.json"
+        first_index.symlink_to(shared_target)
+        second_manifest.symlink_to(shared_target)
+    first = _local_config(first_root).with_overrides(index_path=first_index)
+    second = _local_config(second_root).with_overrides(
+        ingest_manifest_path=second_manifest
+    )
+    holder_entered = threading.Event()
+    release_holder = threading.Event()
+    contender_entered = threading.Event()
+    errors: list[BaseException] = []
+
+    def hold() -> None:
+        try:
+            with rag.index_guard(first):
+                holder_entered.set()
+                assert release_holder.wait(timeout=5.0)
+        except BaseException as exc:  # pragma: no cover - assertion reports it
+            errors.append(exc)
+
+    holder = threading.Thread(target=hold)
+    contender = threading.Thread(
+        target=_enter_guard_from_thread,
+        args=(second, contender_entered, errors),
+    )
+    holder.start()
+    try:
+        assert holder_entered.wait(timeout=5.0) is True
+        contender.start()
+        assert contender_entered.wait(timeout=0.3) is False
+        release_holder.set()
+        assert contender_entered.wait(timeout=5.0) is True
+    finally:
+        release_holder.set()
+        holder.join(timeout=5.0)
+        contender.join(timeout=5.0)
+    assert not holder.is_alive()
+    assert not contender.is_alive()
+    assert errors == []
+
+
 @pytest.mark.parametrize("shared_resource", ["manifest", "store"])
 def test_index_guard_serializes_partial_overlap_between_spawned_processes(
     tmp_path: pathlib.Path,
@@ -503,6 +563,81 @@ def test_index_guard_serializes_partial_overlap_between_spawned_processes(
         release_first.set()
         release_second.set()
         begin_second.set()
+        if holder.is_alive():
+            holder.terminate()
+        if contender.pid is not None and contender.is_alive():
+            contender.terminate()
+        holder.join(timeout=5.0)
+        if contender.pid is not None:
+            contender.join(timeout=5.0)
+
+
+@pytest.mark.parametrize("alias_kind", ["direct", "symlinks"])
+def test_index_guard_serializes_cross_role_target_between_spawned_processes(
+    tmp_path: pathlib.Path,
+    alias_kind: str,
+) -> None:
+    shared_target = tmp_path / "shared-state.json"
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    first_root.mkdir()
+    second_root.mkdir()
+    first_index = shared_target
+    second_manifest = shared_target
+    if alias_kind == "symlinks":
+        first_index = first_root / "shared-index-link.jsonl"
+        second_manifest = second_root / "shared-manifest-link.json"
+        first_index.symlink_to(shared_target)
+        second_manifest.symlink_to(shared_target)
+    first = _local_config(first_root).with_overrides(index_path=first_index)
+    second = _local_config(second_root).with_overrides(
+        ingest_manifest_path=second_manifest
+    )
+    context = multiprocessing.get_context("spawn")
+    holder_entered = context.Event()
+    release_holder = context.Event()
+    contender_entered = context.Event()
+    release_contender = context.Event()
+    contender_ready = context.Event()
+    begin_contender = context.Event()
+    holder = context.Process(
+        target=_guard_process,
+        args=(
+            str(first.index_path),
+            str(first.ingest_manifest_path),
+            holder_entered,
+            release_holder,
+        ),
+    )
+    contender = context.Process(
+        target=_guard_process,
+        args=(
+            str(second.index_path),
+            str(second.ingest_manifest_path),
+            contender_entered,
+            release_contender,
+            contender_ready,
+            begin_contender,
+        ),
+    )
+    holder.start()
+    try:
+        assert holder_entered.wait(timeout=5.0) is True
+        contender.start()
+        assert contender_ready.wait(timeout=5.0) is True
+        begin_contender.set()
+        assert contender_entered.wait(timeout=0.3) is False
+        release_holder.set()
+        assert contender_entered.wait(timeout=5.0) is True
+        release_contender.set()
+        holder.join(timeout=5.0)
+        contender.join(timeout=5.0)
+        assert holder.exitcode == 0
+        assert contender.exitcode == 0
+    finally:
+        release_holder.set()
+        release_contender.set()
+        begin_contender.set()
         if holder.is_alive():
             holder.terminate()
         if contender.pid is not None and contender.is_alive():
@@ -985,10 +1120,11 @@ def test_depth_release_interruption_restores_exact_state(
     )
     index_lock = importlib.import_module("local_docs_rag_agent.rag.index_lock")
     resources, _ = index_lock._lock_resources(config)
+    index_key = index_lock._resource_key(
+        "local-target", str(config.index_path.resolve())
+    )
     target = next(
-        resource.key
-        for resource in resources
-        if "local-store" in resource.path.name
+        resource.key for resource in resources if resource.key == index_key
     )
     interruption = KeyboardInterrupt(f"{phase} logical depth restoration")
 
@@ -1051,10 +1187,11 @@ def test_unresolved_depth_restore_retains_physical_ownership_until_retry(
     )
     index_lock = importlib.import_module("local_docs_rag_agent.rag.index_lock")
     resources, _ = index_lock._lock_resources(config)
+    index_key = index_lock._resource_key(
+        "local-target", str(config.index_path.resolve())
+    )
     target = next(
-        resource
-        for resource in resources
-        if "local-store" in resource.path.name
+        resource for resource in resources if resource.key == index_key
     )
     restore_error = KeyboardInterrupt("logical depth restore interrupted")
     body_error = SystemExit("active lifecycle interruption")
@@ -1317,10 +1454,11 @@ def test_unresolved_thread_release_retains_state_until_outer_retry(
     )
     index_lock = importlib.import_module("local_docs_rag_agent.rag.index_lock")
     resources, _ = index_lock._lock_resources(config)
+    index_key = index_lock._resource_key(
+        "local-target", str(config.index_path.resolve())
+    )
     target = next(
-        resource
-        for resource in resources
-        if "local-store" in resource.path.name
+        resource for resource in resources if resource.key == index_key
     )
     primary = RuntimeError("thread release failed before unlock")
     fallback = KeyboardInterrupt("thread release fallback interrupted")
@@ -1929,7 +2067,7 @@ def test_frame_publication_interruption_is_transactional(
 ) -> None:
     config = _local_config(tmp_path)
     index_lock = importlib.import_module("local_docs_rag_agent.rag.index_lock")
-    guard_body = index_lock.index_guard.__wrapped__
+    guard_body = index_lock._bound_index_guard.__wrapped__
     source_lines, first_line = inspect.getsourcelines(guard_body)
     append_offset = next(
         offset
@@ -2053,11 +2191,17 @@ def test_monotonic_disjoint_nested_guards_remain_allowed(
 
     def resources_for(
         config: app_config.AppConfig,
-    ) -> tuple[tuple[Any, ...], pathlib.Path]:
+    ) -> tuple[tuple[Any, ...], Any]:
+        targets = index_lock._BoundIndexTargets(
+            config=config,
+            manifest_path=config.ingest_manifest_path,
+            storage_identity="test-identity",
+            local_index_path=config.index_path,
+        )
         if config is outer:
-            return outer_resources, config.ingest_manifest_path
+            return outer_resources, targets
         assert config is inner
-        return inner_resources, config.ingest_manifest_path
+        return inner_resources, targets
 
     monkeypatch.setattr(index_lock, "_lock_resources", resources_for)
 
@@ -2085,11 +2229,17 @@ def test_nested_subset_of_held_resources_remains_allowed(
 
     def resources_for(
         config: app_config.AppConfig,
-    ) -> tuple[tuple[Any, ...], pathlib.Path]:
+    ) -> tuple[tuple[Any, ...], Any]:
+        targets = index_lock._BoundIndexTargets(
+            config=config,
+            manifest_path=config.ingest_manifest_path,
+            storage_identity="test-identity",
+            local_index_path=config.index_path,
+        )
         if config is outer:
-            return outer_resources, config.ingest_manifest_path
+            return outer_resources, targets
         assert config is inner
-        return inner_resources, config.ingest_manifest_path
+        return inner_resources, targets
 
     monkeypatch.setattr(index_lock, "_lock_resources", resources_for)
 
@@ -2120,11 +2270,17 @@ def test_reverse_order_disjoint_nested_guard_fails_before_retention(
 
     def resources_for(
         config: app_config.AppConfig,
-    ) -> tuple[tuple[Any, ...], pathlib.Path]:
+    ) -> tuple[tuple[Any, ...], Any]:
+        targets = index_lock._BoundIndexTargets(
+            config=config,
+            manifest_path=config.ingest_manifest_path,
+            storage_identity="test-identity",
+            local_index_path=config.index_path,
+        )
         if config is outer:
-            return outer_resources, config.ingest_manifest_path
+            return outer_resources, targets
         assert config is inner
-        return inner_resources, config.ingest_manifest_path
+        return inner_resources, targets
 
     monkeypatch.setattr(index_lock, "_lock_resources", resources_for)
 

@@ -75,9 +75,9 @@ def retrieve(
     """
     limit = config.top_k if top_k is None else top_k
     reranker = build_reranker(config)
-    with index_lock.index_guard(config):
-        ingest.ensure_index(config)
-        store = store_factory.build_store(config)
+    with index_lock._bound_index_guard(config) as targets:
+        ingest._ensure_index_locked(targets)
+        store = store_factory._build_bound_store(targets)
         candidates = store.search(
             query=query, top_k=reranker.candidate_depth(limit)
         )

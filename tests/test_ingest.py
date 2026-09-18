@@ -19,6 +19,7 @@ from local_docs_rag_agent.rag import (
     index_lock,
     ingest,
     manifest,
+    pipeline,
     qdrant_store,
     store_factory,
 )
@@ -102,6 +103,34 @@ class FakeQdrantStore:
         self.replaced_source_paths = replaced_source_paths or []
 
 
+def _generated_qdrant_request_target(configured_url: str) -> str:
+    client = qdrant_client.QdrantClient(
+        url=configured_url,
+        check_compatibility=False,
+    )
+    try:
+        remote_client: Any = client._client
+        api_client: Any = remote_client.openapi_client.client
+        captured: list[str] = []
+
+        def capture_send(request: Any, type_: Any) -> Any:
+            del type_
+            captured.append(str(request.url))
+            return request
+
+        api_client.send = capture_send
+        api_client.request(
+            type_=object,
+            method="GET",
+            url="/collections/{collection_name}/exists",
+            path_params={"collection_name": "identity-probe"},
+        )
+        assert len(captured) == 1
+        return captured[0]
+    finally:
+        client.close()
+
+
 def _qdrant_config(
     tmp_path: pathlib.Path, docs_dir: pathlib.Path, manifest_path: pathlib.Path
 ) -> app_config.AppConfig:
@@ -138,6 +167,11 @@ def _install_fakes(
         "build_store",
         lambda config, embedding_provider=None: store,
     )
+    monkeypatch.setattr(
+        store_factory,
+        "_build_bound_store",
+        lambda targets, embedding_provider=None: store,
+    )
 
 
 def _install_incremental_fake(
@@ -155,6 +189,11 @@ def _install_incremental_fake(
         store_factory,
         "build_store",
         lambda config, embedding_provider=None: store,
+    )
+    monkeypatch.setattr(
+        store_factory,
+        "_build_bound_store",
+        lambda targets, embedding_provider=None: store,
     )
 
 
@@ -618,6 +657,54 @@ def test_local_index_dangling_symlink_survives_ingest_and_ensure(
     ] == ["Evidence"]
 
 
+def test_retrieve_keeps_index_target_bound_when_symlink_is_retargeted(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "sample.md").write_text("Bound evidence", encoding="utf-8")
+    original_target = tmp_path / "original" / "chunks.jsonl"
+    replacement_target = tmp_path / "replacement" / "chunks.jsonl"
+    diversion_target = tmp_path / "diversion" / "chunks.jsonl"
+    index_link = tmp_path / "chunks-link.jsonl"
+    index_link.symlink_to(original_target)
+    config = _local_incremental_config(tmp_path, docs).with_overrides(
+        index_path=index_link,
+    )
+    original_acquire = index_lock._acquire_resource
+    retargeted = False
+
+    def acquire_then_retarget(frame: Any, deadline: float) -> None:
+        nonlocal retargeted
+        original_acquire(frame, deadline)
+        if not retargeted:
+            original_target.parent.mkdir(exist_ok=True)
+            original_target.symlink_to(diversion_target)
+            index_link.unlink()
+            index_link.symlink_to(replacement_target)
+            retargeted = True
+
+    monkeypatch.setattr(index_lock, "_acquire_resource", acquire_then_retarget)
+    monkeypatch.setattr(
+        provider_factory,
+        "build_embedding_provider",
+        lambda config: FakeEmbeddingProvider(),
+    )
+
+    outcome = pipeline.retrieve(config, "Bound evidence", top_k=1)
+
+    assert retargeted is True
+    assert original_target.exists()
+    assert not original_target.is_symlink()
+    assert not replacement_target.exists()
+    assert not diversion_target.exists()
+    assert [hit.chunk.text for hit in outcome.hits] == ["Bound evidence"]
+    stored = manifest.IngestManifest.load(config.ingest_manifest_path)
+    bound_config = config.with_overrides(index_path=original_target)
+    assert stored.storage_identity == ingest.storage_identity(bound_config)
+
+
 @pytest.mark.parametrize("target_exists", [False, True])
 def test_manifest_final_symlink_survives_ingest_and_ensure(
     tmp_path: pathlib.Path,
@@ -774,6 +861,56 @@ def test_qdrant_storage_identity_canonicalizes_endpoint_credentials(
     )
 
     assert ingest.storage_identity(first) == ingest.storage_identity(second)
+
+
+@pytest.mark.parametrize(
+    ("first_path", "second_path"),
+    [
+        ("/a/./b", "/a/b"),
+        ("/a/../b", "/b"),
+        ("/a//b", "/a/b"),
+        ("/%7euser", "/%7Euser"),
+    ],
+)
+def test_qdrant_identity_matches_effective_generated_request_target(
+    tmp_path: pathlib.Path,
+    first_path: str,
+    second_path: str,
+) -> None:
+    first_url = f"https://example.com{first_path}"
+    second_url = f"https://example.com{second_path}"
+    config = _qdrant_config(
+        tmp_path,
+        tmp_path / "docs",
+        tmp_path / "manifest.json",
+    )
+    first = config.with_overrides(qdrant_url=first_url)
+    second = config.with_overrides(qdrant_url=second_url)
+
+    assert _generated_qdrant_request_target(
+        first_url
+    ) == _generated_qdrant_request_target(second_url)
+    assert ingest.storage_identity(first) == ingest.storage_identity(second)
+
+
+def test_qdrant_validation_rejects_path_that_changes_request_authority(
+    tmp_path: pathlib.Path,
+) -> None:
+    configured_url = "https://example.com//audit-host"
+    config = _qdrant_config(
+        tmp_path,
+        tmp_path / "docs",
+        tmp_path / "manifest.json",
+    ).with_overrides(qdrant_url=configured_url)
+
+    assert _generated_qdrant_request_target(configured_url).startswith(
+        "https://audit-host/"
+    )
+    with pytest.raises(
+        exceptions.ConfigurationError,
+        match="valid HTTP\\(S\\) endpoint",
+    ):
+        rag.validate_storage_target(config)
 
 
 def test_qdrant_storage_identity_treats_omitted_port_as_6333(

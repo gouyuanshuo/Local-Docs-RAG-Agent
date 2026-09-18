@@ -9,12 +9,18 @@ branch here; generic ingest and readiness code does not need its name or type.
 
 from __future__ import annotations
 
+import pathlib
+from typing import TYPE_CHECKING
+
 from local_docs_rag_agent import config as app_config
 from local_docs_rag_agent.core import exceptions
 from local_docs_rag_agent.providers import base as provider_base
 from local_docs_rag_agent.providers import factory as provider_factory
 from local_docs_rag_agent.rag import base as rag_base
 from local_docs_rag_agent.rag import local_store, qdrant_store, retrieval
+
+if TYPE_CHECKING:
+    from local_docs_rag_agent.rag import index_lock
 
 
 def build_store(
@@ -38,6 +44,31 @@ def build_store(
         URL.
       VectorStoreError: If the Qdrant client is not installed.
     """
+    return _build_store(config, embedding_provider=embedding_provider)
+
+
+def _build_bound_store(
+    targets: index_lock._BoundIndexTargets,
+    embedding_provider: provider_base.EmbeddingProvider | None = None,
+) -> rag_base.ChunkStore:
+    if targets.local_index_path is None:
+        return build_store(
+            targets.config,
+            embedding_provider=embedding_provider,
+        )
+    return _build_store(
+        targets.config,
+        embedding_provider=embedding_provider,
+        bound_local_index_path=targets.local_index_path,
+    )
+
+
+def _build_store(
+    config: app_config.AppConfig,
+    embedding_provider: provider_base.EmbeddingProvider | None = None,
+    *,
+    bound_local_index_path: pathlib.Path | None = None,
+) -> rag_base.ChunkStore:
     provider = embedding_provider or provider_factory.build_embedding_provider(
         config
     )
@@ -57,9 +88,14 @@ def build_store(
             settings=settings,
         )
     return local_store.LocalJsonlChunkStore(
-        config.index_path,
+        (
+            config.index_path
+            if bound_local_index_path is None
+            else bound_local_index_path
+        ),
         embedding_provider=provider,
         settings=settings,
+        _index_path_is_bound=bound_local_index_path is not None,
     )
 
 

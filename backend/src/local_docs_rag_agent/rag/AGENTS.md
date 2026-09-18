@@ -44,10 +44,13 @@ index_lock -> config, core (and lazy storage identity lookup)
   must restore even when checksums match.
 - Every store save follows durable `repair_required` publication. A clean
   manifest is published only after the store mutation succeeds.
-- Ingest and retrieval readiness/query lock both the canonical manifest and
-  storage target in global order under one deadline. Sharing either resource
-  serializes; configurations sharing neither remain concurrent. Reranking runs
-  after both resources are released.
+- Ingest and retrieval readiness/query bind and lock both the canonical
+  manifest and storage target in global order under one deadline. Sharing
+  either resolved path serializes even when one configuration calls it a
+  manifest and another calls it an index. Configured final-component symlink
+  aliases converge; distinct hardlink names are not a supported cross-config
+  coordination mechanism. Configurations sharing neither target remain
+  concurrent. Reranking runs after both resources are released.
 - After `fork`, child lock/ownership registries are reset and inherited lock
   descriptors are closed without unlocking the parent's guard. Contention on
   one target does not serialize an unrelated target.
@@ -70,9 +73,10 @@ index_lock -> config, core (and lazy storage identity lookup)
   before retention, and disjoint nested sets must preserve global resource
   order; callers should normally exit one configuration's guard before
   entering another.
-- Manifest and local-store lock artifacts live beside their resolved files.
-  Qdrant store artifacts live in the per-user cache and contain only a hashed,
-  credential-free identity. Persistent lock files are harmless.
+- Manifest and local-store lock artifacts use one role-neutral identity and
+  artifact beside each resolved file. Qdrant store artifacts live in the
+  per-user cache and contain only a hashed, credential-free identity.
+  Persistent lock files are harmless.
 - Host-local guards do not coordinate Qdrant lifecycle work across hosts;
   multi-host deployments require external coordination.
 - The versioned ingest manifest binds source ownership to a hashed storage
@@ -84,8 +88,11 @@ index_lock -> config, core (and lazy storage identity lookup)
 - An initialization `BaseException` discards its claim and attempts exact
   cleanup. Cleanup failure never replaces the original; it adds an exact-name
   note and structured `qdrant_orphaned_collection` marker.
-- Qdrant storage identity uses effective REST port `6333` when the URL omits a
-  port. Explicit ports, including `80` and `443`, remain distinct targets.
+- Qdrant storage identity follows the locked client's generated REST request
+  base: dot segments, repeated path separators, and percent-escape case are
+  normalized, and a leading double-slash path that would replace the request
+  authority is invalid. It uses effective REST port `6333` when the URL omits
+  a port. Explicit ports, including `80` and `443`, remain distinct targets.
 - Qdrant endpoint parsing accepts `http`/`https` endpoints whose host is
   localhost, a valid single- or multi-label DNS name, an IDNA-normalized name,
   IPv4, or bracketed IPv6. Labels are 1–63 characters, the DNS name is at most
@@ -101,8 +108,10 @@ index_lock -> config, core (and lazy storage identity lookup)
   normalization with operation `client_init`.
 - Explicitly marked internal Qdrant validation diagnostics bypass raw-client
   normalization unchanged; arbitrary client/domain exceptions do not.
-- The local store resolves its bound index path once before I/O, matching the
-  identity path and preserving a final-component symlink during atomic writes.
+- Guard planning resolves the configured local index once, records its identity,
+  and carries that exact bound path through readiness, ingest, store
+  construction, and query I/O. The store never re-resolves it, preserving the
+  guarded target if the configured final-component symlink is retargeted.
 - The manifest target is likewise resolved before locking and I/O, preserving
   existing or dangling final-component symlinks. A local index and manifest
   may never resolve to the same file.

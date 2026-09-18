@@ -28,6 +28,8 @@ class LocalJsonlChunkStore:
         index_path: pathlib.Path,
         embedding_provider: provider_base.EmbeddingProvider,
         settings: retrieval.RetrievalSettings | None = None,
+        *,
+        _index_path_is_bound: bool = False,
     ) -> None:
         """Bind the store to an index file, a provider, and a strategy.
 
@@ -36,8 +38,12 @@ class LocalJsonlChunkStore:
             so a final-component symlink remains intact across atomic writes.
           embedding_provider: Used to embed the query at search time.
           settings: Ranking knobs. Defaults to the project defaults.
+          _index_path_is_bound: Internal marker for a path already resolved by
+            the lifecycle guard.
         """
-        self._index_path = index_path.resolve()
+        self._index_path = (
+            index_path if _index_path_is_bound else index_path.resolve()
+        )
         self._embedding_provider = embedding_provider
         self._settings = settings or retrieval.RetrievalSettings()
 

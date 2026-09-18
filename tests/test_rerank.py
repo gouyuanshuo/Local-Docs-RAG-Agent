@@ -266,9 +266,13 @@ def test_pipeline_retrieves_the_reranker_window_and_returns_top_k(
 ) -> None:
     store = FakeStore(_hits())
     reranker, _ = _reranker(reply="[3, 1]", candidate_k=20)
-    monkeypatch.setattr(store_factory, "build_store", lambda config: store)
+    monkeypatch.setattr(
+        store_factory,
+        "_build_bound_store",
+        lambda targets: store,
+    )
     monkeypatch.setattr(pipeline, "build_reranker", lambda config: reranker)
-    monkeypatch.setattr(ingest, "ensure_index", lambda config: None)
+    monkeypatch.setattr(ingest, "_ensure_index_locked", lambda targets: None)
 
     outcome = pipeline.retrieve(
         app_config.AppConfig.from_env().with_overrides(top_k=2), "attention"
@@ -286,9 +290,13 @@ def test_pipeline_reports_both_retrieval_stages(
     # have to carry both statuses or a degraded rerank would pass unnoticed.
     store = FakeStore(_hits())
     reranker, _ = _reranker(reply="nonsense")
-    monkeypatch.setattr(store_factory, "build_store", lambda config: store)
+    monkeypatch.setattr(
+        store_factory,
+        "_build_bound_store",
+        lambda targets: store,
+    )
     monkeypatch.setattr(pipeline, "build_reranker", lambda config: reranker)
-    monkeypatch.setattr(ingest, "ensure_index", lambda config: None)
+    monkeypatch.setattr(ingest, "_ensure_index_locked", lambda targets: None)
 
     outcome = pipeline.retrieve(app_config.AppConfig.from_env(), "attention")
 
@@ -300,8 +308,12 @@ def test_pipeline_holds_the_reranker_off_the_query_when_it_is_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     store = FakeStore(_hits())
-    monkeypatch.setattr(store_factory, "build_store", lambda config: store)
-    monkeypatch.setattr(ingest, "ensure_index", lambda config: None)
+    monkeypatch.setattr(
+        store_factory,
+        "_build_bound_store",
+        lambda targets: store,
+    )
+    monkeypatch.setattr(ingest, "_ensure_index_locked", lambda targets: None)
 
     outcome = pipeline.retrieve(
         app_config.AppConfig.from_env().with_overrides(top_k=2), "attention"

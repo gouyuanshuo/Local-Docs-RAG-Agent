@@ -26,6 +26,7 @@ import hashlib
 import ipaddress
 import json
 import pathlib
+import re
 from urllib import parse
 
 import idna
@@ -72,14 +73,15 @@ def ingest_documents(
         embeddings receives fallback vectors.
       VectorStoreError: If the store rejects the write.
     """
-    with index_lock.index_guard(config) as manifest_path:
-        return _ingest_documents_locked(config, manifest_path)
+    with index_lock._bound_index_guard(config) as targets:
+        return _ingest_documents_locked(targets)
 
 
 def _ingest_documents_locked(
-    config: app_config.AppConfig,
-    manifest_path: pathlib.Path,
+    targets: index_lock._BoundIndexTargets,
 ) -> list[models.DocumentChunk]:
+    config = targets.config
+    manifest_path = targets.manifest_path
     source_texts = discovery.read_source_texts(
         config.docs_dir, config.docs_exclude_patterns
     )
@@ -88,15 +90,15 @@ def _ingest_documents_locked(
         for source_path, text in source_texts.items()
     }
     previous_manifest = manifest.IngestManifest.load(manifest_path)
-    desired_storage_identity = storage_identity(config)
+    desired_storage_identity = targets.storage_identity
     legacy_rebuild = _validate_manifest_storage(
         config,
         previous_manifest,
         desired_storage_identity,
     )
     embedding_provider = provider_factory.build_embedding_provider(config)
-    store = store_factory.build_store(
-        config, embedding_provider=embedding_provider
+    store = store_factory._build_bound_store(
+        targets, embedding_provider=embedding_provider
     )
     desired_fingerprint = index_fingerprint(
         config, embedding_mode=_expected_embedding_mode(config)
@@ -172,16 +174,17 @@ def ensure_index(config: app_config.AppConfig) -> None:
       ConfigurationError: If the storage target is invalid, differs from the
         manifest, or a legacy Qdrant manifest needs an ownership decision.
     """
-    with index_lock.index_guard(config) as manifest_path:
-        _ensure_index_locked(config, manifest_path)
+    with index_lock._bound_index_guard(config) as targets:
+        _ensure_index_locked(targets)
 
 
 def _ensure_index_locked(
-    config: app_config.AppConfig,
-    manifest_path: pathlib.Path,
+    targets: index_lock._BoundIndexTargets,
 ) -> None:
+    config = targets.config
+    manifest_path = targets.manifest_path
     stored = manifest.IngestManifest.load(manifest_path)
-    desired_storage_identity = storage_identity(config)
+    desired_storage_identity = targets.storage_identity
     legacy_rebuild = _validate_manifest_storage(
         config,
         stored,
@@ -196,9 +199,9 @@ def _ensure_index_locked(
         )
     )
     needs_restore = stored.repair_required or bool(stored.needs_reindex)
-    store = store_factory.build_store(config)
+    store = store_factory._build_bound_store(targets)
     if configuration_changed or needs_restore or not store.exists():
-        ingest_documents(config)
+        _ingest_documents_locked(targets)
 
 
 def source_checksum(text: str) -> str:
@@ -244,7 +247,15 @@ def storage_identity(config: app_config.AppConfig) -> str:
       ConfigurationError: If target semantics are invalid, including an
         unsupported backend or a Qdrant URL that is missing or malformed.
     """
-    payload = _storage_target_payload(config)
+    return _storage_identity_from_payload(_storage_target_payload(config))
+
+
+def _bound_local_storage_identity(index_path: pathlib.Path) -> str:
+    payload = _local_storage_target_payload(index_path)
+    return _storage_identity_from_payload(payload)
+
+
+def _storage_identity_from_payload(payload: dict[str, str]) -> str:
     serialized = json.dumps(payload, ensure_ascii=True, sort_keys=True)
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
@@ -283,11 +294,7 @@ def _storage_target_payload(
 ) -> dict[str, str]:
     validate_storage_target(config)
     if config.vector_backend == "local":
-        index_path = config.index_path.resolve()
-        return {
-            "vector_backend": "local",
-            "index_path": str(index_path),
-        }
+        return _local_storage_target_payload(config.index_path.resolve())
     if config.vector_backend == "qdrant":
         if not config.qdrant_url:
             raise exceptions.ConfigurationError(
@@ -317,14 +324,42 @@ def _canonical_qdrant_url(url: str) -> str:
         if scheme not in {"http", "https"} or hostname is None or port == 0:
             raise ValueError
         normalized_host = _canonical_qdrant_host(hostname)
+        normalized_path = _canonical_qdrant_path(parsed.path)
     except (TypeError, UnicodeError, ValueError):
         raise exceptions.ConfigurationError(
             "QDRANT_URL must be a valid HTTP(S) endpoint"
         ) from None
     effective_port = port if port is not None else 6333
     netloc = f"{normalized_host}:{effective_port}"
-    path = parsed.path.rstrip("/")
-    return parse.urlunsplit((scheme, netloc, path, "", ""))
+    return parse.urlunsplit((scheme, netloc, normalized_path, "", ""))
+
+
+def _canonical_qdrant_path(path: str) -> str:
+    if path.startswith("//"):
+        raise ValueError
+    joined = parse.urljoin("https://identity.invalid/", path)
+    normalized = parse.urlsplit(joined).path
+    normalized = re.sub(r"/{2,}", "/", normalized)
+    escapes = re.findall(r"%[0-9A-Fa-f]{2}", normalized)
+    normalized = re.sub(
+        r"%[0-9A-Fa-f]{2}",
+        lambda match: match.group(0).upper(),
+        normalized,
+    )
+    percent_is_encoded = len(escapes) == normalized.count("%")
+    safe = "/!$&'()*+,-.:;=@_~"
+    if percent_is_encoded:
+        safe += "%"
+    return parse.quote(normalized, safe=safe).rstrip("/")
+
+
+def _local_storage_target_payload(
+    index_path: pathlib.Path,
+) -> dict[str, str]:
+    return {
+        "vector_backend": "local",
+        "index_path": str(index_path),
+    }
 
 
 def _canonical_qdrant_host(hostname: str) -> str:
