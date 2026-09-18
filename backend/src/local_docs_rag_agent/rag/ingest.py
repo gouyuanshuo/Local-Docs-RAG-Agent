@@ -338,7 +338,11 @@ def _canonical_qdrant_host(hostname: str) -> str:
     ascii_hostname = (
         lowercase_hostname
         if lowercase_hostname.isascii()
-        else idna.encode(lowercase_hostname).decode("ascii")
+        else idna.encode(
+            lowercase_hostname,
+            strict=True,
+            std3_rules=True,
+        ).decode("ascii")
     )
     if not ascii_hostname or len(ascii_hostname) > 253:
         raise ValueError

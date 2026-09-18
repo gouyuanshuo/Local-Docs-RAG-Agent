@@ -281,15 +281,16 @@ effective REST port is `6333` when omitted; explicit ports such as `80` and
 `443` remain distinct storage targets. IPv6 literals use their compressed
 form. Hostnames may be localhost, valid single- or multi-label DNS names,
 IDNA2008-normalized international names, IPv4, or bracketed IPv6. Non-ASCII
-names use the direct core `idna` dependency's encoding, the same operation
-HTTPX/Qdrant uses; for example, `faß.example` becomes
+names use the direct core `idna` dependency with strict and STD3 rules, matching
+Qdrant's connection parser; for example, `faß.example` becomes
 `xn--fa-hia.example` and remains distinct from `fass.example`. DNS labels are
 1–63 ASCII letters/digits/hyphens after IDNA conversion, cannot begin or end
 with a hyphen, and the whole name is at most 253 characters. Empty labels,
 including a trailing-dot root label, whitespace/control characters, malformed
 numeric IP addresses, illegal label characters, context-invalid joiners,
-invalid IDNA code points, invalid ports, and port `0` are rejected. Malformed
-endpoint errors do not echo URL credentials.
+invalid IDNA code points, Unicode separator variants (`U+3002`, `U+FF0E`, and
+`U+FF61`), invalid ports, and port `0` are rejected. Malformed endpoint errors
+do not echo URL credentials.
 
 The local store resolves its configured index path once when it is built. Its
 reads, atomic writes, existence checks, and the manifest identity therefore

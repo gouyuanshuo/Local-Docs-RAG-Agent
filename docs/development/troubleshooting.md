@@ -196,16 +196,18 @@ and run `local-docs-rag ingest` to create a versioned, target-bound one.
 **`QDRANT_URL must be a valid HTTP(S) endpoint`.** Check the scheme, brackets
 around IPv6 literals, hostname, and port. The host may be localhost, a valid
 single- or multi-label DNS name, an international DNS name that converts under
-IDNA2008, IPv4, or bracketed IPv6. The direct `idna` dependency deliberately
-matches HTTPX/Qdrant: `faß.example` is `xn--fa-hia.example`, not
+strict IDNA2008/STD3 rules, IPv4, or bracketed IPv6. The direct `idna`
+dependency deliberately matches Qdrant's connection parser: `faß.example` is
+`xn--fa-hia.example`, not
 `fass.example`. DNS labels cannot be empty (including a trailing-dot root
 label), over 63 characters, begin/end with a hyphen, or contain characters
 other than ASCII letters, digits, and hyphens after IDNA conversion; the whole
 DNS name is at most 253 characters. Whitespace/control characters, invalid
-IDNA code points or joiner context, and malformed numeric IP addresses are
-invalid. Port `0` is invalid; omitting the port selects Qdrant's REST port
-`6333`. The diagnostic intentionally does not echo the URL, because URL user
-information or query parameters may contain credentials.
+IDNA code points or joiner context, Unicode separator variants (`。`, `．`,
+`｡`), and malformed numeric IP addresses are invalid. Port `0` is invalid;
+omitting the port selects Qdrant's REST port `6333`. The diagnostic
+intentionally does not echo the URL, because URL user information or query
+parameters may contain credentials.
 
 **Qdrant fails during client startup.** Constructor failures use the same
 credential-safe operation normalization as later requests and identify the

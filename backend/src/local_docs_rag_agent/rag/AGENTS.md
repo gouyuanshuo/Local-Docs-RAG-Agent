@@ -92,8 +92,9 @@ index_lock -> config, core (and lazy storage identity lookup)
   253 characters, whitespace/control and illegal label characters are invalid,
   IPv6 literals are compressed, and port `0` is invalid. Every invalid form
   reports the same credential-free configuration error. Non-ASCII names use
-  the direct `idna` dependency's IDNA2008 encoding, matching HTTPX/Qdrant;
-  trailing-dot hosts are rejected rather than collapsed with another target.
+  the direct `idna` dependency's strict IDNA2008/STD3 encoding, matching
+  Qdrant's connection parser; Unicode separator variants and trailing-dot hosts
+  are rejected rather than collapsed with another target.
 - Qdrant operation errors omit raw URLs and exception messages and suppress
   unsafe chaining while retaining operation, collection, exception class,
   reason code, and recovery hints. Client-construction failures use the same

@@ -1059,6 +1059,18 @@ def test_validate_storage_target_malformed_url_traceback_excludes_credentials(
             "private?key=query-secret"
         ),
         (
+            "http://validation-user:validation-password@bad\u3002host.invalid/"
+            "private?key=query-secret"
+        ),
+        (
+            "http://validation-user:validation-password@bad\uff0ehost.invalid/"
+            "private?key=query-secret"
+        ),
+        (
+            "http://validation-user:validation-password@bad\uff61host.invalid/"
+            "private?key=query-secret"
+        ),
+        (
             "http://validation-user:validation-password@bad..invalid/"
             "private?key=query-secret"
         ),

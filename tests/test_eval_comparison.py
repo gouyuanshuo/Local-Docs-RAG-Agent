@@ -212,6 +212,78 @@ def test_malformed_qdrant_target_fails_before_comparison_side_effects(
     assert not output_path.exists()
 
 
+@pytest.mark.parametrize("separator", ["\u3002", "\uff0e", "\uff61"])
+def test_idna_separator_fails_before_local_first_comparison_side_effects(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    separator: str,
+) -> None:
+    sentinel_user = "separator-user-sentinel"
+    sentinel_password = "separator-password-sentinel"
+    sentinel_path = "separator-path-sentinel"
+    sentinel_query = "separator-query-sentinel"
+    configured_url = (
+        f"http://{sentinel_user}:{sentinel_password}@"
+        f"bad{separator}host.invalid/{sentinel_path}?key={sentinel_query}"
+    )
+    config = _comparison_config(tmp_path).with_overrides(
+        qdrant_url=configured_url
+    )
+    output_path = tmp_path / "comparison-report.json"
+    validated: list[constants.VectorBackendName] = []
+    validate = rag.validate_storage_target
+
+    def record_validation(config: app_config.AppConfig) -> None:
+        validated.append(config.vector_backend)
+        validate(config)
+
+    def unexpected_side_effect(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise AssertionError("comparison side effect preceded target preflight")
+
+    monkeypatch.setattr(rag, "validate_storage_target", record_validation)
+    monkeypatch.setattr(harness, "load_eval_cases", unexpected_side_effect)
+    monkeypatch.setattr(rag, "read_source_texts", unexpected_side_effect)
+    monkeypatch.setattr(rag, "ingest_documents", unexpected_side_effect)
+    monkeypatch.setattr(
+        rag,
+        "initialize_owned_qdrant_index",
+        unexpected_side_effect,
+    )
+    monkeypatch.setattr(harness, "run_eval", unexpected_side_effect)
+    monkeypatch.setattr(file_io, "atomic_write_text", unexpected_side_effect)
+
+    with pytest.raises(exceptions.ConfigurationError) as exc_info:
+        comparison.run_eval_matrix(
+            config,
+            {
+                **_single_backend_request("local"),
+                "vector_backends": ["local", "qdrant"],
+            },
+            output_path=output_path,
+        )
+
+    rendered = "\n".join(
+        (
+            str(exc_info.value),
+            repr(exc_info.value),
+            "".join(traceback.format_exception(exc_info.value)),
+        )
+    )
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__suppress_context__ is True
+    for secret in (
+        sentinel_user,
+        sentinel_password,
+        sentinel_path,
+        sentinel_query,
+        configured_url,
+    ):
+        assert secret not in rendered
+    assert validated == ["local", "qdrant"]
+    assert not output_path.exists()
+
+
 def test_missing_qdrant_url_stays_a_planned_skipped_cell(
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
