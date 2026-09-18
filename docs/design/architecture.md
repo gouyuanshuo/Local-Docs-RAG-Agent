@@ -204,7 +204,11 @@ acquisition, protected body, and release phases. A protected-body exception
 receives one normal release only; an ambiguous release keeps its exact
 acquisition obligation for the surrounding cleanup retry, before any new
 recursion may be acquired. The cleanup scope starts before mutex acquisition
-and covers depth publication through the first protected-body yield.
+and covers depth publication through the first protected-body yield. Its exit
+also treats depth restoration, cleanup-phase publication, and physical release
+as one idempotent transition: an interruption anywhere in that transition
+causes one whole-transition retry while the original acquire/body exception
+remains authoritative.
 
 Reentry of the same resource set is supported. A nested guard that partially
 overlaps the current thread's resources is rejected before retaining anything,

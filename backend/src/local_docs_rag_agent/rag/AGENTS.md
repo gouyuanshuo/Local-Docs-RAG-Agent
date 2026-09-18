@@ -63,7 +63,9 @@ index_lock -> config, core (and lazy storage identity lookup)
   depth restoration, then retains the token until file- and thread-lock
   cleanup obligations are conclusively discharged. Internal registry mutexes
   likewise retain per-acquisition cleanup obligations across a failed
-  fallback; a protected-body exception never triggers an extra mutex release.
+  fallback. The complete depth/phase/physical cleanup transition retries once
+  after an interruption; a protected-body exception remains authoritative and
+  never triggers an unrelated extra mutex release.
 - Nested guards may reenter the same resource set. Partial overlap is rejected
   before retention, and disjoint nested sets must preserve global resource
   order; callers should normally exit one configuration's guard before

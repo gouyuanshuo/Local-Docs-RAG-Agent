@@ -1676,6 +1676,199 @@ def test_internal_mutex_obligation_publication_is_transactional() -> None:
 
 @pytest.mark.parametrize(
     "phase",
+    ["cleanup_entry", "before_depth_restore", "after_depth_restore"],
+)
+def test_internal_mutex_cleanup_transition_retries_whole_transition(
+    phase: str,
+) -> None:
+    index_lock = importlib.import_module("local_docs_rag_agent.rag.index_lock")
+    mutex = threading.RLock()
+    cleanup = index_lock._finish_mutex_cleanup
+    source_lines, first_line = inspect.getsourcelines(cleanup)
+    markers = {
+        "cleanup_entry": ("release_pending =",),
+        "before_depth_restore": ("_restore_mutex_depth(key, depth_before)",),
+        "after_depth_restore": ('obligation.phase = "cleanup"',),
+    }
+    offsets = [
+        offset
+        for offset, source_line in enumerate(source_lines)
+        if any(marker in source_line for marker in markers[phase])
+    ]
+    target_line = first_line + offsets[-1]
+    interruption = KeyboardInterrupt(f"{phase} mutex cleanup interruption")
+
+    def interrupt_cleanup(frame: Any, event: str, arg: Any) -> Any:
+        del arg
+        if (
+            frame.f_code is cleanup.__code__
+            and event == "line"
+            and frame.f_lineno == target_line
+        ):
+            sys.settrace(None)
+            raise interruption
+        return interrupt_cleanup
+
+    sys.settrace(interrupt_cleanup)
+    try:
+        with (
+            pytest.raises(KeyboardInterrupt) as exc_info,
+            index_lock._mutex_section(mutex),
+        ):
+            pass
+    finally:
+        sys.settrace(None)
+
+    assert exc_info.value is interruption
+    with index_lock._mutex_section(mutex):
+        pass
+
+    contender_acquired = threading.Event()
+    contender = threading.Thread(
+        target=_acquire_mutex_from_thread,
+        args=(mutex, contender_acquired),
+    )
+    contender.start()
+    try:
+        assert contender_acquired.wait(timeout=2.0) is True
+        contender.join(timeout=5.0)
+        assert not contender.is_alive()
+        assert index_lock._mutex_depths() == {}
+        assert index_lock._mutex_obligations() == []
+    finally:
+        with contextlib.suppress(RuntimeError):
+            mutex.release()
+        index_lock._THREAD_STATE.mutex_depths = {}
+        index_lock._THREAD_STATE.mutex_obligations = []
+
+
+@pytest.mark.parametrize("origin", ["acquire", "body"])
+def test_mutex_cleanup_interruption_preserves_active_primary(
+    origin: str,
+) -> None:
+    index_lock = importlib.import_module("local_docs_rag_agent.rag.index_lock")
+    inner = threading.RLock()
+    primary = SystemExit(f"{origin} primary")
+    cleanup_interruption = KeyboardInterrupt("cleanup transition interrupted")
+
+    class _AcquireInterruptingMutex:
+        armed = True
+
+        def acquire(self) -> bool:
+            acquired = inner.acquire()
+            if origin == "acquire" and self.armed:
+                self.armed = False
+                raise primary
+            return acquired
+
+        def release(self) -> None:
+            inner.release()
+
+    mutex = _AcquireInterruptingMutex()
+    cleanup = index_lock._finish_mutex_cleanup
+    source_lines, first_line = inspect.getsourcelines(cleanup)
+    target_line = next(
+        first_line + offset
+        for offset, source_line in enumerate(source_lines)
+        if "release_pending =" in source_line
+    )
+
+    def interrupt_cleanup(frame: Any, event: str, arg: Any) -> Any:
+        del arg
+        if (
+            frame.f_code is cleanup.__code__
+            and event == "line"
+            and frame.f_lineno == target_line
+        ):
+            sys.settrace(None)
+            raise cleanup_interruption
+        return interrupt_cleanup
+
+    sys.settrace(interrupt_cleanup)
+    try:
+        with (
+            pytest.raises(SystemExit) as exc_info,
+            index_lock._mutex_section(mutex),
+        ):
+            if origin == "body":
+                raise primary
+    finally:
+        sys.settrace(None)
+
+    assert exc_info.value is primary
+    contender_acquired = threading.Event()
+    contender = threading.Thread(
+        target=_acquire_mutex_from_thread,
+        args=(inner, contender_acquired),
+    )
+    contender.start()
+    assert contender_acquired.wait(timeout=2.0) is True
+    contender.join(timeout=5.0)
+    assert not contender.is_alive()
+    assert index_lock._mutex_depths() == {}
+    assert index_lock._mutex_obligations() == []
+
+
+def test_mutex_cleanup_compensation_has_no_interruptible_decision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    index_lock = importlib.import_module("local_docs_rag_agent.rag.index_lock")
+    inner = threading.RLock()
+    primary = RuntimeError("primary cleanup release failure")
+    decision_interruption = KeyboardInterrupt("cleanup decision interrupted")
+
+    class _CleanupFailingMutex:
+        release_calls = 0
+
+        def acquire(self) -> bool:
+            return inner.acquire()
+
+        def release(self) -> None:
+            self.release_calls += 1
+            if self.release_calls <= 2:
+                raise primary
+            inner.release()
+
+    mutex = _CleanupFailingMutex()
+    decision_calls = 0
+
+    def interrupt_cleanup_decision(*args: Any) -> bool:
+        nonlocal decision_calls
+        del args
+        decision_calls += 1
+        raise decision_interruption
+
+    monkeypatch.setattr(
+        index_lock,
+        "_mutex_cleanup_complete",
+        interrupt_cleanup_decision,
+        raising=False,
+    )
+
+    escaped: BaseException | None = None
+    try:
+        with index_lock._mutex_section(mutex):
+            pass
+    except BaseException as exc:
+        escaped = exc
+
+    assert escaped is primary
+    assert decision_calls == 0
+    contender_acquired = threading.Event()
+    contender = threading.Thread(
+        target=_acquire_mutex_from_thread,
+        args=(inner, contender_acquired),
+    )
+    contender.start()
+    assert contender_acquired.wait(timeout=2.0) is True
+    contender.join(timeout=5.0)
+    assert not contender.is_alive()
+    assert index_lock._mutex_depths() == {}
+    assert index_lock._mutex_obligations() == []
+
+
+@pytest.mark.parametrize(
+    "phase",
     ["before_state", "after_state", "after_token", "after_registry"],
 )
 def test_retention_interruption_is_transactional(

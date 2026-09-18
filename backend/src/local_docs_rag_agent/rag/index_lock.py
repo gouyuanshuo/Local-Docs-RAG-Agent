@@ -451,6 +451,8 @@ def _mutex_section(lock: Any) -> Iterator[None]:
     _drain_mutex_obligations(lock)
     obligation = _MutexObligation(lock=lock)
     body_error: BaseException | None = None
+    primary_error: BaseException | None = None
+    cleanup_error: BaseException | None = None
     try:
         _mutex_obligations().append(obligation)
         body_error = None
@@ -468,15 +470,39 @@ def _mutex_section(lock: Any) -> Iterator[None]:
         except BaseException as exc:
             body_error = exc
             raise
+    except BaseException as exc:
+        primary_error = exc
+        raise
     finally:
-        active_error = sys.exception()
-        _restore_mutex_depth(key, depth_before)
-        obligation.phase = "cleanup"
         try:
-            _release_mutex_obligation(obligation)
-        except BaseException:
-            if active_error is None and body_error is None:
-                raise
+            try:
+                _finish_mutex_cleanup(key, depth_before, obligation)
+            except BaseException as exc:
+                cleanup_error = exc
+        finally:
+            try:
+                _finish_mutex_cleanup(key, depth_before, obligation)
+            except BaseException as exc:
+                if cleanup_error is None:
+                    cleanup_error = exc
+        if (
+            primary_error is None
+            and body_error is None
+            and cleanup_error is not None
+        ):
+            raise cleanup_error
+
+
+def _finish_mutex_cleanup(
+    key: int,
+    depth_before: int,
+    obligation: _MutexObligation,
+) -> None:
+    release_pending = _mutex_obligation_pending(obligation)
+    _restore_mutex_depth(key, depth_before)
+    obligation.phase = "cleanup"
+    if release_pending:
+        _release_mutex_obligation(obligation)
 
 
 def _release_mutex_obligation(obligation: _MutexObligation) -> None:
