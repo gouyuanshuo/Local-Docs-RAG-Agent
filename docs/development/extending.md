@@ -144,6 +144,11 @@ and capability-driven generic ingest lifecycle.
 5. Construct it in `build_reranker` in `rag/pipeline.py`.
 6. Test that it reorders, that a bad reply degrades rather than raises, and that
    its status reaches the answer diagnostics.
+7. Add the name to the hand-synchronized `RerankerName` union in
+   `frontend/src/types/api.ts`; update a browser control and its behavior test
+   if the UI exposes selection. Run the frontend tests/build, and update the
+   allowed values and behavior in `docs/reference/configuration.md`, the CLI
+   reference, HTTP/report examples, and metrics guidance.
 
 ## A retrieval strategy
 
@@ -158,6 +163,14 @@ and capability-driven generic ingest lifecycle.
 5. Sweep it against `blended` with `eval-compare` before claiming it is better,
    using live providers. Cells that ran on fallback are `degraded` and stay off
    the leaderboard, so a keyless sweep has no winner.
+6. Add the name to the hand-synchronized `RetrievalStrategyName` union in
+   `frontend/src/types/api.ts`; update a browser control and behavior test if
+   selection is exposed. Run the frontend tests/build, and update the allowed
+   values and semantics in `docs/reference/configuration.md`, the CLI and HTTP
+   references, and `docs/reference/metrics.md`. Because the matrix default
+   sweeps every retrieval strategy, adding one changes the bare comparison's
+   cell count, provider cost, and remote-mutation count; update every stated
+   default count rather than leaving the current 12/24 figures in place.
 
 ## A comparison axis
 
@@ -210,8 +223,15 @@ type-checked, ran, and produced quietly wrong numbers.
 ## A CLI command
 
 1. Write a handler in `commands/`.
-2. Add a `_register_*` function in `cli.py` that binds it with `set_defaults`.
-3. List that function in `COMMAND_REGISTRARS`.
+2. Import that command module in `cli.py`, using the documented module alias
+   convention when one exists.
+3. Add a `_register_*` function in `cli.py` that binds the handler with
+   `set_defaults`.
+4. List that function in `COMMAND_REGISTRARS`.
+5. Add parser/flag/dispatch coverage in `tests/test_cli.py` and document the
+   command and every public flag in `docs/reference/cli.md`.
+   `tests/test_docs.py` checks that the reference covers the generated CLI
+   surface.
 
 ## After any extension
 

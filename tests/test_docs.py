@@ -357,6 +357,9 @@ def test_extension_recipes_name_hand_synchronized_surfaces() -> None:
     config_recipe = _section(text, "## A configuration setting")
     store_recipe = _section(text, "## A vector store")
     runtime_recipe = _section(text, "## A runtime")
+    reranker_recipe = _section(text, "## A reranker")
+    retrieval_recipe = _section(text, "## A retrieval strategy")
+    cli_recipe = _section(text, "## A CLI command")
 
     assert "docs/reference/configuration.md" in config_recipe
     assert "frontend/src/types/api.ts" in store_recipe
@@ -364,6 +367,14 @@ def test_extension_recipes_name_hand_synchronized_surfaces() -> None:
     assert "frontend/src/types/api.ts" in runtime_recipe
     assert "RuntimeName" in runtime_recipe
     assert "frontend/src/components/AskPanel.tsx" in runtime_recipe
+    assert "frontend/src/types/api.ts" in reranker_recipe
+    assert "RerankerName" in reranker_recipe
+    assert "frontend/src/types/api.ts" in retrieval_recipe
+    assert "RetrievalStrategyName" in retrieval_recipe
+    assert "commands/" in cli_recipe
+    assert "cli.py" in cli_recipe
+    assert "tests/test_cli.py" in cli_recipe
+    assert "docs/reference/cli.md" in cli_recipe
 
 
 def test_http_success_examples_match_the_response_schemas() -> None:
