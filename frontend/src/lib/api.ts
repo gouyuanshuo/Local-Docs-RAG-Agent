@@ -1,8 +1,21 @@
 import type { ApiErrorPayload } from "../types/api";
 
-export const apiBaseUrl =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ??
-  "http://127.0.0.1:8000";
+const DEVELOPMENT_API_BASE_URL = "http://127.0.0.1:8000";
+
+export function resolveApiBaseUrl(
+  configuredBaseUrl: string | undefined,
+  isDevelopment: boolean,
+): string {
+  return (
+    configuredBaseUrl?.replace(/\/$/, "") ??
+    (isDevelopment ? DEVELOPMENT_API_BASE_URL : "")
+  );
+}
+
+export const apiBaseUrl = resolveApiBaseUrl(
+  import.meta.env.VITE_API_BASE_URL as string | undefined,
+  import.meta.env.DEV,
+);
 
 export class ApiError extends Error {
   readonly status: number;

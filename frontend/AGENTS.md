@@ -7,7 +7,9 @@ citations and diagnostics. No retrieval policy in the browser.
 
 - `src/App.tsx` — layout composition
 - `src/hooks/useRagWorkspace.ts` — all client state
-- `src/lib/api.ts` — `fetch` to `/api/*` (`VITE_API_BASE_URL`)
+- `src/lib/api.ts` — `fetch` to `/api/*`; an explicit
+  `VITE_API_BASE_URL` wins, Vite development defaults to localhost, and
+  production defaults to the serving origin
 - `src/types/api.ts` — hand-synced wire types, including comparison axes,
   dataset/configuration identities, nullable Qdrant run metadata, retrieval
   snapshots, and complete eval summaries/results
