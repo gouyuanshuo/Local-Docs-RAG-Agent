@@ -16,9 +16,17 @@ changed, never that a network or a quota did.
     --cov=local_docs_rag_agent --cov-report=term-missing
   ```
 
-Restore first with `uv sync --locked --all-extras`. The frontend has no unit
-tests. Restore it with `pnpm install --frozen-lockfile`; its gate is
-`pnpm run build`, which type-checks with `tsc -b` before building.
+Restore first with `uv sync --locked --all-extras`. Restore the frontend with
+`pnpm install --frozen-lockfile`, then run both frontend gates:
+
+```text
+pnpm --filter local-docs-rag-agent-web test
+pnpm run build
+```
+
+The first command runs Vitest and React Testing Library behavior tests with
+HTTP mocked at the `fetch` boundary. The build type-checks with `tsc -b` before
+Vite emits the production assets.
 
 ## Where tests live
 
@@ -30,9 +38,22 @@ tests. Restore it with `pnpm install --frozen-lockfile`; its gate is
 | `runtime` | `tests/test_agents_runtime.py`, `tests/test_runtime_shared.py` |
 | `evals` | `tests/test_eval_harness.py`, `tests/test_eval_comparison.py`, `tests/test_eval_gold.py` |
 | delivery | `tests/test_api.py`, `tests/test_cli.py` |
+| frontend | colocated `*.test.ts` and `*.test.tsx` files under `frontend/src/` |
 | whole repository | `tests/test_import_graph.py`, `tests/test_docs.py` |
 
 Each module's `AGENTS.md` lists the tests to run first when changing it.
+
+## Installed-wheel startup
+
+The CI package job builds a real wheel, installs it without editable source
+into a fresh virtual environment, changes to a directory outside the checkout,
+and verifies API-only root and health responses. This catches package-data and
+checkout-discovery failures that the source-tree pytest configuration cannot.
+
+Reproduce that boundary with the install and smoke commands in the
+[deployment guide](deployment.md#build-and-verify-a-release). Packaging changes
+must also exercise an explicit static directory and an invalid one through
+`tests/test_api.py`; the built wheel intentionally contains no frontend assets.
 
 ## Environment isolation
 

@@ -47,12 +47,17 @@ table says what each gate guards and where CI runs it.
 | Mypy | strict types over `backend/src`, `tests`, and `scripts`; run bare so it reads `[tool.mypy] files` | Backend → Mypy |
 | Pytest | behavior, import direction, eval gold, documentation integrity | Backend → Pytest |
 | Compile | the package compiles | Backend → Compile Python package |
+| Installed-wheel smoke | the built wheel imports and serves health outside the checkout without an editable install or frontend assets | Wheel build and install smoke |
+| Frontend tests | visible errors, independent bootstrap state, retries, and API-origin selection through mocked HTTP | Frontend → Test frontend behavior |
 | Frontend build | strict TypeScript (`tsc -b`) and a production Vite build | Frontend → Build frontend |
 
 CI restores the backend with uv 0.12.16 from the universal `uv.lock` and runs
 every gate on Python 3.11 and 3.13. The Agents SDK registration regression uses
 the installed SDK from that restore, not a substitute module. CI restores the
 frontend with `pnpm install --frozen-lockfile` on Node 22 and pnpm 10.18.0.
+It runs the frontend behavior tests before the build. A separate package job
+builds the actual wheel, installs it into a fresh environment, changes to a run
+directory outside the checkout, and verifies API-only startup and health.
 
 ## Dependency changes
 
@@ -73,6 +78,10 @@ stay pinned in `[build-system]` and are checked by the wheel smoke job.
 Live checks against real providers and Qdrant are not gates. They live in
 `scripts/`, never run in CI, and are reported separately from the offline
 results; see [troubleshooting](troubleshooting.md#live-checks).
+
+Packaging or deployment changes also follow the isolated wheel, static-build,
+startup, backup, and rollback checks in the
+[deployment guide](deployment.md#build-and-verify-a-release).
 
 ## Closing out a change
 

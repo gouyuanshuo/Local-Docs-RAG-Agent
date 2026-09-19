@@ -8,6 +8,23 @@ present). Copy `.env.example` to `.env` to configure a local instance.
 
 ---
 
+## Frontend Build-Time Setting
+
+`VITE_API_BASE_URL` is a Vite build input, not an `AppConfig` setting. When it
+is unset, Vite development requests `http://127.0.0.1:8000`, while a production
+build uses same-origin `/api/*` requests. A non-empty value supplies an explicit
+API origin in either mode; one trailing slash is removed before requests are
+formed.
+
+Set it in the environment that runs `pnpm run build`. Its value is compiled
+into the frontend bundle, so changing it requires a rebuild and redeployment of
+`frontend/dist`; changing the backend process environment has no effect on an
+existing bundle. The supported single-host deployment leaves it unset and
+serves the frontend and API from the same loopback origin. See
+[Deployment and rollback](../development/deployment.md#serve-an-explicit-frontend-build).
+
+---
+
 ## Shared Application Settings
 
 | Variable | Type | Default | Validation / Values | Description |

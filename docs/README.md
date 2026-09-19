@@ -13,6 +13,7 @@ distractors for the eval questions written about the same topics.
 | I want to… | Read |
 | --- | --- |
 | set up a working environment and ask a first question | [Getting started](development/getting-started.md) |
+| package, deploy, back up, or roll back one host | [Deployment and rollback](development/deployment.md) |
 | know how a change gets committed, and what each gate guards | [Workflow](development/workflow.md) |
 | run tests, write them, or change eval gold | [Testing](development/testing.md) |
 | add a provider, store, runtime, reranker, strategy, axis, command, or setting | [Extending](development/extending.md) |
@@ -50,7 +51,7 @@ a copy is the first thing to go stale.
 ```text
 docs/
   README.md      this index
-  development/   setting up, working, testing, extending, troubleshooting
+  development/   setup, deployment, workflow, testing, extending, troubleshooting
   reference/     settings, HTTP API, CLI, and metric definitions
   design/        system shape and design decisions
   planning/      long-horizon roadmap

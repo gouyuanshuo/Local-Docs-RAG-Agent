@@ -88,6 +88,8 @@ uv run --locked --all-extras python -m uvicorn \
 ```
 
 `local-docs-rag-api` serves the same app on the same address without reload.
+For an installed wheel, an explicit static build, backup, and rollback, follow
+the [deployment guide](deployment.md) instead of relying on checkout discovery.
 
 Frontend, in a second terminal:
 
