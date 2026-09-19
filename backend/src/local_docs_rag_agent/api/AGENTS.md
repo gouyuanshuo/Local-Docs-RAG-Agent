@@ -29,6 +29,9 @@ Ask `question` max length 4000.
   `run_metadata`; delivery must not discard orphan-recovery details.
 - `/api/ask` preserves each citation span's answer-local `source_id`; legacy
   or otherwise unlabelled spans serialize it as `null`.
+- `create_app()` must work from an installed wheel with no source checkout or
+  frontend build. An explicit frontend directory is authoritative and must
+  contain `index.html` plus `assets/`; invalid explicit builds fail fast.
 - Malformed Qdrant targets return 400 before comparison side effects. Raw
   URLs, credentials, API keys, and client exception context never enter HTTP
   bodies or headers; normalized compare failures stay 200 per-cell outcomes,

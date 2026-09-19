@@ -189,6 +189,78 @@ def _install_echoing_qdrant_failure(
     monkeypatch.setattr(qdrant_client, "QdrantClient", fail_client)
 
 
+def test_create_app_without_discovered_frontend_serves_api_and_json_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+) -> None:
+    isolated_module = (
+        tmp_path / "site-packages" / "local_docs_rag_agent" / "api" / "app.py"
+    )
+    monkeypatch.setattr(api_app, "__file__", str(isolated_module))
+
+    client = fastapi_testclient.TestClient(api_app.create_app())
+
+    health_response = client.get("/api/health")
+    root_response = client.get("/")
+
+    assert health_response.status_code == 200
+    assert health_response.json()["status"] == "ok"
+    assert root_response.status_code == 200
+    assert root_response.json() == {
+        "name": "Local Docs RAG Agent API",
+        "message": (
+            "Frontend dev server not running. Start it with `pnpm run dev`."
+        ),
+    }
+
+
+def test_create_app_serves_explicit_frontend_build(
+    tmp_path: pathlib.Path,
+) -> None:
+    frontend_dist = tmp_path / "explicit-frontend"
+    assets_dir = frontend_dist / "assets"
+    assets_dir.mkdir(parents=True)
+    (frontend_dist / "index.html").write_text(
+        "<main>explicit frontend</main>",
+        encoding="utf-8",
+    )
+    (assets_dir / "app.js").write_text(
+        'document.body.dataset.bundle = "explicit";',
+        encoding="utf-8",
+    )
+
+    client = fastapi_testclient.TestClient(
+        api_app.create_app(frontend_dist_dir=frontend_dist)
+    )
+
+    index_response = client.get("/")
+    asset_response = client.get("/assets/app.js")
+
+    assert index_response.status_code == 200
+    assert index_response.text == "<main>explicit frontend</main>"
+    assert asset_response.status_code == 200
+    assert asset_response.text == ('document.body.dataset.bundle = "explicit";')
+
+
+def test_create_app_rejects_invalid_explicit_frontend_without_fallback(
+    tmp_path: pathlib.Path,
+) -> None:
+    invalid_dist = tmp_path / "private-invalid-frontend-sentinel"
+    invalid_dist.mkdir()
+    (invalid_dist / "index.html").write_text(
+        "<main>incomplete build</main>",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        api_app.create_app(frontend_dist_dir=invalid_dist)
+
+    assert str(exc_info.value) == (
+        "frontend_dist_dir must contain index.html and an assets directory"
+    )
+    assert "private-invalid-frontend-sentinel" not in str(exc_info.value)
+
+
 def test_info_exposes_external_http_proxy_setting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

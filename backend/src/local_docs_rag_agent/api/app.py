@@ -1,8 +1,8 @@
 """Creates the FastAPI app: middleware, static hosting, error handling.
 
-The app serves the built frontend from `frontend/dist` when it exists, and falls
-back to a JSON pointer toward the dev server when it does not, so the same entry
-point works for a built deployment and for local development.
+The app serves a valid built frontend when one is supplied or discovered in a
+source checkout. It falls back to a JSON pointer toward the dev server when no
+build is available, so an installed wheel can run as an API-only deployment.
 
 Domain errors are translated here rather than in each route: a `LocalDocsError`
 becomes a response carrying its stable code and action hint, which is what lets
@@ -22,36 +22,78 @@ from fastapi.middleware import cors as fastapi_cors
 from local_docs_rag_agent.api import routes
 from local_docs_rag_agent.core import exceptions
 
+_INVALID_FRONTEND_DIST_MESSAGE = (
+    "frontend_dist_dir must contain index.html and an assets directory"
+)
 
-def _repo_root() -> pathlib.Path:
+
+def _is_frontend_dist_dir(path: pathlib.Path) -> bool:
+    return (
+        path.is_dir()
+        and (path / "index.html").is_file()
+        and (path / "assets").is_dir()
+    )
+
+
+def _discover_frontend_dist_dir() -> pathlib.Path | None:
     current = pathlib.Path(__file__).resolve()
     for parent in current.parents:
-        if (parent / "pyproject.toml").exists():
-            return parent
-    raise RuntimeError("Could not locate repository root from api/app.py")
+        if (parent / "pyproject.toml").is_file():
+            frontend_dist_dir = parent / "frontend" / "dist"
+            if _is_frontend_dist_dir(frontend_dist_dir):
+                return frontend_dist_dir
+            return None
+    return None
 
 
-FRONTEND_DIST_DIR = _repo_root() / "frontend" / "dist"
-FRONTEND_ASSETS_DIR = FRONTEND_DIST_DIR / "assets"
-FRONTEND_INDEX_PATH = FRONTEND_DIST_DIR / "index.html"
+def _select_frontend_dist_dir(
+    frontend_dist_dir: pathlib.Path | None,
+) -> pathlib.Path | None:
+    if frontend_dist_dir is None:
+        return _discover_frontend_dist_dir()
+    if not _is_frontend_dist_dir(frontend_dist_dir):
+        raise ValueError(_INVALID_FRONTEND_DIST_MESSAGE)
+    return frontend_dist_dir
 
 
-def create_app() -> fastapi.FastAPI:
+def create_app(
+    frontend_dist_dir: pathlib.Path | None = None,
+) -> fastapi.FastAPI:
     """Build the FastAPI application.
+
+    Args:
+      frontend_dist_dir: An optional built frontend directory. When omitted,
+        a valid `frontend/dist` is discovered from a source checkout when
+        available. An explicit directory must contain `index.html` and an
+        `assets` directory.
 
     Returns:
       An app with CORS, error handlers, and API routes registered, and
-      the built frontend mounted when `frontend/dist` exists.
+      a built frontend mounted when one is available.
+
+    Raises:
+      ValueError: The explicit frontend directory is not a valid build.
     """
+    selected_frontend_dist_dir = _select_frontend_dist_dir(frontend_dist_dir)
+    frontend_assets_dir = (
+        selected_frontend_dist_dir / "assets"
+        if selected_frontend_dist_dir is not None
+        else None
+    )
+    frontend_index_path = (
+        selected_frontend_dist_dir / "index.html"
+        if selected_frontend_dist_dir is not None
+        else None
+    )
     app = fastapi.FastAPI(title="Local Docs RAG Agent", version="0.1.0")
     _configure_cors(app)
     _register_error_handlers(app)
     app.include_router(routes.router)
 
-    if FRONTEND_ASSETS_DIR.is_dir():
+    if frontend_assets_dir is not None:
         app.mount(
             "/assets",
-            fastapi_staticfiles.StaticFiles(directory=FRONTEND_ASSETS_DIR),
+            fastapi_staticfiles.StaticFiles(directory=frontend_assets_dir),
             name="assets",
         )
 
@@ -66,8 +108,8 @@ def create_app() -> fastapi.FastAPI:
           pointer to the dev server, so hitting the API root during
           development reads as a hint rather than a 404.
         """
-        if FRONTEND_INDEX_PATH.is_file():
-            return fastapi_responses.FileResponse(FRONTEND_INDEX_PATH)
+        if frontend_index_path is not None:
+            return fastapi_responses.FileResponse(frontend_index_path)
         return fastapi_responses.JSONResponse(
             {
                 "name": "Local Docs RAG Agent API",

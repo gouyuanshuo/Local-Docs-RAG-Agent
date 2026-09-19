@@ -99,30 +99,49 @@ jobs:
           mkdir -p "$RUNNER_TEMP/wheel-dist"
           uv build --wheel --out-dir "$RUNNER_TEMP/wheel-dist"
 
-      - name: Install and import wheel
+      - name: Install and start API from wheel
         run: |
-          wheel="$RUNNER_TEMP/wheel-dist"
-          wheel="$wheel/local_docs_rag_agent-0.1.0-py3-none-any.whl"
+          requirements="$RUNNER_TEMP/wheel-runtime-requirements.txt"
+          uv export --quiet --locked --no-dev --no-emit-project \
+            --format requirements.txt --output-file "$requirements"
+          wheel=$(find "$RUNNER_TEMP/wheel-dist" -maxdepth 1 -type f \
+            -name 'local_docs_rag_agent-*.whl' -print -quit)
           smoke="$RUNNER_TEMP/wheel-smoke"
           run_dir="$RUNNER_TEMP/wheel-run"
           mkdir -p "$run_dir"
           uv venv --python 3.13 "$smoke"
+          uv pip install --python "$smoke/bin/python" -r "$requirements"
           uv pip install --python "$smoke/bin/python" --no-deps "$wheel"
           cd "$run_dir"
-          "$smoke/bin/python" - <<'PY'
+          env -u PYTHONPATH "$smoke/bin/python" - <<'PY'
           import os
           import pathlib
 
+          from fastapi import testclient
           import local_docs_rag_agent
+          from local_docs_rag_agent.api import app as api_app
 
           module = pathlib.Path(local_docs_rag_agent.__file__).resolve()
           smoke = pathlib.Path(
               os.environ["RUNNER_TEMP"], "wheel-smoke"
           ).resolve()
           checkout = pathlib.Path(os.environ["GITHUB_WORKSPACE"]).resolve()
+          run_dir = pathlib.Path.cwd().resolve()
+          assert not any(
+              (parent / "pyproject.toml").is_file()
+              for parent in (run_dir, *run_dir.parents)
+          )
           assert module.is_relative_to(smoke), module
           assert not module.is_relative_to(checkout), module
           assert local_docs_rag_agent.__version__ == "0.1.0"
+          client = testclient.TestClient(api_app.create_app())
+          health = client.get("/api/health")
+          root = client.get("/")
+          assert health.status_code == 200, health.text
+          assert health.json()["status"] == "ok"
+          assert root.status_code == 200, root.text
+          assert root.headers["content-type"].startswith("application/json")
+          assert root.json()["name"] == "Local Docs RAG Agent API"
           print(module)
           PY
 
