@@ -87,11 +87,11 @@ export function AnswerResult({ result }: AnswerResultProps) {
       </div>
 
       <div className="citation-list">
-        {result.citation_spans.map((span, index) => (
+        {result.citation_spans.map((span) => (
           <article key={span.chunk_id} className="citation-card">
             <header className="citation-head">
               <div>
-                <span className="citation-index">S{index + 1}</span>
+                <span className="citation-index">{span.source_id ?? "unlabelled"}</span>
                 <strong>{fileLabel(span.source_path)}</strong>
                 <p>{span.source_path}</p>
               </div>

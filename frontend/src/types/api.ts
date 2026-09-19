@@ -20,6 +20,7 @@ export type CitationSpan = {
   start_char: number;
   end_char: number;
   text: string;
+  source_id: string | null;
 };
 
 export type AnswerDiagnostics = {

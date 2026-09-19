@@ -18,6 +18,8 @@ citations and diagnostics. No retrieval policy in the browser.
 - Talk only to `/api/*`. No API keys in the bundle.
 - Ask diagnostics (requested/actual runtime, chat/embedding/rerank) render
   in the answer card, not only in raw JSON.
+- Citation cards render the backend's answer-local `source_id`; a null ID is
+  shown as `unlabelled`, never replaced with a positional label.
 - Compare `degraded` / `skipped` / `error` runs are visible; fallback cells
   must not look like leaderboard wins.
 - Buttons disable while in flight (`isAsking` / `isActing`).
