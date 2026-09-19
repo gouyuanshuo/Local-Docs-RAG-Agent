@@ -138,8 +138,8 @@ def compare_eval(
     """Evaluate a matrix of configurations and rank the results.
 
     Args:
-      payload: The axes to sweep. An omitted axis holds the configured
-        value steady rather than sweeping it.
+      payload: The axes to sweep. An omitted axis takes its declared matrix
+        default; chunk and retrieval strategy sweep by default.
 
     Returns:
       Every cell that ran, plus the leaderboard built from them.

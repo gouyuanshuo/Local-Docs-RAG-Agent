@@ -67,9 +67,9 @@ class EvalRequest(pydantic.BaseModel):
 class EvalCompareRequest(pydantic.BaseModel):
     """The axes to sweep in a comparison run.
 
-    An omitted axis holds the configured value steady rather than
-    sweeping it, so a request cannot accidentally expand into the full
-    Cartesian product.
+    An omitted axis takes its declared matrix default. Chunk and retrieval
+    strategy currently sweep their closed option sets; most other axes hold
+    the configured value steady.
     """
 
     runtimes: RuntimeList | None = None

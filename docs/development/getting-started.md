@@ -58,11 +58,15 @@ cp .env.example .env
 
 The app loads a project-local `.env` on start, without overriding variables
 already exported in your shell. `.env` is gitignored; only `.env.example` is
-tracked.
+tracked. Restart the backend after changing either the launching process
+environment or `.env`. Each operation builds a fresh `AppConfig`, but a running
+process cannot receive newly exported shell variables, and dotenv does not
+overwrite values it already loaded into that process.
 
-Leave the keys empty for a first run. Chat and embeddings then report `fallback`
-in every answer's diagnostics instead of failing, which is enough to see the
-whole pipeline work. Two things are worth knowing before you change anything:
+Leave the keys and `QDRANT_URL` empty and keep `VECTOR_BACKEND=local` for an
+offline first run. Chat and embeddings then report `fallback` in every answer's
+diagnostics instead of failing, which is enough to see the whole pipeline work.
+Two things are worth knowing before you change anything:
 
 - `DOCS_DIR` defaults to `data/corpus/sample`, the corpus the eval set is
   written against. Point it at your own documents if you like, but never at
@@ -123,3 +127,6 @@ never reports a degraded run as a successful one.
 
 Run the quality gates from [AGENTS.md](../../AGENTS.md#quality-gates). They are
 offline and deterministic, so they pass on a fresh clone with no keys at all.
+Do not hand-edit the generated index, manifest, lock files, frontend build, or
+dependency trees; the [workflow inventory](workflow.md#generated-and-runtime-files)
+names their owning commands.

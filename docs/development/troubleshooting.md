@@ -277,15 +277,24 @@ with `py -3.13`.
 
 `scripts/` holds checks against real services. They are not tests: pytest never
 collects them, they never run in CI, and their results are reported separately
-from the offline gates.
+from the offline gates. Provider calls can be billable even when the check is
+read-only with respect to project storage.
 
 | Script | Effect |
 | --- | --- |
-| `scripts/check_chat_api.py` | Read-only: one chat call |
-| `scripts/check_embedding_api.py` | Read-only: one embedding call |
-| `scripts/check_qdrant.py` | Read-only: reaches the configured collection |
-| `scripts/verify_live_qdrant.py` | Writes to the configured collection, then asks and evaluates |
+| `scripts/check_chat_api.py` | One potentially paid chat call; no index mutation |
+| `scripts/check_embedding_api.py` | One potentially paid embedding call; no index mutation |
+| `scripts/check_qdrant.py` | Reads whether the configured collection exists; no collection mutation |
+| `scripts/verify_live_qdrant.py` | Makes provider calls, writes the configured collection, then asks and evaluates |
 
 Run `verify_live_qdrant.py` only against a disposable or explicitly approved
 collection. It fails if the runtime, chat, or embeddings degrade at any point,
 which is what makes a pass meaningful.
+
+The normal CLI/API paths are configuration-sensitive too. `ingest` can call a
+paid embedding provider and mutate the configured local index or Qdrant
+collection. `eval-compare` can multiply embedding, chat, and reranker calls by
+the cell/case count; Qdrant cells create and clean up owned disposable
+collections. Confirm cost and target approval before a configured live run. For
+the distinct local, no-key path that never contacts those services, follow
+[testing](testing.md#live-and-no-key-checks).

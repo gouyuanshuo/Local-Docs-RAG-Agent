@@ -341,7 +341,10 @@ The next highest-value work is still below the UI layer.
 - the former monolithic `frontend/src/App.tsx` has been reduced to layout composition
 - API contracts, request/error handling, workspace state/actions, presentation helpers,
   and feature panels now have separate modules
-- the existing visual structure and backend contract remain unchanged
+- answer-local citation ids, operation errors, and partial bootstrap health now
+  render explicitly instead of being hidden in raw output
+- colocated Vitest and React Testing Library behavior tests cover those states,
+  retries, and development/production API-origin selection before the build gate
 
 ---
 
@@ -385,8 +388,12 @@ OpenAI-compatible + Qwen is already enough to validate the current system.
   consistency, persisted-data corruption, Qdrant pagination, and API error contracts
 - backend architecture is documented in `docs/design/architecture.md`, and
   extension recipes in `docs/development/extending.md`
-- GitHub Actions now enforces backend Ruff/mypy/pytest/compile gates and the frontend build
-- next engineering steps include deployment packaging and resolving the external Qdrant endpoint
+- GitHub Actions now enforces locked backend Ruff/mypy/pytest/compile gates,
+  frontend behavior tests/build, and an installed-wheel API-only smoke outside
+  the source checkout
+- the deployment guide now covers explicit static builds, process configuration,
+  coordinated backup, rollback, and a disposable offline rehearsal for one host
+- next engineering steps include Docker and resolving the external Qdrant endpoint
 
 ---
 

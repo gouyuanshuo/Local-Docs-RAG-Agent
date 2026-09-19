@@ -15,6 +15,7 @@ distractors for the eval questions written about the same topics.
 | set up a working environment and ask a first question | [Getting started](development/getting-started.md) |
 | package, deploy, back up, or roll back one host | [Deployment and rollback](development/deployment.md) |
 | know how a change gets committed, and what each gate guards | [Workflow](development/workflow.md) |
+| know which generated/runtime files must not be hand-edited | [Generated and runtime files](development/workflow.md#generated-and-runtime-files) |
 | run tests, write them, or change eval gold | [Testing](development/testing.md) |
 | add a provider, store, runtime, reranker, strategy, axis, command, or setting | [Extending](development/extending.md) |
 | find out why something degraded, skipped, or failed | [Troubleshooting](development/troubleshooting.md) |
@@ -61,7 +62,8 @@ docs/
 ## Reviews
 
 Reviews are dated snapshots of the repository as it was. They are not updated
-afterwards; findings that still matter are tracked in [tasks.md](../tasks.md).
+afterwards and are never treated as the current API, tree, or operating
+instructions. Findings that still matter are tracked in [tasks.md](../tasks.md).
 
 - [2026-08-29 code review](reviews/2026-08-29-code-review.md)
 - [2026-09-13 repository audit](reviews/2026-09-13-audit-report.html) (HTML)

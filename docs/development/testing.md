@@ -146,8 +146,28 @@ anything. Before trusting it, plant the defect it exists to catch, confirm the
 test fails, and remove the plant. `tests/test_docs.py` was checked this way
 against a stale quoted path, a broken link, and an unindexed document.
 
-## Live checks are not tests
+## Live and no-key checks
 
 `scripts/check_*.py` and `scripts/verify_live_qdrant.py` talk to real services.
-They are named so pytest never collects them and they never run in CI. See
-[troubleshooting](troubleshooting.md#live-checks).
+They are named so pytest never collects them and they never run in CI. The chat
+and embedding checks can consume paid provider calls. The strict verifier
+embeds the corpus, writes the configured Qdrant collection, asks a question,
+and evaluates every case; run it only with explicit approval for the provider
+cost and for that exact disposable or approved collection.
+
+Normal commands can also become live operations. With credentials configured,
+`ingest` calls the embedding provider, and `eval-compare` can call embedding,
+chat, and selected reranking providers once per relevant corpus/case/cell.
+Qdrant ingest mutates the configured collection. Qdrant comparison cells create
+owned UUID-named disposable collections and attempt to delete them afterwards;
+their exact orphan-recovery metadata must be retained when cleanup fails. The
+CLI also replaces its configured comparison output report atomically.
+
+The deterministic offline gates do none of that. For an explicit no-key product
+smoke, disable project dotenv loading, select `VECTOR_BACKEND=local`, clear the
+provider keys and Qdrant URL, and use disposable absolute index, manifest, and
+eval paths. In that configuration, ingest/ask/eval use hash and extractive
+fallbacks locally, and the default 12-cell comparison has an empty leaderboard
+by design. See the concrete disposable environment in the
+[deployment rehearsal](deployment.md#disposable-local-rehearsal) and the script
+effects in [troubleshooting](troubleshooting.md#live-checks).

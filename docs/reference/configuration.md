@@ -5,6 +5,12 @@ and what it changes.
 
 Settings are read from the process environment and the project `.env` file (if
 present). Copy `.env.example` to `.env` to configure a local instance.
+Exported process variables win because dotenv never overwrites them. Restart
+the backend after changing either source: a route creates a fresh `AppConfig`
+for its operation, but the operating system does not inject later shell exports
+into an existing process, and values loaded from `.env` remain in that process
+instead of being replaced by later file edits. Confirm effective non-secret
+values with `GET /api/info` after restart.
 
 ---
 

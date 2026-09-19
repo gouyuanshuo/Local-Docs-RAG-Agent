@@ -4,20 +4,26 @@ This file is the short-horizon task board for the repository.
 
 ## Operating checklist
 
-Before coding:
+Before normal coding:
 
-- [x] Read `AGENTS.md`
-- [x] Read `spec.md`
-- [x] Read `tasks.md`
-- [x] Check `docs/planning/development-roadmap.md`
-- [x] Open the relevant local skill if needed
+- Read root `AGENTS.md`.
+- Skim only **Current focus** in this file.
+- Open the one module `AGENTS.md` selected by the root router and at most one
+  adjacent contract for a shared seam.
+- Read `spec.md` only when the task needs product requirements. Read the
+  roadmap only when the task may change phase status.
+- Open a local skill when the task matches it.
+
+A named, read-only repository audit may inventory multiple module contracts,
+maintained documents, and implementation seams when that broad evidence is the
+task. Historical snapshots under `docs/reviews/` remain evidence, not current
+instructions, and are not rewritten during reconciliation.
 
 After coding:
 
-- [x] Run a relevant verification path
-- [x] Review the changed code
-- [x] Mark completed tasks below
-- [x] Add follow-up tasks if new work appears
+- Run the relevant module tests, then every applicable quality gate.
+- Review the changed code and its module seams.
+- Mark completed tasks below and add concrete follow-ups for new work.
 
 ## Current focus
 
@@ -134,6 +140,30 @@ Current theme:
       pass on Python 3.11/3.13, as do the frozen frontend build, isolated wheel
       import/metadata check, and disposable no-key ingest/ask/eval/compare
       workflow with unchanged interactive storage
+- [x] Preserve answer-wide provider status while merging repeated searches,
+      assign citation labels within each answer, and expose stable source IDs
+      through the HTTP response and frontend
+- [x] Add frontend behavior coverage for answer-local citation labels,
+      independent bootstrap failures, visible operation errors, retry state,
+      and development/production API-origin selection; run it before the build
+      in frozen Node 22 CI
+- [x] Make API startup from an installed wheel independent of a source checkout,
+      keep automatic static discovery constrained to the exact checkout, and
+      fail fast for an invalid explicit frontend build
+- [x] Add the single-host packaged deployment, backup, rollback, explicit static
+      build, and offline rehearsal runbook without claiming multi-host Qdrant
+      coordination
+- [x] Reconcile every maintained instruction/reference with the hardened tree,
+      HTTP wire, comparison defaults, generated artifacts, and live-operation
+      risks; keep dated review snapshots historical
+- [x] Enforce the complete backend dependency direction, delivery-framework
+      isolation, the public RAG facade, and generic store capabilities with AST
+      regression tests covering absolute and relative imports
+  - Documentation close-out: all 10 focused docs tests pass, including the
+    three link/path/index checks; focused Ruff, Ruff format, and mypy pass for
+    `tests/test_docs.py`; four comparison default/planning checks and
+    `git diff --check` pass. No live provider/Qdrant or frontend run was made
+    for this documentation-only task.
 - [ ] Resolve the upstream Starlette/AnyIO `BlockingPortal` deprecation warning
       or add a narrowly justified filter after the dependency lock is selected
 
@@ -141,8 +171,8 @@ Current theme:
 
 - [x] Remove stray root shim scripts and untrack already-ignored build output
 - [x] Rename `scripts/test_*.py` to `check_*` so manual checks are not mistaken for tests
-- [x] Add `constants.py` as the single source of truth for closed option sets
-- [x] Extract typed environment readers and validators into `env.py`
+- [x] Add `core/constants.py` as the single source of truth for closed option sets
+- [x] Extract typed environment readers and validators into `core/env.py`
 - [x] Split the `ChunkStore` protocol, the JSONL store, and store construction apart
 - [x] Move document discovery out of the ingest pipeline into `rag/discovery.py`
 - [x] Promote the Qdrant error helpers to public names and drop the re-export shim

@@ -19,7 +19,10 @@ Extension recipes: `docs/development/extending.md`. Long-horizon phases:
    the task matches.
 
 Do **not** start by reading every module contract, `qdrant_store.py`, or the
-roadmap end-to-end.
+roadmap end-to-end. Open `spec.md` when the task needs product requirements and
+the roadmap only when phase status may change; neither is a per-task startup
+requirement. A named, read-only repository audit may inventory multiple module
+contracts and maintained documents when that broader evidence is the task.
 
 ## Module map
 
@@ -79,14 +82,20 @@ in production code. Tests may import internals.
 
 ## Code style
 
-Python follows the [Google Python Style Guide][google-style], enforced by
-`ruff` / `ruff format` (`pyproject.toml`):
+Python follows the [Google Python Style Guide][google-style]. `ruff` and
+`ruff format` enforce the configured lint, docstring, import-order, line-length,
+and formatting rules in `pyproject.toml`:
 
 - 80-column lines. Wrap comments and docstrings by hand; `E501` still checks
   them.
 - Module-only imports: `from x import y` where `y` is a module, then
   `y.Symbol`. Never import a class or function directly.
 - Google docstrings on every public module, class, and function.
+
+Module-only imports are a code-review convention, not a Ruff rule. The AST
+checks in `tests/test_import_graph.py` enforce the dependency direction above,
+delivery-framework isolation, the public `rag` facade, and capability-driven
+generic ingest lifecycle.
 
 Deliberate exceptions (adding a fifth needs a reason in the commit):
 
@@ -115,17 +124,25 @@ uv run --locked --all-extras python -m ruff check \
 uv run --locked --all-extras python -m mypy
 uv run --locked --all-extras python -m pytest
 uv run --locked --all-extras python -m compileall -q backend/src
+pnpm install --frozen-lockfile
+pnpm --filter local-docs-rag-agent-web test
+pnpm run build
 ```
 
 Use uv 0.12.16. The universal `uv.lock` covers every extra and Python 3.11+;
-CI runs the backend gates on 3.11 and 3.13. Frontend changes also require
-`pnpm install --frozen-lockfile` and `pnpm run build` with Node 22 and pnpm
-10.18.0.
+CI runs the backend gates on 3.11 and 3.13. CI runs the frontend behavior tests
+and build with Node 22 and pnpm 10.18.0. Run the frontend commands for frontend,
+HTTP-wire, packaging, or static-serving changes.
 
 Refresh dependencies intentionally with `uv lock` under uv 0.12.16, then run
 the locked restore and gates. Review and commit `pyproject.toml` and `uv.lock`
 together. Roll back a dependency change by reverting that manifest/lock pair
 together; never restore only one side.
+
+Do not hand-edit generated builds, dependencies, runtime index/report data,
+lock artifacts, or tool caches. Change `uv.lock` and `pnpm-lock.yaml` only
+through uv and pnpm. The maintained inventory and regeneration commands live in
+`docs/development/workflow.md#generated-and-runtime-files`.
 
 ## Commit convention
 

@@ -116,17 +116,14 @@ The backend is responsible for:
 |       `-- local_docs_rag_agent/
 |           |-- api/               HTTP delivery: app factory, routes, schemas
 |           |-- commands/          CLI command handlers
+|           |-- config/            immutable validated AppConfig package
+|           |-- core/              constants, domain records, errors, env, file I/O
 |           |-- evals/             eval harness and comparison matrix
 |           |-- providers/         chat and embedding providers
 |           |-- rag/               discovery, chunking, stores, ingest
 |           |-- runtime/           answer runtimes and dispatch
 |           |-- agent.py           one-question facade
 |           |-- cli.py             argument parsing and command registry
-|           |-- config.py          immutable validated configuration
-|           |-- constants.py       shared closed option sets
-|           |-- env.py             typed env readers and validators
-|           |-- exceptions.py      expected-failure taxonomy
-|           |-- models.py          framework-free domain records
 |           |-- presenters.py      dataclass to JSON payload conversion
 |           `-- tools.py           capabilities exposed to agent runtimes
 |-- frontend/
@@ -134,31 +131,38 @@ The backend is responsible for:
 |   |   |-- components/            focused panels and result rendering
 |   |   |-- hooks/                 workspace state and actions
 |   |   |-- lib/                   HTTP client and display formatting
-|   |   `-- types/                 backend-facing contracts
+|   |   |-- types/                 backend-facing contracts
+|   |   `-- test/                  Vitest and Testing Library setup
 |   |-- index.html
 |   |-- package.json
+|   |-- vitest.config.ts
 |   `-- vite.config.ts
 |-- docs/                          documentation; start at docs/README.md
 |   |-- design/
+|   |-- development/
 |   |-- planning/
+|   |-- reference/
 |   `-- reviews/
 |-- data/
 |   |-- corpus/sample/             default retrieval and eval corpus
-|   `-- evals/                     gold eval set
-|-- scripts/                       manual, environment-dependent checks
+|   |-- evals/                     gold eval set and generated compare reports
+|   `-- index/                     generated index, manifest, and lock artifacts
+|-- scripts/                       manual live-service checks
 |-- tests/
 |-- AGENTS.md
 |-- spec.md
 |-- tasks.md
 |-- pyproject.toml
+|-- uv.lock
 |-- package.json
+|-- pnpm-lock.yaml
 |-- pnpm-workspace.yaml
 `-- README.md
 ```
 
 Two conventions keep the backend extensible:
 
-- `constants.py` is the single source of truth for every closed option set
+- `core/constants.py` is the single source of truth for every closed option set
   (runtimes, chunk strategies, vector backends, API styles). Configuration parsing,
   HTTP request validation, and CLI argument choices all derive from it, so adding an
   option is one edit plus its implementation.
@@ -183,7 +187,8 @@ The files you will reach for most often:
 - `docs/design/architecture.md`
   - module boundaries, dependency direction, state ownership, and the failure contract
 - `docs/development/`
-  - getting started, workflow, testing, extension recipes, and troubleshooting
+  - getting started, deployment and rollback, workflow, testing, extension
+    recipes, and troubleshooting
 - `docs/planning/development-roadmap.md`
   - long-horizon roadmap and phase plan
 - `docs/reviews/`
@@ -221,10 +226,14 @@ each eval number measures and what it cannot see.
 
 ## Tests
 
-The suite is offline and deterministic. The quality-gate commands are in
+The backend and frontend behavior suites are offline and deterministic. The
+quality-gate commands are in
 [AGENTS.md](AGENTS.md#quality-gates), the
 [testing guide](docs/development/testing.md) explains how tests are organized
-and written, and CI runs the same gates.
+and written, and CI runs the same gates. Generated builds, dependencies,
+indexes, reports, lock artifacts, and caches are listed in the
+[workflow guide](docs/development/workflow.md#generated-and-runtime-files);
+do not hand-edit them.
 
 ## Project highlights
 

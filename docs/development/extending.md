@@ -10,7 +10,10 @@ the repository root.
 
 Every recipe assumes the code style in [AGENTS.md](../../AGENTS.md#code-style):
 module-only imports, 80 columns, and a Google docstring on anything public.
-`ruff check` and `ruff format --check` enforce all three.
+Ruff enforces import ordering, line length, docstrings, lint, and formatting.
+Module-only imports are a code-review convention; the AST checks in
+`tests/test_import_graph.py` enforce layer direction, use of the `rag` facade,
+and capability-driven generic ingest lifecycle.
 
 ## A configuration setting
 
@@ -59,29 +62,41 @@ module-only imports, 80 columns, and a Google docstring on anything public.
 5. Normalize operational failures into `VectorStoreError` with a stable
    `reason_code`. The comparison matrix branches on it to report an unreachable
    service as a `skipped` cell rather than an `error`.
-6. Add an explicit case to `rag/ingest.storage_identity`. Canonicalize only
-   non-secret target data, strip credentials, and never let a new backend fall
-   through to another backend's identity. An unsupported or incompletely wired
-   backend must fail closed before it can claim or mutate storage.
+6. Extend `rag/ingest.validate_storage_target` and storage identity together.
+   Pure validation must not inspect files, acquire locks, build a client, contact
+   a service, or write anything. Give the backend an explicit identity branch,
+   canonicalize only non-secret target data, strip credentials, and never let a
+   new backend fall through to another backend's identity. An unsupported or
+   incompletely wired backend must fail closed before it can claim or mutate
+   storage.
 7. Define the backend's legacy-manifest ownership policy in
    `_validate_manifest_storage`. Decide deliberately whether an identity-less
    legacy manifest can rebuild and adopt this target, or must require an
    explicit operator ownership decision; do not inherit another backend's
    policy by fallthrough.
-8. Add a matching key and lock-file path mapping in `rag/index_lock.py`. Use the
-   same canonical target as storage identity and I/O, choose an appropriate
-   local or per-user remote location, and keep credentials out of both the key
-   and persistent lock artifact.
+8. Add a matching storage resource in `rag/index_lock.py`. The lifecycle guard
+   always locks both the bound manifest and store target in global key order.
+   Use the same canonical target as validation, identity, and I/O; put local
+   lock artifacts beside the resolved target or remote artifacts in a per-user
+   cache, and keep credentials out of the resource key and persistent artifact.
 9. Construct it in `rag/store_factory.py` and export it from `rag/__init__.py`.
    Do not add backend-name or concrete-type branches to generic ingest or
    readiness code; factory selection, storage identity, legacy ownership, and
    lock mapping are the deliberately backend-specific exceptions.
-10. Add lifecycle tests for missing, unchanged, changed, removed, and
+10. Decide how eval comparison isolates this backend before exposing it as an
+    axis choice. Local cells use temporary files; Qdrant cells use the
+    ownership-token initialization/deletion facade and UUID collection names.
+    A different persistent service needs an equally fail-closed, exact-target
+    ownership and cleanup path; it must not run through the local comparison
+    branch and mutate an interactive target.
+11. Add lifecycle tests for missing, unchanged, changed, removed, and
     changed-to-empty sources, plus retrieval and normalized-failure tests. Add
     identity/lock tests proving equivalent forms of the same target
     intentionally collide, distinct backends or targets do not collide,
     secrets never enter persisted identity/lock data, and unsupported or
-    unwired backend names fail closed.
+    unwired backend names fail closed. For a remote comparison backend, test
+    absence checks, ownership-token rejection, cleanup failure metadata, and
+    exact-name orphan recovery.
 
 ## A runtime
 
@@ -125,22 +140,46 @@ module-only imports, 80 columns, and a Google docstring on anything public.
 
 ## A comparison axis
 
-1. Add the setting with the first recipe.
-2. Add one `MatrixAxis` entry to `AXES` in `evals/comparison.py`, naming the
-   request key, the `AppConfig` field it overrides, its CLI flag, its label
-   prefix, and how it defaults.
-3. Add the matching field, under the same name, to `EvalCompareRequest` and
-   `EvalCompareResponse` in `api/schemas.py`.
-4. Add the field to the hand-synchronized comparison wire types in
-   `frontend/src/types/api.ts`. Extend the HTTP serialization and frontend
-   type/build checks in the same change.
+1. Add the `AppConfig` setting with the first recipe, including
+   `.env.example`, test-environment isolation, validation, and the
+   configuration reference.
+2. Add one `MatrixAxis` entry to `AXES` in `evals/comparison.py`. Its `name` is
+   the request and report key; `field` is the real `AppConfig` override;
+   `flag`, `noun`, and `label_prefix` drive CLI/help/labels; `choices` provides
+   a closed option set or `None` for integers; and `default` returns the values
+   used when the caller omits the axis. Decide that default deliberately. A
+   sweep can multiply calls and cost; holding steady uses the configured value.
+3. Add a constrained list alias when needed and a field under exactly
+   `axis.name` to both `EvalCompareRequest` and `EvalCompareResponse` in
+   `api/schemas.py`. The response field is required because every report echoes
+   its resolved axes; the request field is optional because omission selects
+   the axis default.
+4. The CLI parser derives repeatable flags from `AXES`, so do not add a second
+   hand-written flag. Confirm the generated flag's choices/type and destination
+   in `tests/test_eval_comparison.py`, and document it in
+   `docs/reference/cli.md`, including what omission does.
+5. Add the resolved response field to `CompareResponse` in
+   `frontend/src/types/api.ts`. If the UI can request values, add that request
+   field to its typed payload/control and to the JSON body in
+   `frontend/src/hooks/useRagWorkspace.ts`; cover the interaction with a
+   behavior test. Run both the frontend test and build gates so the
+   hand-synchronized wire type is checked.
+6. Update `docs/reference/http-api.md` request and response examples,
+   `docs/reference/metrics.md` report fields and label description,
+   `docs/reference/cli.md` flags/default count, and
+   `docs/reference/configuration.md` for the underlying setting. If the new
+   default changes cell count, cost, or remote mutations, say so explicitly in
+   the CLI and HTTP references.
+7. Run `tests/test_eval_comparison.py`, `tests/test_cli.py`,
+   `tests/test_docs.py`, the frontend behavior tests/build, and then the
+   applicable root quality gates.
 
 No other matrix-planning code changes are needed. The Cartesian product, the
 per-cell overrides, the run label, the report keys, and the CLI flag are all
 derived from that entry, and `tests/test_eval_comparison.py` fails if the
-Python schema, the CLI, or the label falls out of step with it. The TypeScript
-wire type remains an explicit delivery-boundary update rather than a derived
-artifact.
+Python schema, the CLI, or the label falls out of step with it. HTTP examples,
+TypeScript wire types, UI request serialization, and prose references remain
+explicit delivery-boundary updates rather than derived artifacts.
 
 That derivation is the point. The axes were once a parameter list, a length
 list, a `product()` call, and an unpacking tuple that had to agree by position.

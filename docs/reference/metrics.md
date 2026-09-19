@@ -80,7 +80,9 @@ case a reranker exists to fix.
 | `avg_response_time_ms` | mean response time, rounded to 2 decimals |
 | `results` | every per-case result |
 
-An empty run averages to `0.0`.
+Gold data must contain at least one case. The loader rejects an empty or
+whitespace-only file before eval or comparison can initialize an index, run a
+matrix cell, or emit a misleading all-zero summary.
 
 Three older names remain for existing report consumers. Prefer the canonical
 fields; the aliases carry the same values:
@@ -100,6 +102,11 @@ fields; the aliases carry the same values:
 
 `local-docs-rag eval-compare`, the internal comparison function, and
 `/api/eval/compare` expose the same provenance-bearing report shape:
+
+When axes are omitted, runtime, reranker, `top_k`, chunk size, and chunk overlap
+hold their configured values; chunk strategy sweeps all three choices;
+retrieval strategy sweeps all four; and Qdrant joins local only when a URL is
+configured. The default is therefore 12 local cells or 24 with Qdrant.
 
 | Field | Value |
 | --- | --- |
@@ -132,10 +139,15 @@ A cell's `status` is `ok`, `degraded`, `skipped`, or `error`. What each means,
 and the reasons attached to it, are in
 [troubleshooting](../development/troubleshooting.md#the-comparison-matrix).
 
-Before gold is loaded or a cell can touch storage, planning validates every
-executable storage target through the RAG facade. A missing Qdrant URL remains
-the explicit `missing_qdrant_url` skipped cell; a nonempty malformed Qdrant URL
-is a safe request-level configuration error rather than a partial comparison.
+Before gold is loaded or a cell can touch storage, planning resolves the whole
+Cartesian product, rejects empty axes and more than 128 cells, constructs every
+validated `AppConfig` variant, and validates every executable storage target
+through the RAG facade. A failure produces no partial run or CLI output. A
+missing Qdrant URL remains the explicit `missing_qdrant_url` skipped cell; a
+nonempty malformed Qdrant URL is a safe request-level configuration error.
+Execution then isolates local cells in temporary files and Qdrant cells in
+owned disposable collections. Configured live providers can make that sweep
+billable; a local no-key run instead reports fallback cells and no winner.
 
 ### Leaderboard
 

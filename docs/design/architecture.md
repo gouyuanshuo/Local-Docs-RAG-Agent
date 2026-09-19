@@ -33,7 +33,10 @@ provider policy. Both delegate to the same Python application modules.
 ### Delivery layer
 
 - `api/app.py`
-  - creates FastAPI, middleware, static hosting, and domain-error handlers
+  - creates FastAPI, middleware, static hosting, and domain-error handlers; it
+    starts API-only from an installed wheel, discovers `frontend/dist` only
+    from its exact source checkout, and accepts a validated explicit static
+    build for packaged deployment
 - `api/routes.py`
   - maps HTTP requests to application operations
 - `api/schemas.py`
@@ -55,6 +58,9 @@ import FastAPI, Pydantic, argparse, or frontend concerns.
 
 - `agent.py`
   - small facade for answering one question
+- `tools.py`
+  - application capabilities exposed to agent runtimes; retrieval enters through
+    the public `rag` facade
 - `runtime/dispatch.py`
   - selects `basic` or `agents_sdk`
 - `runtime/basic.py`
@@ -403,11 +409,18 @@ at all. `core` must not import `rag`, `runtime`, `evals`, or `api`.
 - `components/` owns focused panels and result rendering
 - `App.tsx` only composes the page layout
 
+Vite development defaults API requests to `http://127.0.0.1:8000`; production
+defaults to same-origin `/api/*`, while an explicit `VITE_API_BASE_URL` is
+compiled into the build. Health, info, and document bootstrap failures remain
+independent, and action failures render beside the owning control. Colocated
+Vitest and React Testing Library tests exercise these behaviors with HTTP
+mocked at the `fetch` boundary before the production build gate runs.
+
 ## State ownership
 
 | State | Owner | Durability |
 | --- | --- | --- |
-| Environment configuration | `AppConfig` | process/request snapshot |
+| Environment configuration | `AppConfig` | operation snapshot of process-scoped values; restart after env or `.env` changes |
 | Source documents | user-selected `DOCS_DIR` | external filesystem |
 | Local chunks | `LocalJsonlChunkStore` | atomic JSONL file |
 | Qdrant chunks | `QdrantChunkStore` | remote collection |
@@ -446,4 +459,7 @@ live in [AGENTS.md](../../AGENTS.md#quality-gates), and the
 where CI runs it.
 
 Live Qdrant and provider verification is a separate, environment-dependent
-check, reported separately from the deterministic offline gates.
+check, reported separately from the deterministic offline gates. It may incur
+provider charges and mutate an approved collection; configured ingest and
+comparison paths carry the same cost/mutation risk even though offline local
+no-key runs do not.

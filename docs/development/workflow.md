@@ -12,7 +12,10 @@ lands.
    changes phase status.
 
 Do not start by reading the whole repository. The contracts exist so a change
-can be made correctly from its module outward.
+can be made correctly from its module outward. A named, read-only repository
+audit is the exception: it may inventory multiple contracts, maintained docs,
+and implementation seams when the audit itself requires that evidence. It does
+not turn `spec.md` or the roadmap into mandatory reading for ordinary tasks.
 
 ## Branches and pushes
 
@@ -51,6 +54,13 @@ table says what each gate guards and where CI runs it.
 | Frontend tests | visible errors, independent bootstrap state, retries, and API-origin selection through mocked HTTP | Frontend → Test frontend behavior |
 | Frontend build | strict TypeScript (`tsc -b`) and a production Vite build | Frontend → Build frontend |
 
+The module-only import style is reviewed by humans; Ruff does not enforce it.
+`tests/test_import_graph.py` uses the Python AST to enforce the dependency rules
+that are mechanically checkable: every backend layer follows the declared
+dependency direction, delivery frameworks stay in delivery modules, production
+code outside `rag` uses its facade, and generic ingest lifecycle code branches
+on store capabilities rather than concrete backends.
+
 CI restores the backend with uv 0.12.16 from the universal `uv.lock` and runs
 every gate on Python 3.11 and 3.13. The Agents SDK registration regression uses
 the installed SDK from that restore, not a substitute module. CI restores the
@@ -75,13 +85,43 @@ one side makes a locked restore fail or silently preserves the wrong policy.
 Isolated wheel builds do not read `uv.lock`, so their exact build requirements
 stay pinned in `[build-system]` and are checked by the wheel smoke job.
 
+Change JavaScript dependencies with pnpm so it updates `package.json` and
+`pnpm-lock.yaml` together, then restore with `pnpm install --frozen-lockfile`.
+Never hand-edit either lockfile: update `uv.lock` with uv and
+`pnpm-lock.yaml` with pnpm, review the generated diff, and keep each lock with
+its manifest change.
+
 Live checks against real providers and Qdrant are not gates. They live in
 `scripts/`, never run in CI, and are reported separately from the offline
-results; see [troubleshooting](troubleshooting.md#live-checks).
+results. Chat, embedding, ingest, eval, and comparison work may consume paid
+provider calls when credentials are configured. Qdrant ingest and the strict
+live verifier mutate the configured collection; comparison creates and removes
+owned disposable collections. Obtain approval for the provider cost and target
+before running them. See [testing](testing.md#live-and-no-key-checks) and
+[troubleshooting](troubleshooting.md#live-checks).
 
 Packaging or deployment changes also follow the isolated wheel, static-build,
 startup, backup, and rollback checks in the
 [deployment guide](deployment.md#build-and-verify-a-release).
+
+## Generated and runtime files
+
+Do not hand-edit generated artifacts to make a check pass. Regenerate them from
+their owner, or move runtime data aside as a recoverable unit and rebuild it.
+
+| Path | Owner / safe action |
+| --- | --- |
+| `node_modules/`, `frontend/node_modules/` | pnpm dependencies; restore with `pnpm install --frozen-lockfile` |
+| `frontend/dist/` | Vite production output; recreate with `pnpm run build` |
+| `data/index/` | local index, manifest, and persistent advisory lock artifacts; stop writers and preserve the index/manifest pair before moving it aside, then rebuild with `local-docs-rag ingest` |
+| `data/evals/compare_latest.json`, `data/evals/local_vs_qdrant_compare.json` | generated comparison reports; rerun the producing comparison instead of editing a result |
+| `.venv/`, `__pycache__/`, `.ruff_cache/`, `.mypy_cache/`, `.pytest_cache/`, `.coverage`, `htmlcov/`, `*.tsbuildinfo` | environment, compiler, test, type, lint, and coverage caches; recreate with the owning tool |
+| local `.lock` files and Qdrant lock artifacts under the per-user cache | stable coordination identities, not application data; leave them in place and never delete one to bypass an active owner |
+| `uv.lock`, `pnpm-lock.yaml` | tracked dependency resolutions; change only with uv or pnpm, never by hand |
+
+The generated comparison reports are records of a particular run, not current
+quality truth. A no-key local comparison deliberately has an empty leaderboard
+because fallback cells are unrankable.
 
 ## Closing out a change
 
