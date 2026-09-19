@@ -214,6 +214,93 @@ def test_create_app_without_discovered_frontend_serves_api_and_json_root(
     }
 
 
+def test_create_app_ignores_unrelated_ancestor_project_frontend(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+) -> None:
+    unrelated_root = tmp_path / "unrelated-project"
+    unrelated_dist = unrelated_root / "frontend" / "dist"
+    unrelated_assets = unrelated_dist / "assets"
+    unrelated_assets.mkdir(parents=True)
+    (unrelated_root / "pyproject.toml").write_text(
+        "[project]\nname = 'unrelated'\n",
+        encoding="utf-8",
+    )
+    (unrelated_dist / "index.html").write_text(
+        "<main>unrelated frontend sentinel</main>",
+        encoding="utf-8",
+    )
+    (unrelated_assets / "unrelated.js").write_text(
+        "unrelated asset sentinel",
+        encoding="utf-8",
+    )
+    installed_module = (
+        unrelated_root
+        / ".venv"
+        / "lib"
+        / "python3.13"
+        / "site-packages"
+        / "local_docs_rag_agent"
+        / "api"
+        / "app.py"
+    )
+    monkeypatch.setattr(api_app, "__file__", str(installed_module))
+
+    client = fastapi_testclient.TestClient(api_app.create_app())
+
+    root_response = client.get("/")
+    asset_response = client.get("/assets/unrelated.js")
+
+    assert root_response.status_code == 200
+    assert root_response.headers["content-type"].startswith("application/json")
+    assert root_response.json()["name"] == "Local Docs RAG Agent API"
+    assert "unrelated frontend sentinel" not in root_response.text
+    assert asset_response.status_code == 404
+
+
+def test_create_app_discovers_frontend_from_its_source_checkout(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+) -> None:
+    checkout_root = tmp_path / "source-checkout"
+    source_module = (
+        checkout_root
+        / "backend"
+        / "src"
+        / "local_docs_rag_agent"
+        / "api"
+        / "app.py"
+    )
+    frontend_dist = checkout_root / "frontend" / "dist"
+    assets_dir = frontend_dist / "assets"
+    source_module.parent.mkdir(parents=True)
+    assets_dir.mkdir(parents=True)
+    source_module.write_text("# source module identity\n", encoding="utf-8")
+    (checkout_root / "pyproject.toml").write_text(
+        "[project]\nname = 'local-docs-rag-agent'\n",
+        encoding="utf-8",
+    )
+    (frontend_dist / "index.html").write_text(
+        "<main>source checkout frontend</main>",
+        encoding="utf-8",
+    )
+    (assets_dir / "source.js").write_text(
+        "source checkout asset",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(api_app, "__file__", str(source_module))
+
+    client = fastapi_testclient.TestClient(api_app.create_app())
+
+    index_response = client.get("/")
+    asset_response = client.get("/assets/source.js")
+
+    assert index_response.status_code == 200
+    assert index_response.text == "<main>source checkout frontend</main>"
+    assert asset_response.status_code == 200
+    assert asset_response.text == "source checkout asset"
+
+
 def test_create_app_serves_explicit_frontend_build(
     tmp_path: pathlib.Path,
 ) -> None:
@@ -240,6 +327,40 @@ def test_create_app_serves_explicit_frontend_build(
     assert index_response.text == "<main>explicit frontend</main>"
     assert asset_response.status_code == 200
     assert asset_response.text == ('document.body.dataset.bundle = "explicit";')
+
+
+def test_create_app_stabilizes_explicit_relative_frontend_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+) -> None:
+    initial_working_dir = tmp_path / "initial-working-dir"
+    later_working_dir = tmp_path / "later-working-dir"
+    initial_working_dir.mkdir()
+    later_working_dir.mkdir()
+    monkeypatch.chdir(initial_working_dir)
+    relative_dist = pathlib.Path("relative-frontend")
+    assets_dir = relative_dist / "assets"
+    assets_dir.mkdir(parents=True)
+    (relative_dist / "index.html").write_text(
+        "<main>stable relative frontend</main>",
+        encoding="utf-8",
+    )
+    (assets_dir / "relative.js").write_text(
+        "stable relative asset",
+        encoding="utf-8",
+    )
+
+    application = api_app.create_app(frontend_dist_dir=relative_dist)
+    monkeypatch.chdir(later_working_dir)
+    client = fastapi_testclient.TestClient(application)
+
+    index_response = client.get("/")
+    asset_response = client.get("/assets/relative.js")
+
+    assert index_response.status_code == 200
+    assert index_response.text == "<main>stable relative frontend</main>"
+    assert asset_response.status_code == 200
+    assert asset_response.text == "stable relative asset"
 
 
 def test_create_app_rejects_invalid_explicit_frontend_without_fallback(

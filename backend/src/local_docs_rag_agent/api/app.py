@@ -25,6 +25,7 @@ from local_docs_rag_agent.core import exceptions
 _INVALID_FRONTEND_DIST_MESSAGE = (
     "frontend_dist_dir must contain index.html and an assets directory"
 )
+_SOURCE_APP_PATH = pathlib.Path("backend/src/local_docs_rag_agent/api/app.py")
 
 
 def _is_frontend_dist_dir(path: pathlib.Path) -> bool:
@@ -38,11 +39,18 @@ def _is_frontend_dist_dir(path: pathlib.Path) -> bool:
 def _discover_frontend_dist_dir() -> pathlib.Path | None:
     current = pathlib.Path(__file__).resolve()
     for parent in current.parents:
-        if (parent / "pyproject.toml").is_file():
-            frontend_dist_dir = parent / "frontend" / "dist"
-            if _is_frontend_dist_dir(frontend_dist_dir):
-                return frontend_dist_dir
-            return None
+        source_app_path = parent / _SOURCE_APP_PATH
+        if (
+            (parent / "pyproject.toml").is_file()
+            and source_app_path.is_file()
+            and source_app_path.resolve() == current
+        ):
+            frontend_dist_dir = (parent / "frontend" / "dist").resolve()
+            return (
+                frontend_dist_dir
+                if _is_frontend_dist_dir(frontend_dist_dir)
+                else None
+            )
     return None
 
 
@@ -51,9 +59,13 @@ def _select_frontend_dist_dir(
 ) -> pathlib.Path | None:
     if frontend_dist_dir is None:
         return _discover_frontend_dist_dir()
-    if not _is_frontend_dist_dir(frontend_dist_dir):
+    try:
+        resolved_frontend_dist_dir = frontend_dist_dir.resolve()
+    except (OSError, RuntimeError):
+        raise ValueError(_INVALID_FRONTEND_DIST_MESSAGE) from None
+    if not _is_frontend_dist_dir(resolved_frontend_dist_dir):
         raise ValueError(_INVALID_FRONTEND_DIST_MESSAGE)
-    return frontend_dist_dir
+    return resolved_frontend_dist_dir
 
 
 def create_app(
