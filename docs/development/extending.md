@@ -2,8 +2,8 @@
 
 Recipes for the extension points the design anticipates. Each one lists every
 place a change has to reach. A missed step here rarely crashes: it shows up as a
-setting the tests do not isolate, an option set declared twice, or a degraded run
-that reads as a live one.
+setting the tests do not isolate, a browser wire union left stale, or a degraded
+run that reads as a live one.
 
 Paths are relative to `backend/src/local_docs_rag_agent/` unless they start at
 the repository root.
@@ -30,6 +30,13 @@ and capability-driven generic ingest lifecycle.
    `core/constants.py` as a `Literal` alias with its derived tuple.
    Configuration parsing, request validation, and CLI choices all read it from
    there.
+7. Add the setting, default, validation, and effect to
+   `docs/reference/configuration.md`. `tests/test_docs.py` checks that every
+   environment variable read by `AppConfig` is named there.
+8. If the setting crosses the HTTP or browser boundary, update the matching
+   `api/schemas.py` model, `frontend/src/types/api.ts`, UI control or display,
+   behavior test, and HTTP reference. Run the frontend test and build gates;
+   TypeScript option unions are hand-synchronized with Python.
 
 ## A provider
 
@@ -97,6 +104,13 @@ and capability-driven generic ingest lifecycle.
     unwired backend names fail closed. For a remote comparison backend, test
     absence checks, ownership-token rejection, cleanup failure metadata, and
     exact-name orphan recovery.
+12. Update `VectorBackendName` in `frontend/src/types/api.ts`; it is a
+    hand-synchronized copy of the Python option set used by app-info,
+    diagnostics, retrieval configuration, and comparison reports. Run the
+    frontend behavior tests and build. Also update the vector-backend values
+    in `docs/reference/configuration.md`, plus the HTTP, CLI, deployment,
+    backup, and troubleshooting guidance affected by the backend's operating
+    model.
 
 ## A runtime
 
@@ -107,6 +121,13 @@ and capability-driven generic ingest lifecycle.
 4. Retrieve through `rag.retrieve` and assemble citations with
    `runtime/shared.py`, so every runtime retrieves and cites the same way.
 5. Wire it into `runtime/dispatch.py`.
+6. Add the name to the hand-synchronized `RuntimeName` union in
+   `frontend/src/types/api.ts` and add its explicit selector option in
+   `frontend/src/components/AskPanel.tsx`. Cover selection and response
+   rendering in a frontend behavior test, then run the test and build gates.
+7. Update the runtime values and behavior in
+   `docs/reference/configuration.md`, `docs/reference/http-api.md`, and the
+   relevant CLI/troubleshooting guidance.
 
 ## A reranker
 

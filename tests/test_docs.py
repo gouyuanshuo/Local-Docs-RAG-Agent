@@ -30,6 +30,7 @@ REFERENCE_DIR = DOCS_DIR / "reference"
 PACKAGE_DIR = REPO_ROOT / "backend" / "src" / "local_docs_rag_agent"
 ROOT_AGENTS = REPO_ROOT / "AGENTS.md"
 ROOT_README = REPO_ROOT / "README.md"
+ROOT_GITIGNORE = REPO_ROOT / ".gitignore"
 HTTP_VERBS = frozenset({"get", "post", "put", "patch", "delete"})
 
 FENCE_RE = re.compile(r"^(```|~~~).*?^\1", re.MULTILINE | re.DOTALL)
@@ -326,6 +327,43 @@ def test_root_agents_lists_every_locked_quality_gate() -> None:
     assert [
         command for command in expected_commands if command not in agents
     ] == []
+
+
+def test_python_build_outputs_are_ignored_and_documented() -> None:
+    ignored = {
+        line.strip()
+        for line in ROOT_GITIGNORE.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    expected_patterns = {
+        "/build/",
+        "/dist/",
+        "backend/src/*.egg-info/",
+    }
+    workflow = (DOCS_DIR / "development" / "workflow.md").read_text(
+        encoding="utf-8"
+    )
+    generated = _section(workflow, "## Generated and runtime files")
+
+    assert expected_patterns <= ignored
+    for path in ("`build/`", "`dist/`", "`backend/src/*.egg-info/`"):
+        assert path in generated
+
+
+def test_extension_recipes_name_hand_synchronized_surfaces() -> None:
+    text = (DOCS_DIR / "development" / "extending.md").read_text(
+        encoding="utf-8"
+    )
+    config_recipe = _section(text, "## A configuration setting")
+    store_recipe = _section(text, "## A vector store")
+    runtime_recipe = _section(text, "## A runtime")
+
+    assert "docs/reference/configuration.md" in config_recipe
+    assert "frontend/src/types/api.ts" in store_recipe
+    assert "VectorBackendName" in store_recipe
+    assert "frontend/src/types/api.ts" in runtime_recipe
+    assert "RuntimeName" in runtime_recipe
+    assert "frontend/src/components/AskPanel.tsx" in runtime_recipe
 
 
 def test_http_success_examples_match_the_response_schemas() -> None:

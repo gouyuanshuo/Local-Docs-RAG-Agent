@@ -162,10 +162,11 @@ The backend is responsible for:
 
 Two conventions keep the backend extensible:
 
-- `core/constants.py` is the single source of truth for every closed option set
-  (runtimes, chunk strategies, vector backends, API styles). Configuration parsing,
-  HTTP request validation, and CLI argument choices all derive from it, so adding an
-  option is one edit plus its implementation.
+- `core/constants.py` is the Python source of truth for every closed option set
+  (runtimes, chunk strategies, vector backends, API styles). Backend configuration,
+  HTTP request validation, and CLI choices derive from it. The TypeScript wire unions
+  are necessarily hand-synchronized, so a browser-visible option also updates
+  `frontend/src/types/api.ts` and its control in the same change.
 - `rag/` is imported through its package facade. Code outside it imports from
   `local_docs_rag_agent.rag`, not from individual modules, so the internal split
   between the `ChunkStore` protocol, the two store implementations, and the ingest

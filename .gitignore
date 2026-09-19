@@ -2,6 +2,8 @@
 .venv/
 __pycache__/
 *.pyc
+/build/
+/dist/
 backend/src/*.egg-info/
 
 # Tooling caches and coverage output

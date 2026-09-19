@@ -76,7 +76,9 @@ in production code. Tests may import internals.
 - Measurable > explainable > reliable > more agent-like > more product-like.
 - Do not treat fallback as success; keep `ProviderStatus` visible.
 - Prefer extending an existing module over a new top-level package.
-- Closed option sets live only in `core/constants.py`.
+- Backend closed option sets live only in `core/constants.py`. The TypeScript
+  wire unions in `frontend/src/types/api.ts` are hand-synchronized copies and
+  change with the Python option and any UI control.
 - See `docs/development/extending.md` to add a provider, store, runtime, CLI command,
   or config field.
 
@@ -95,7 +97,8 @@ and formatting rules in `pyproject.toml`:
 Module-only imports are a code-review convention, not a Ruff rule. The AST
 checks in `tests/test_import_graph.py` enforce the dependency direction above,
 delivery-framework isolation, the public `rag` facade, and capability-driven
-generic ingest lifecycle.
+generic ingest lifecycle. The root package initializer follows the `core`
+boundary; unknown `local_docs_rag_agent.*` targets fail closed.
 
 Deliberate exceptions (adding a fifth needs a reason in the commit):
 

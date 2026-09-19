@@ -125,8 +125,11 @@ never reports a degraded run as a successful one.
 
 ## 6. Check your setup
 
-Run the quality gates from [AGENTS.md](../../AGENTS.md#quality-gates). They are
-offline and deterministic, so they pass on a fresh clone with no keys at all.
-Do not hand-edit the generated index, manifest, lock files, frontend build, or
-dependency trees; the [workflow inventory](workflow.md#generated-and-runtime-files)
-names their owning commands.
+Run the quality gates from [AGENTS.md](../../AGENTS.md#quality-gates). After the
+locked dependency restores, the behavior gates are deterministic and require
+no provider keys or production services. A cache-cold fresh clone may contact
+the Python and JavaScript package registries during `uv sync` and
+`pnpm install`. Do not hand-edit the generated index, manifest, lock files,
+frontend build, or dependency trees; the
+[workflow inventory](workflow.md#generated-and-runtime-files) names their
+owning commands.

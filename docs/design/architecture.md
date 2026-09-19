@@ -377,10 +377,11 @@ Coding-agent contracts live next to the code (`*/AGENTS.md`). Root `AGENTS.md`
 is the router; this file stays the system diagram.
 
 - `core/constants.py`
-  - the closed option sets shared by every layer: runtimes, chunk strategies, vector
-    backends, API styles, retrieval strategies, and rerankers. The runtime tuples are
-    derived from the `Literal` aliases
-    with `typing.get_args`, so the static type and the runtime validation cannot drift
+  - the closed option sets shared by every backend layer: runtimes, chunk
+    strategies, vector backends, API styles, retrieval strategies, and
+    rerankers. Runtime tuples derive from the `Literal` aliases with
+    `typing.get_args`, so Python static types and runtime validation cannot
+    drift. TypeScript wire unions remain explicit hand-synchronized copies
 - `core/env.py`
   - typed environment readers and value validators
 - `core/models.py`

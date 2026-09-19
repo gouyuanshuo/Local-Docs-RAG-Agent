@@ -59,7 +59,9 @@ The module-only import style is reviewed by humans; Ruff does not enforce it.
 that are mechanically checkable: every backend layer follows the declared
 dependency direction, delivery frameworks stay in delivery modules, production
 code outside `rag` uses its facade, and generic ingest lifecycle code branches
-on store capabilities rather than concrete backends.
+on store capabilities rather than concrete backends. The root package
+initializer follows the `core` boundary, and an unknown package target fails
+closed rather than acting as an unchecked re-export.
 
 CI restores the backend with uv 0.12.16 from the universal `uv.lock` and runs
 every gate on Python 3.11 and 3.13. The Agents SDK registration regression uses
@@ -113,6 +115,7 @@ their owner, or move runtime data aside as a recoverable unit and rebuild it.
 | --- | --- |
 | `node_modules/`, `frontend/node_modules/` | pnpm dependencies; restore with `pnpm install --frozen-lockfile` |
 | `frontend/dist/` | Vite production output; recreate with `pnpm run build` |
+| `build/`, `dist/`, `backend/src/*.egg-info/` | Python package intermediates and release output; recreate with `uv build`, and never edit copied package files in place |
 | `data/index/` | local index, manifest, and persistent advisory lock artifacts; stop writers and preserve the index/manifest pair before moving it aside, then rebuild with `local-docs-rag ingest` |
 | `data/evals/compare_latest.json`, `data/evals/local_vs_qdrant_compare.json` | generated comparison reports; rerun the producing comparison instead of editing a result |
 | `.venv/`, `__pycache__/`, `.ruff_cache/`, `.mypy_cache/`, `.pytest_cache/`, `.coverage`, `htmlcov/`, `*.tsbuildinfo` | environment, compiler, test, type, lint, and coverage caches; recreate with the owning tool |
