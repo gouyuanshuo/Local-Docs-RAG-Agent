@@ -6,10 +6,8 @@ export function resolveApiBaseUrl(
   configuredBaseUrl: string | undefined,
   isDevelopment: boolean,
 ): string {
-  return (
-    configuredBaseUrl?.replace(/\/$/, "") ??
-    (isDevelopment ? DEVELOPMENT_API_BASE_URL : "")
-  );
+  const explicitBaseUrl = configuredBaseUrl?.trim().replace(/\/$/, "");
+  return explicitBaseUrl || (isDevelopment ? DEVELOPMENT_API_BASE_URL : "");
 }
 
 export const apiBaseUrl = resolveApiBaseUrl(

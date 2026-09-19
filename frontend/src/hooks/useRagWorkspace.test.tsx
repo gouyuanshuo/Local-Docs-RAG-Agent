@@ -170,6 +170,46 @@ it("retains health and config when only document bootstrap fails", async () => {
   expect(screen.queryByText("Backend unavailable")).not.toBeInTheDocument();
 });
 
+it("renders completed bootstrap resources while a sibling is still pending", async () => {
+  const pendingDocuments = deferred<Response>();
+  mockApi({
+    "/api/documents": () => pendingDocuments.promise,
+  });
+  render(<App />);
+
+  expect(await screen.findByText("Backend ok")).toBeVisible();
+  expect(screen.getByText("test-chat / test-model")).toBeVisible();
+  expect(callsFor("/api/documents")).toHaveLength(1);
+});
+
+it("finishes ingest while a document refresh is still pending", async () => {
+  const pendingDocuments = deferred<Response>();
+  let documentCalls = 0;
+  mockApi({
+    "/api/documents": () => {
+      documentCalls += 1;
+      return documentCalls === 1
+        ? jsonResponse({ count: 1, documents: ["docs/example.md"] })
+        : pendingDocuments.promise;
+    },
+    "/api/ingest": () => jsonResponse({ status: "ok" }),
+  });
+  const user = userEvent.setup();
+  render(<App />);
+  await screen.findByText("Backend ok");
+
+  const ingestButton = screen.getByRole("button", { name: "Run Ingest" });
+  await user.click(ingestButton);
+  await waitFor(() => {
+    expect(callsFor("/api/documents")).toHaveLength(2);
+  });
+
+  await waitFor(() => {
+    expect(ingestButton).toBeEnabled();
+  });
+  expect(screen.getByText(/"status": "ok"/)).toBeInTheDocument();
+});
+
 it("ignores an older bootstrap that settles after a post-ingest refresh", async () => {
   const initialHealth = deferred<Response>();
   const initialInfo = deferred<Response>();
@@ -258,6 +298,33 @@ it("clears an ask failure after a successful retry", async () => {
   expect(await screen.findByText("The retry recovered.")).toBeVisible();
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   expect(callsFor("/api/ask")).toHaveLength(2);
+});
+
+it("renders backend citation ids and preserves an unlabelled span", async () => {
+  mockApi({
+    "/api/ask": () =>
+      jsonResponse({
+        ...ASK_RESPONSE,
+        citation_spans: [
+          ASK_RESPONSE.citation_spans[0],
+          {
+            ...ASK_RESPONSE.citation_spans[0],
+            chunk_id: "example-1",
+            chunk_index: 1,
+            source_id: null,
+          },
+        ],
+      }),
+  });
+  const user = userEvent.setup();
+  render(<App />);
+  await screen.findByText("Backend ok");
+
+  await user.click(screen.getByRole("button", { name: "Ask Docs" }));
+
+  expect(await screen.findByText("S1")).toBeVisible();
+  expect(screen.getByText("unlabelled")).toBeVisible();
+  expect(screen.queryByText("S2")).not.toBeInTheDocument();
 });
 
 it("shows action failures and clears them after a successful retry", async () => {

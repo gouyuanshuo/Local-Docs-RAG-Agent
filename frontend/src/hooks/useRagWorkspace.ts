@@ -31,38 +31,52 @@ export function useRagWorkspace() {
   const [isAsking, setIsAsking] = useState(false);
   const [isActing, setIsActing] = useState(false);
 
-  const bootstrap = useCallback(async () => {
+  const bootstrap = useCallback(() => {
     bootstrapGeneration.current += 1;
     const generation = bootstrapGeneration.current;
     setHealthError(null);
     setInfoError(null);
     setDocumentsError(null);
-    const [healthResult, infoResult, documentsResult] = await Promise.allSettled([
-      requestJson<Health>("/api/health"),
-      requestJson<AppInfo>("/api/info"),
-      requestJson<DocumentsResponse>("/api/documents"),
-    ]);
-    if (generation !== bootstrapGeneration.current) {
-      return;
-    }
-    if (healthResult.status === "fulfilled") {
-      setHealth(healthResult.value);
-    } else {
-      setHealth(null);
-      setHealthError(errorMessage(healthResult.reason));
-    }
-    if (infoResult.status === "fulfilled") {
-      setInfo(infoResult.value);
-    } else {
-      setInfo(null);
-      setInfoError(errorMessage(infoResult.reason));
-    }
-    if (documentsResult.status === "fulfilled") {
-      setDocuments(documentsResult.value.documents);
-    } else {
-      setDocuments([]);
-      setDocumentsError(errorMessage(documentsResult.reason));
-    }
+
+    void requestJson<Health>("/api/health").then(
+      (result) => {
+        if (generation === bootstrapGeneration.current) {
+          setHealth(result);
+        }
+      },
+      (error: unknown) => {
+        if (generation === bootstrapGeneration.current) {
+          setHealth(null);
+          setHealthError(errorMessage(error));
+        }
+      },
+    );
+    void requestJson<AppInfo>("/api/info").then(
+      (result) => {
+        if (generation === bootstrapGeneration.current) {
+          setInfo(result);
+        }
+      },
+      (error: unknown) => {
+        if (generation === bootstrapGeneration.current) {
+          setInfo(null);
+          setInfoError(errorMessage(error));
+        }
+      },
+    );
+    void requestJson<DocumentsResponse>("/api/documents").then(
+      (result) => {
+        if (generation === bootstrapGeneration.current) {
+          setDocuments(result.documents);
+        }
+      },
+      (error: unknown) => {
+        if (generation === bootstrapGeneration.current) {
+          setDocuments([]);
+          setDocumentsError(errorMessage(error));
+        }
+      },
+    );
   }, []);
 
   useEffect(() => {
@@ -105,7 +119,7 @@ export function useRagWorkspace() {
         method: "POST",
       });
       setActionRaw(pretty(payload));
-      await bootstrap();
+      bootstrap();
     } catch (error) {
       const message = errorMessage(error);
       setActionError(message);

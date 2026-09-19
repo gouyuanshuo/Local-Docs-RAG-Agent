@@ -10,6 +10,11 @@ it("uses same-origin API paths in production", () => {
   expect(resolveApiBaseUrl(undefined, false)).toBe("");
 });
 
+it("treats an empty configured origin as unset", () => {
+  expect(resolveApiBaseUrl("", true)).toBe("http://127.0.0.1:8000");
+  expect(resolveApiBaseUrl("", false)).toBe("");
+});
+
 it("uses an explicit origin in every mode and removes its trailing slash", () => {
   expect(resolveApiBaseUrl("https://api.example.test/", false)).toBe(
     "https://api.example.test",
