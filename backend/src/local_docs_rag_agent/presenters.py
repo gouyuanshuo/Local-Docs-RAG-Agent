@@ -58,6 +58,7 @@ def serialize_citation_span(span: models.CitationSpan) -> dict[str, object]:
         "start_char": span.start_char,
         "end_char": span.end_char,
         "text": span.text,
+        "source_id": span.source_id,
     }
 
 

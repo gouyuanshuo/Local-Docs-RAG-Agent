@@ -27,6 +27,8 @@ Ask `question` max length 4000.
 - `/api/eval/compare` preserves the raw report's `dataset_identity`, each
   cell's `dataset_identity` and `configuration_identity`, and optional typed
   `run_metadata`; delivery must not discard orphan-recovery details.
+- `/api/ask` preserves each citation span's answer-local `source_id`; legacy
+  or otherwise unlabelled spans serialize it as `null`.
 - Malformed Qdrant targets return 400 before comparison side effects. Raw
   URLs, credentials, API keys, and client exception context never enter HTTP
   bodies or headers; normalized compare failures stay 200 per-cell outcomes,

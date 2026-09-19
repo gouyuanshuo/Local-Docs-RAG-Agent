@@ -151,6 +151,7 @@ class CitationSpanResponse(pydantic.BaseModel):
     start_char: pydantic.NonNegativeInt
     end_char: pydantic.NonNegativeInt
     text: str
+    source_id: str | None = None
 
 
 class AnswerDiagnosticsResponse(pydantic.BaseModel):

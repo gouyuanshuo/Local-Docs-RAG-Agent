@@ -8,9 +8,10 @@ import pytest
 import qdrant_client
 from fastapi import testclient as fastapi_testclient
 
-from local_docs_rag_agent import rag
+from local_docs_rag_agent import agent, presenters, rag
 from local_docs_rag_agent.api import app as api_app
 from local_docs_rag_agent.api import schemas
+from local_docs_rag_agent.core import models
 from local_docs_rag_agent.evals import comparison, harness
 from local_docs_rag_agent.providers import factory as provider_factory
 
@@ -228,6 +229,110 @@ def test_ask_rejects_oversized_question() -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_ask_exposes_answer_local_citation_source_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VECTOR_BACKEND", "local")
+    monkeypatch.setenv("AGENT_RUNTIME", "basic")
+    monkeypatch.setenv("LLM_API_KEY", "")
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    monkeypatch.setenv("EMBEDDING_API_KEY", "")
+
+    def skip_index(config: object) -> None:
+        del config
+
+    def answer_with_source_id(
+        self: agent.LocalDocsAgent,
+        question: str,
+    ) -> models.AgentAnswer:
+        del self
+        live_status = models.ProviderStatus(provider="test", mode="live")
+        return models.AgentAnswer(
+            question=question,
+            answer="The answer is grounded in the cited span [S1].",
+            citations=["docs/source.md"],
+            citation_spans=[
+                models.CitationSpan(
+                    source_path="docs/source.md",
+                    chunk_id="chunk-1",
+                    chunk_index=0,
+                    start_char=10,
+                    end_char=34,
+                    text="grounded citation text",
+                    source_id="S1",
+                )
+            ],
+            retrieved_chunks=[],
+            diagnostics=models.AnswerDiagnostics(
+                requested_runtime="basic",
+                actual_runtime="basic",
+                vector_backend="local",
+                chat_provider=live_status,
+                embedding_provider=live_status,
+                reranker=models.ProviderStatus(
+                    provider="none",
+                    mode="ready",
+                    reason="reranker_disabled",
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(rag, "ensure_index", skip_index)
+    monkeypatch.setattr(
+        agent.LocalDocsAgent,
+        "answer",
+        answer_with_source_id,
+    )
+    client = fastapi_testclient.TestClient(api_app.create_app())
+
+    response = client.post(
+        "/api/ask",
+        json={"question": "Which source supports the answer?"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["answer"].endswith("[S1].")
+    assert payload["citation_spans"] == [
+        {
+            "source_path": "docs/source.md",
+            "chunk_id": "chunk-1",
+            "chunk_index": 0,
+            "start_char": 10,
+            "end_char": 34,
+            "text": "grounded citation text",
+            "source_id": "S1",
+        }
+    ]
+
+
+def test_citation_span_schema_serializes_missing_source_id_as_null() -> None:
+    span = models.CitationSpan(
+        source_path="legacy.md",
+        chunk_id="legacy-chunk",
+        chunk_index=0,
+        start_char=0,
+        end_char=11,
+        text="legacy span",
+    )
+    expected = {
+        "source_path": "legacy.md",
+        "chunk_id": "legacy-chunk",
+        "chunk_index": 0,
+        "start_char": 0,
+        "end_char": 11,
+        "text": "legacy span",
+        "source_id": None,
+    }
+    payload = presenters.serialize_citation_span(span)
+
+    assert payload == expected
+
+    response = schemas.CitationSpanResponse.model_validate(payload)
+
+    assert response.model_dump(mode="json") == expected
 
 
 def test_eval_compare_schema_preserves_run_provenance() -> None:
