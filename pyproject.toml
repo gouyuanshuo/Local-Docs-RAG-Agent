@@ -19,6 +19,7 @@ dependencies = [
     "openai>=1.109.1",
     "portalocker>=3.2.0",
     "python-dotenv>=1.0.1",
+    "urllib3>=2.8.0",
     "uvicorn>=0.30.0",
 ]
 

@@ -187,12 +187,13 @@ Index lifecycle serialization is a single-host, same-user guarantee. Each
 operation locks two independent resources: the canonical ingest manifest and
 the canonical storage target. Resource keys are acquired in deterministic
 global order under one finite deadline, using explicit per-resource thread
-locks plus operating-system advisory locks. The owning thread may enter the
-same guard reentrantly so retrieval can call `ensure_index` while holding
-readiness and query under one critical section. A shared manifest serializes
-even when storage differs, and shared storage serializes even when manifests
-differ; configurations sharing neither resource remain concurrent. Partial
-acquisition unwinds every resource already acquired, and release failures do
+locks plus operating-system advisory locks. Retrieval passes the guard's bound
+targets to the locked readiness helper, keeping readiness and query under one
+critical section without resolving or entering the guard again. A shared
+manifest serializes even when storage differs, and shared storage serializes
+even when manifests differ; configurations sharing neither resource remain
+concurrent. Partial acquisition unwinds every resource already acquired, and
+release failures do
 not prevent attempts to release the remaining resources. Thread-lock and
 operating-system-lock ownership are rolled back if an interruption lands
 between acquisition and bookkeeping publication; cleanup failures do not
@@ -269,10 +270,11 @@ The ingest order is deliberate:
 11. atomically publish the clean manifest
 
 Retrieval holds the same guard while it checks readiness and queries the store.
-It enters `ensure_index` reentrantly, captures the embedding status, and
-releases the guard before reranking or answer generation. If a process dies
-after step 8, the next reader sees `repair_required` and deterministically
-rebuilds current sources and replays idempotent stale/replacement deletes.
+It calls the locked readiness helper with the guard's bound targets, captures
+the embedding status, and releases the guard before reranking or answer
+generation. If a process dies after step 9, the next reader sees
+`repair_required` and deterministically rebuilds current sources and replays
+idempotent stale/replacement deletes.
 Paths in `needs_reindex` remain deletion-owned even when a newly written source
 is removed or excluded before repair. They are cleared only after the repair's
 delete succeeds and the clean manifest is published.

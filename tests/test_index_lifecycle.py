@@ -746,6 +746,58 @@ def test_qdrant_lock_artifacts_exclude_endpoint_credentials(
         assert secret not in rendered
 
 
+def test_qdrant_guard_serializes_equivalent_scoped_ipv6_targets(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    first_root.mkdir()
+    second_root.mkdir()
+    first = _qdrant_config(first_root).with_overrides(
+        qdrant_url="https://[fe80::1%25eth0]/cluster"
+    )
+    second = _qdrant_config(second_root).with_overrides(
+        qdrant_url="https://[fe80::1%eth0]/cluster"
+    )
+    index_lock = importlib.import_module("local_docs_rag_agent.rag.index_lock")
+    remote_lock_root = tmp_path / "remote-locks"
+    monkeypatch.setattr(index_lock, "_REMOTE_LOCK_ROOT", remote_lock_root)
+    holder_entered = threading.Event()
+    release_holder = threading.Event()
+    contender_entered = threading.Event()
+    errors: list[BaseException] = []
+
+    def hold() -> None:
+        try:
+            with rag.index_guard(first):
+                holder_entered.set()
+                assert release_holder.wait(timeout=5.0)
+        except BaseException as exc:  # pragma: no cover - assertion reports it
+            errors.append(exc)
+
+    holder = threading.Thread(target=hold)
+    contender = threading.Thread(
+        target=_enter_guard_from_thread,
+        args=(second, contender_entered, errors),
+    )
+    holder.start()
+    try:
+        assert holder_entered.wait(timeout=5.0) is True
+        contender.start()
+        assert contender_entered.wait(timeout=0.3) is False
+        release_holder.set()
+        assert contender_entered.wait(timeout=5.0) is True
+    finally:
+        release_holder.set()
+        holder.join(timeout=5.0)
+        contender.join(timeout=5.0)
+    assert not holder.is_alive()
+    assert not contender.is_alive()
+    assert errors == []
+    assert len(list(remote_lock_root.glob("*.lock"))) == 1
+
+
 @pytest.mark.skipif(not hasattr(os, "fork"), reason="requires POSIX fork")
 def test_fork_child_reacquires_os_lock_before_entering(
     tmp_path: pathlib.Path,

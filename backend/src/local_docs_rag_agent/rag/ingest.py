@@ -30,6 +30,7 @@ import re
 from urllib import parse
 
 import idna
+from urllib3 import util as urllib3_util
 
 from local_docs_rag_agent import config as app_config
 from local_docs_rag_agent.core import exceptions, models
@@ -317,14 +318,15 @@ def _canonical_qdrant_url(url: str) -> str:
             for character in url
         ):
             raise ValueError
-        parsed = parse.urlsplit(url)
-        scheme = parsed.scheme.lower()
-        hostname = parsed.hostname
+        parsed = urllib3_util.parse_url(url)
+        scheme = parsed.scheme.lower() if parsed.scheme else ""
+        hostname = parsed.host
         port = parsed.port
         if scheme not in {"http", "https"} or hostname is None or port == 0:
             raise ValueError
+        _reject_percent_encoded_dns_host(url, hostname)
         normalized_host = _canonical_qdrant_host(hostname)
-        normalized_path = _canonical_qdrant_path(parsed.path)
+        normalized_path = _canonical_qdrant_path(parsed.path or "")
     except (TypeError, UnicodeError, ValueError):
         raise exceptions.ConfigurationError(
             "QDRANT_URL must be a valid HTTP(S) endpoint"
@@ -353,6 +355,20 @@ def _canonical_qdrant_path(path: str) -> str:
     return parse.quote(normalized, safe=safe).rstrip("/")
 
 
+def _reject_percent_encoded_dns_host(url: str, parsed_host: str) -> None:
+    if parsed_host.startswith("["):
+        return
+    # urllib3 decodes percent escapes in DNS labels. Keep the project's
+    # stricter raw-host policy without using this check to derive identity.
+    _, separator, remainder = url.partition("://")
+    if not separator:
+        raise ValueError
+    raw_authority = re.split(r"[/\\?#]", remainder, maxsplit=1)[0]
+    raw_host_port = raw_authority.rpartition("@")[2]
+    if "%" in raw_host_port:
+        raise ValueError
+
+
 def _local_storage_target_payload(
     index_path: pathlib.Path,
 ) -> dict[str, str]:
@@ -365,6 +381,8 @@ def _local_storage_target_payload(
 def _canonical_qdrant_host(hostname: str) -> str:
     if not hostname:
         raise ValueError
+    if hostname.startswith("[") and hostname.endswith("]"):
+        hostname = hostname[1:-1]
     if ":" in hostname:
         address = ipaddress.IPv6Address(hostname)
         return f"[{address.compressed}]"

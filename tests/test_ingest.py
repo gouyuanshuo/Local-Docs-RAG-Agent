@@ -893,6 +893,47 @@ def test_qdrant_identity_matches_effective_generated_request_target(
     assert ingest.storage_identity(first) == ingest.storage_identity(second)
 
 
+def test_qdrant_scoped_ipv6_identity_matches_generated_request_target(
+    tmp_path: pathlib.Path,
+) -> None:
+    encoded_url = "https://[fe80::1%25eth0]/cluster"
+    raw_url = "https://[fe80::1%eth0]/cluster"
+    config = _qdrant_config(
+        tmp_path,
+        tmp_path / "docs",
+        tmp_path / "manifest.json",
+    )
+    encoded = config.with_overrides(qdrant_url=encoded_url)
+    raw = config.with_overrides(qdrant_url=raw_url)
+
+    assert _generated_qdrant_request_target(
+        encoded_url
+    ) == _generated_qdrant_request_target(raw_url)
+    assert ingest.storage_identity(encoded) == ingest.storage_identity(raw)
+
+
+def test_qdrant_backslash_identity_stays_on_effective_authority(
+    tmp_path: pathlib.Path,
+) -> None:
+    raw_url = "https://example.com\\@evil.com/x"
+    encoded_url = "https://example.com/%5C@evil.com/x"
+    evil_url = "https://evil.com/x"
+    config = _qdrant_config(
+        tmp_path,
+        tmp_path / "docs",
+        tmp_path / "manifest.json",
+    )
+    raw = config.with_overrides(qdrant_url=raw_url)
+    encoded = config.with_overrides(qdrant_url=encoded_url)
+    evil = config.with_overrides(qdrant_url=evil_url)
+
+    raw_target = _generated_qdrant_request_target(raw_url)
+    assert raw_target == _generated_qdrant_request_target(encoded_url)
+    assert raw_target != _generated_qdrant_request_target(evil_url)
+    assert ingest.storage_identity(raw) == ingest.storage_identity(encoded)
+    assert ingest.storage_identity(raw) != ingest.storage_identity(evil)
+
+
 def test_qdrant_validation_rejects_path_that_changes_request_authority(
     tmp_path: pathlib.Path,
 ) -> None:
@@ -1239,6 +1280,7 @@ def test_validate_storage_target_malformed_url_traceback_excludes_credentials(
             "http://validation-user:validation-password@example./"
             "private?key=query-secret"
         ),
+        "https://[v1.fe80]/cluster",
     ],
 )
 def test_validate_storage_target_rejects_invalid_hostname_without_side_effects(
@@ -1262,6 +1304,11 @@ def test_validate_storage_target_rejects_invalid_hostname_without_side_effects(
         guarded.setattr(pathlib.Path, "open", unexpected_call)
         guarded.setattr(builtins, "open", unexpected_call)
         guarded.setattr(qdrant_client, "QdrantClient", unexpected_call)
+        guarded.setattr(
+            provider_factory,
+            "build_embedding_provider",
+            unexpected_call,
+        )
         with pytest.raises(exceptions.ConfigurationError) as exc_info:
             rag.validate_storage_target(config)
 

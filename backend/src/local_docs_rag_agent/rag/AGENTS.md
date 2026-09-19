@@ -89,10 +89,12 @@ index_lock -> config, core (and lazy storage identity lookup)
   cleanup. Cleanup failure never replaces the original; it adds an exact-name
   note and structured `qdrant_orphaned_collection` marker.
 - Qdrant storage identity follows the locked client's generated REST request
-  base: dot segments, repeated path separators, and percent-escape case are
-  normalized, and a leading double-slash path that would replace the request
-  authority is invalid. It uses effective REST port `6333` when the URL omits
-  a port. Explicit ports, including `80` and `443`, remain distinct targets.
+  base by using the same direct `urllib3` parser: authority/path separation,
+  scoped IPv6 zones, dot segments, repeated path separators, and
+  percent-escape case are normalized, and a leading double-slash path that
+  would replace the request authority is invalid. It uses effective REST port
+  `6333` when the URL omits a port. Explicit ports, including `80` and `443`,
+  remain distinct targets.
 - Qdrant endpoint parsing accepts `http`/`https` endpoints whose host is
   localhost, a valid single- or multi-label DNS name, an IDNA-normalized name,
   IPv4, or bracketed IPv6. Labels are 1–63 characters, the DNS name is at most
@@ -101,7 +103,8 @@ index_lock -> config, core (and lazy storage identity lookup)
   reports the same credential-free configuration error. Non-ASCII names use
   the direct `idna` dependency's strict IDNA2008/STD3 encoding, matching
   Qdrant's connection parser; Unicode separator variants and trailing-dot hosts
-  are rejected rather than collapsed with another target.
+  are rejected rather than collapsed with another target. Bracketed IPvFuture
+  forms rejected by Qdrant's parser are invalid here too.
 - Qdrant operation errors omit raw URLs and exception messages and suppress
   unsafe chaining while retaining operation, collection, exception class,
   reason code, and recovery hints. Client-construction failures use the same
