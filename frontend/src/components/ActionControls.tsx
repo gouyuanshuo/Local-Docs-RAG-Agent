@@ -1,6 +1,7 @@
 type ActionControlsProps = {
   rawPayload: string;
   isActing: boolean;
+  error: string | null;
   onIngest: () => Promise<void>;
   onEval: () => Promise<void>;
   onCompare: () => Promise<void>;
@@ -9,6 +10,7 @@ type ActionControlsProps = {
 export function ActionControls({
   rawPayload,
   isActing,
+  error,
   onIngest,
   onEval,
   onCompare,
@@ -16,6 +18,11 @@ export function ActionControls({
   return (
     <article className="panel panel-side">
       <h2>Run controls</h2>
+      {error ? (
+        <p className="error-text" role="alert">
+          {error}
+        </p>
+      ) : null}
       <div className="stack">
         <div className="control-card">
           <h3>Index</h3>

@@ -20,6 +20,10 @@ citations and diagnostics. No retrieval policy in the browser.
   in the answer card, not only in raw JSON.
 - Citation cards render the backend's answer-local `source_id`; a null ID is
   shown as `unlabelled`, never replaced with a positional label.
+- Health, configuration, and document bootstrap results remain independent;
+  only `/api/health` determines backend liveness.
+- Operation and bootstrap failures render beside their owning controls with
+  `role="alert"`; raw payloads remain available for deeper diagnostics.
 - Compare `degraded` / `skipped` / `error` runs are visible; fallback cells
   must not look like leaderboard wins.
 - Buttons disable while in flight (`isAsking` / `isActing`).
@@ -42,8 +46,15 @@ citations and diagnostics. No retrieval policy in the browser.
 
 ## Tests
 
-No unit tests today. Gate: `pnpm run build` (`tsc -b && vite build`).
-CI frontend job is build-only.
+Vitest + React Testing Library behavior tests live beside the owning component
+or hook and mock HTTP only at the `fetch` boundary. Gates:
+
+```text
+pnpm --filter local-docs-rag-agent-web test
+pnpm run build
+```
+
+CI restores the frozen lock, runs behavior tests, then builds.
 
 ## Parallel ownership
 

@@ -8,6 +8,7 @@ type AskPanelProps = {
   result: AskResponse | null;
   rawPayload: string;
   isAsking: boolean;
+  error: string | null;
   onRuntimeChange: (runtime: RuntimeSelection) => void;
   onQuestionChange: (question: string) => void;
   onAsk: () => Promise<void>;
@@ -19,6 +20,7 @@ export function AskPanel({
   result,
   rawPayload,
   isAsking,
+  error,
   onRuntimeChange,
   onQuestionChange,
   onAsk,
@@ -45,7 +47,20 @@ export function AskPanel({
         </label>
       </div>
 
-      <textarea value={question} onChange={(event) => onQuestionChange(event.target.value)} />
+      <label className="question-field">
+        <span>Question</span>
+        <textarea
+          value={question}
+          aria-describedby={error ? "ask-error" : undefined}
+          onChange={(event) => onQuestionChange(event.target.value)}
+        />
+      </label>
+
+      {error ? (
+        <p id="ask-error" className="error-text" role="alert">
+          {error}
+        </p>
+      ) : null}
 
       <div className="toolbar">
         <button

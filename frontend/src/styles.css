@@ -192,6 +192,17 @@ textarea {
   resize: vertical;
 }
 
+.question-field {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0;
+  color: #d7cbbb;
+}
+
+.question-field textarea {
+  margin: 0;
+}
+
 select {
   padding: 10px 14px;
 }

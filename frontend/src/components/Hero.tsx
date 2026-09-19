@@ -5,14 +5,14 @@ type HeroProps = {
   health: Health | null;
   info: AppInfo | null;
   documentsCount: number;
-  bootstrapError: string | null;
+  healthError: string | null;
 };
 
-export function Hero({ health, info, documentsCount, bootstrapError }: HeroProps) {
-  const statusLabel = bootstrapError
-    ? "Backend unavailable"
-    : health
-      ? `Backend ${health.status}`
+export function Hero({ health, info, documentsCount, healthError }: HeroProps) {
+  const statusLabel = health
+    ? `Backend ${health.status}`
+    : healthError
+      ? "Backend unavailable"
       : "Checking backend...";
 
   return (
@@ -34,6 +34,11 @@ export function Hero({ health, info, documentsCount, bootstrapError }: HeroProps
               ? `Updated ${relativeTime(health.backend_time_utc)}`
               : "Waiting for health check"}
           </span>
+          {healthError ? (
+            <span className="error-text" role="alert">
+              Health check failed: {healthError}
+            </span>
+          ) : null}
         </article>
         <article className="stat-card">
           <span className="stat-label">Documents</span>

@@ -15,7 +15,7 @@ export default function App() {
         health={workspace.health}
         info={workspace.info}
         documentsCount={workspace.documents.length}
-        bootstrapError={workspace.bootstrapError}
+        healthError={workspace.healthError}
       />
 
       <section className="workspace">
@@ -26,6 +26,7 @@ export default function App() {
             result={workspace.askResult}
             rawPayload={workspace.askRaw}
             isAsking={workspace.isAsking}
+            error={workspace.askError}
             onRuntimeChange={workspace.setRuntime}
             onQuestionChange={workspace.setQuestion}
             onAsk={workspace.ask}
@@ -36,13 +37,17 @@ export default function App() {
           <ActionControls
             rawPayload={workspace.actionRaw}
             isActing={workspace.isActing}
+            error={workspace.actionError}
             onIngest={workspace.ingest}
             onEval={workspace.evaluate}
             onCompare={workspace.compare}
           />
           <CompareLeaderboard result={workspace.compareResult} />
-          <ConfigPanel info={workspace.info} bootstrapError={workspace.bootstrapError} />
-          <DocumentsPanel documents={workspace.documents} />
+          <ConfigPanel info={workspace.info} error={workspace.infoError} />
+          <DocumentsPanel
+            documents={workspace.documents}
+            error={workspace.documentsError}
+          />
         </aside>
       </section>
     </main>

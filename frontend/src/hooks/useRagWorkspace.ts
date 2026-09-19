@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { errorMessage, pretty, requestJson } from "../lib/api";
 import type {
@@ -13,32 +13,55 @@ import type {
 const DEFAULT_QUESTION = "How is attention explained in lecture 5?";
 
 export function useRagWorkspace() {
+  const bootstrapGeneration = useRef(0);
   const [runtime, setRuntime] = useState<RuntimeSelection>("");
   const [question, setQuestion] = useState(DEFAULT_QUESTION);
   const [health, setHealth] = useState<Health | null>(null);
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [documents, setDocuments] = useState<string[]>([]);
-  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+  const [healthError, setHealthError] = useState<string | null>(null);
+  const [infoError, setInfoError] = useState<string | null>(null);
+  const [documentsError, setDocumentsError] = useState<string | null>(null);
   const [askResult, setAskResult] = useState<AskResponse | null>(null);
   const [compareResult, setCompareResult] = useState<CompareResponse | null>(null);
   const [askRaw, setAskRaw] = useState("Waiting for a question...");
   const [actionRaw, setActionRaw] = useState("System actions will appear here...");
+  const [askError, setAskError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [isAsking, setIsAsking] = useState(false);
   const [isActing, setIsActing] = useState(false);
 
   const bootstrap = useCallback(async () => {
-    try {
-      setBootstrapError(null);
-      const [healthResult, infoResult, documentsResult] = await Promise.all([
-        requestJson<Health>("/api/health"),
-        requestJson<AppInfo>("/api/info"),
-        requestJson<DocumentsResponse>("/api/documents"),
-      ]);
-      setHealth(healthResult);
-      setInfo(infoResult);
-      setDocuments(documentsResult.documents);
-    } catch (error) {
-      setBootstrapError(errorMessage(error));
+    bootstrapGeneration.current += 1;
+    const generation = bootstrapGeneration.current;
+    setHealthError(null);
+    setInfoError(null);
+    setDocumentsError(null);
+    const [healthResult, infoResult, documentsResult] = await Promise.allSettled([
+      requestJson<Health>("/api/health"),
+      requestJson<AppInfo>("/api/info"),
+      requestJson<DocumentsResponse>("/api/documents"),
+    ]);
+    if (generation !== bootstrapGeneration.current) {
+      return;
+    }
+    if (healthResult.status === "fulfilled") {
+      setHealth(healthResult.value);
+    } else {
+      setHealth(null);
+      setHealthError(errorMessage(healthResult.reason));
+    }
+    if (infoResult.status === "fulfilled") {
+      setInfo(infoResult.value);
+    } else {
+      setInfo(null);
+      setInfoError(errorMessage(infoResult.reason));
+    }
+    if (documentsResult.status === "fulfilled") {
+      setDocuments(documentsResult.value.documents);
+    } else {
+      setDocuments([]);
+      setDocumentsError(errorMessage(documentsResult.reason));
     }
   }, []);
 
@@ -47,9 +70,16 @@ export function useRagWorkspace() {
   }, [bootstrap]);
 
   const ask = useCallback(async () => {
+    setAskError(null);
+    setAskResult(null);
+    if (!question.trim()) {
+      const message = "Question must not be blank";
+      setAskError(message);
+      setAskRaw(`Error:\n${message}`);
+      return;
+    }
     setIsAsking(true);
     setAskRaw("Thinking...");
-    setAskResult(null);
     try {
       const payload = await requestJson<AskResponse>("/api/ask", {
         method: "POST",
@@ -58,13 +88,16 @@ export function useRagWorkspace() {
       setAskResult(payload);
       setAskRaw(pretty(payload));
     } catch (error) {
-      setAskRaw(`Error:\n${errorMessage(error)}`);
+      const message = errorMessage(error);
+      setAskError(message);
+      setAskRaw(`Error:\n${message}`);
     } finally {
       setIsAsking(false);
     }
   }, [question, runtime]);
 
   const ingest = useCallback(async () => {
+    setActionError(null);
     setIsActing(true);
     setActionRaw("Running ingest...");
     try {
@@ -74,13 +107,16 @@ export function useRagWorkspace() {
       setActionRaw(pretty(payload));
       await bootstrap();
     } catch (error) {
-      setActionRaw(`Error:\n${errorMessage(error)}`);
+      const message = errorMessage(error);
+      setActionError(message);
+      setActionRaw(`Error:\n${message}`);
     } finally {
       setIsActing(false);
     }
   }, [bootstrap]);
 
   const evaluate = useCallback(async () => {
+    setActionError(null);
     setIsActing(true);
     setActionRaw("Running eval...");
     try {
@@ -90,13 +126,16 @@ export function useRagWorkspace() {
       });
       setActionRaw(pretty(payload));
     } catch (error) {
-      setActionRaw(`Error:\n${errorMessage(error)}`);
+      const message = errorMessage(error);
+      setActionError(message);
+      setActionRaw(`Error:\n${message}`);
     } finally {
       setIsActing(false);
     }
   }, [runtime]);
 
   const compare = useCallback(async () => {
+    setActionError(null);
     setIsActing(true);
     setActionRaw("Running compare eval...");
     setCompareResult(null);
@@ -108,7 +147,9 @@ export function useRagWorkspace() {
       setCompareResult(payload);
       setActionRaw(pretty(payload));
     } catch (error) {
-      setActionRaw(`Error:\n${errorMessage(error)}`);
+      const message = errorMessage(error);
+      setActionError(message);
+      setActionRaw(`Error:\n${message}`);
     } finally {
       setIsActing(false);
     }
@@ -122,11 +163,15 @@ export function useRagWorkspace() {
     health,
     info,
     documents,
-    bootstrapError,
+    healthError,
+    infoError,
+    documentsError,
     askResult,
     compareResult,
     askRaw,
     actionRaw,
+    askError,
+    actionError,
     isAsking,
     isActing,
     ask,

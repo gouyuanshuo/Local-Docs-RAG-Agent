@@ -127,7 +127,7 @@ jobs:
           PY
 
   frontend:
-    name: Frontend build
+    name: Frontend tests and build
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -148,6 +148,9 @@ jobs:
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Test frontend behavior
+        run: pnpm --filter local-docs-rag-agent-web test
 
       - name: Build frontend
         run: pnpm run build
