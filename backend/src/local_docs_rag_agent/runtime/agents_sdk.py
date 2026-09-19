@@ -70,10 +70,9 @@ def answer_with_agents_sdk(
       question: The question to answer.
 
     Returns:
-      The answer. A missing SDK, a missing key, a run failure, or an
-      empty result delegates to the basic runtime with a
-      `runtime_fallback:` reason in the diagnostics rather than
-      raising.
+      The answer. A missing SDK, a missing key, a run or output-extraction
+      failure, or an empty result delegates to the basic runtime with a
+      `runtime_fallback:` reason in the diagnostics rather than raising.
     """
     agents_sdk_available = _supports_agents_sdk()
     if not agents_sdk_available or not config.llm_api_key:
@@ -106,6 +105,10 @@ def answer_with_agents_sdk(
                 client=client,
             )
         )
+        raw_final_output = result.final_output
+        final_output = (
+            "" if raw_final_output is None else str(raw_final_output).strip()
+        )
     except Exception as exc:
         _log_sdk_exception(exc)
         if not client.is_closed():
@@ -120,7 +123,6 @@ def answer_with_agents_sdk(
         )
         return _preserve_search_diagnostics(fallback_answer, run_context)
 
-    final_output = str(result.final_output).strip()
     if not final_output:
         fallback_answer = basic_runtime.answer_with_basic_runtime(
             config,

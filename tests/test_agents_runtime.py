@@ -391,13 +391,34 @@ def test_agents_searches_keep_source_ids_and_conservative_statuses(
     assert client.closed is True
 
 
-@pytest.mark.parametrize("failure_kind", ["runner_error", "empty_output"])
+@pytest.mark.parametrize(
+    ("failure_kind", "expected_runtime_reason"),
+    [
+        (
+            "runner_error",
+            "runtime_fallback:agents_sdk_error:RuntimeError",
+        ),
+        ("empty_output", "runtime_fallback:empty_agent_output"),
+        ("none_output", "runtime_fallback:empty_agent_output"),
+        (
+            "raising_output",
+            "runtime_fallback:agents_sdk_error:RuntimeError",
+        ),
+    ],
+)
 def test_agents_fallback_preserves_prior_search_degradation(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
     failure_kind: str,
+    expected_runtime_reason: str,
 ) -> None:
     fake_module = _install_fake_agents(monkeypatch)
     client = FakeAsyncOpenAI()
+    output_error_sentinel = "sensitive-final-output-sentinel"
+
+    class RaisingFinalOutput:
+        def __str__(self) -> str:
+            raise RuntimeError(output_error_sentinel)
 
     class SearchThenFallbackRunner:
         @staticmethod
@@ -412,7 +433,12 @@ def test_agents_fallback_preserves_prior_search_degradation(
             agent.tools[1](FakeRunContextWrapper(context), "find a", 1)
             if failure_kind == "runner_error":
                 raise RuntimeError("runner stopped after search")
-            return types.SimpleNamespace(final_output="   ")
+            final_output: object = "   "
+            if failure_kind == "none_output":
+                final_output = None
+            elif failure_kind == "raising_output":
+                final_output = RaisingFinalOutput()
+            return types.SimpleNamespace(final_output=final_output)
 
     fake_module.__dict__["Runner"] = SearchThenFallbackRunner
     monkeypatch.setattr(agents_sdk, "_supports_agents_sdk", lambda: True)
@@ -464,16 +490,27 @@ def test_agents_fallback_preserves_prior_search_degradation(
             ),
         ),
     )
+    fallback_call: dict[str, object] = {}
+
+    def fake_basic_runtime(
+        *args: object, **kwargs: object
+    ) -> models.AgentAnswer:
+        del args
+        fallback_call.update(kwargs)
+        return basic_answer
+
     monkeypatch.setattr(
-        basic_runtime,
-        "answer_with_basic_runtime",
-        lambda *args, **kwargs: basic_answer,
+        basic_runtime, "answer_with_basic_runtime", fake_basic_runtime
     )
+    caplog.set_level(logging.WARNING, logger=agents_sdk.__name__)
 
     answer = agents_sdk.answer_with_agents_sdk(
         _config("responses"), "combine a and b"
     )
 
+    assert answer.answer == "Basic fallback answer."
+    assert answer.diagnostics.actual_runtime == "basic"
+    assert fallback_call["runtime_reason"] == expected_runtime_reason
     assert answer.diagnostics.embedding_provider.mode == "fallback"
     assert (
         answer.diagnostics.embedding_provider.reason
@@ -487,6 +524,9 @@ def test_agents_fallback_preserves_prior_search_degradation(
     assert basic_answer.diagnostics.embedding_provider.mode == "live"
     assert basic_answer.diagnostics.reranker.mode == "live"
     assert client.closed is True
+    assert output_error_sentinel not in "\n".join(
+        record.getMessage() for record in caplog.records
+    )
 
 
 def test_agents_runtime_closes_client_and_exposes_runner_fallback(
