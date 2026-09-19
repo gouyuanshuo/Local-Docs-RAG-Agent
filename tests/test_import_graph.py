@@ -27,12 +27,13 @@ DIRECTORY_LAYERS = {
     "runtime": "runtime",
 }
 TOP_LEVEL_FILE_LAYERS = {
-    "__init__.py": "facade",
+    "__init__.py": "core",
     "agent.py": "runtime",
     "cli.py": "delivery",
     "presenters.py": "delivery",
     "tools.py": "runtime",
 }
+ROOT_PACKAGE_EXPORTS = {"__version__"}
 ALLOWED_LAYER_IMPORTS = {
     "delivery": {
         "config",
@@ -116,9 +117,7 @@ def _import_targets(path: pathlib.Path, tree: ast.AST) -> list[tuple[str, int]]:
         module = _resolve_from_module(path, node)
         if module == PACKAGE_NAME:
             targets.extend(
-                (f"{module}.{alias.name}", node.lineno)
-                for alias in node.names
-                if alias.name != "*"
+                (f"{module}.{alias.name}", node.lineno) for alias in node.names
             )
             continue
         if module == RAG_FACADE:
@@ -138,10 +137,14 @@ def _import_targets(path: pathlib.Path, tree: ast.AST) -> list[tuple[str, int]]:
 
 
 def _layer_for_module(module: str) -> str | None:
+    if module == PACKAGE_NAME:
+        return "core"
     prefix = f"{PACKAGE_NAME}."
     if not module.startswith(prefix):
         return None
     top_level_name = module.removeprefix(prefix).split(".", maxsplit=1)[0]
+    if top_level_name in ROOT_PACKAGE_EXPORTS:
+        return "core"
     if top_level_name in DIRECTORY_LAYERS:
         return DIRECTORY_LAYERS[top_level_name]
     top_level_path = f"{top_level_name}.py"
@@ -164,14 +167,16 @@ def _find_import_violations(path: pathlib.Path, source: str) -> list[str]:
 
         target_layer = _layer_for_module(module)
         if target_layer is None:
+            if module.startswith(f"{PACKAGE_NAME}."):
+                violations.append(
+                    f"{location} imports unclassified package target {module}"
+                )
             continue
         if source_layer != "rag" and module.startswith(f"{RAG_FACADE}."):
             violations.append(
                 f"{location} imports {module}; modules outside rag must use "
                 f"the {RAG_FACADE} facade"
             )
-            continue
-        if source_layer == "facade":
             continue
         if source_layer == "evals" and module == EVALS_PRESENTER_SEAM:
             continue
@@ -286,6 +291,24 @@ def _synthetic_violations(relative_path: str, source: str) -> list[str]:
             "config cannot import providers",
             id="config-to-providers",
         ),
+        pytest.param(
+            "__init__.py",
+            "from .api import schemas\n",
+            "core cannot import delivery",
+            id="root-package-to-api",
+        ),
+        pytest.param(
+            "core/example.py",
+            "from local_docs_rag_agent import UnsafeApiSymbol\n",
+            "unclassified package target",
+            id="unknown-root-package-symbol",
+        ),
+        pytest.param(
+            "core/example.py",
+            "from local_docs_rag_agent import *\n",
+            "unclassified package target",
+            id="root-package-star-import",
+        ),
     ],
 )
 def test_checker_rejects_forbidden_imports(
@@ -312,7 +335,7 @@ def test_checker_rejects_forbidden_imports(
         pytest.param("providers/factory.py", "providers", id="providers"),
         pytest.param("config/__init__.py", "config", id="config"),
         pytest.param("core/models.py", "core", id="core"),
-        pytest.param("__init__.py", "facade", id="root-facade-exemption"),
+        pytest.param("__init__.py", "core", id="root-package-metadata"),
     ],
 )
 def test_classifier_assigns_documented_layers(
@@ -408,6 +431,11 @@ def test_classifier_rejects_an_unmapped_production_file() -> None:
             "from local_docs_rag_agent.core import models\n",
             id="core",
         ),
+        pytest.param(
+            "__init__.py",
+            "from .core import models\n",
+            id="root-package-metadata",
+        ),
     ],
 )
 def test_checker_allows_documented_dependencies(
@@ -422,18 +450,12 @@ def test_checker_allows_evals_to_use_the_presenters_shared_seam() -> None:
     assert _synthetic_violations("evals/example.py", source) == []
 
 
-def test_every_production_file_has_a_layer_or_facade_exemption() -> None:
+def test_every_production_file_has_a_documented_layer() -> None:
     classifications = {
         _relative(path): _classify_file(path) for path in _iter_python_files()
     }
 
-    assert set(classifications.values()) == {
-        *ALLOWED_LAYER_IMPORTS,
-        "facade",
-    }
-    assert [
-        path for path, layer in classifications.items() if layer == "facade"
-    ] == ["__init__.py"]
+    assert set(classifications.values()) == set(ALLOWED_LAYER_IMPORTS)
 
 
 def test_production_imports_follow_documented_dependency_direction() -> None:
