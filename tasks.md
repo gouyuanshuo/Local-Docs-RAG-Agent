@@ -126,6 +126,14 @@ Current theme:
       requirements through the `ChunkStore` lifecycle contract
 - [x] Lock canonical manifest and storage resources together, recover Qdrant
       initialization interruptions, and sanitize outward Qdrant failures
+- [x] Align Qdrant target identity with the locked client's effective request
+      parser, including path normalization, strict IDNA, scoped IPv6, and
+      authority-changing input rejection
+- [x] Audit Stage 3 after implementation: the final combined review is Ready
+      after its target-identity repair rounds; locked gates and all 385 tests
+      pass on Python 3.11/3.13, as do the frozen frontend build, isolated wheel
+      import/metadata check, and disposable no-key ingest/ask/eval/compare
+      workflow with unchanged interactive storage
 - [ ] Resolve the upstream Starlette/AnyIO `BlockingPortal` deprecation warning
       or add a narrowly justified filter after the dependency lock is selected
 
