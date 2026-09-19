@@ -25,7 +25,7 @@ Import: `from local_docs_rag_agent.core import constants` then
   `ProviderUnavailableError` / `VectorStoreError` to 503 (mapping lives in
   delivery).
 - Atomic write must not leave a truncated index/manifest.
-- `CitationSpan.source_id` is optional retrieval-time metadata. Runtime answer
+- `CitationSpan.source_id` is optional answer-time metadata. Runtime answer
   assembly sets it on copied spans to the exact answer-local id shown to the
   model; stored retrieval spans remain unlabelled.
 
