@@ -36,7 +36,8 @@ def answer_with_basic_runtime(
     provider = provider_factory.build_chat_provider(config)
     outcome = rag.retrieve(config, question)
     hits = outcome.hits
-    context = runtime_shared.build_answer_context(hits)
+    source_ids: dict[str, str] = {}
+    context = runtime_shared.build_answer_context(hits, source_ids)
     answer = provider.answer(question=question, context=context)
     chat_status = provider.status
     if runtime_reason:
@@ -57,5 +58,9 @@ def answer_with_basic_runtime(
         reranker=outcome.reranker_status,
     )
     return runtime_shared.build_agent_answer(
-        question=question, answer=answer, hits=hits, diagnostics=diagnostics
+        question=question,
+        answer=answer,
+        hits=hits,
+        diagnostics=diagnostics,
+        source_ids=source_ids,
     )

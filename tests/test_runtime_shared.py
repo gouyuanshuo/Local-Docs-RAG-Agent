@@ -82,6 +82,57 @@ def test_tool_results_include_the_score_and_full_text() -> None:
     assert lines[-1] == "Attention maps queries against keys and values."
 
 
+def test_tool_results_reuse_run_scoped_source_ids() -> None:
+    source_ids: dict[str, str] = {}
+
+    first = runtime_shared.format_tool_search_results(
+        [_hit(chunk_id="a")], source_ids
+    )
+    second = runtime_shared.format_tool_search_results(
+        [_hit(chunk_id="b", source_path="other.md")], source_ids
+    )
+    repeated = runtime_shared.format_tool_search_results(
+        [_hit(chunk_id="a")], source_ids
+    )
+
+    assert first.splitlines()[0] == "[S1]"
+    assert second.splitlines()[0] == "[S2]"
+    assert repeated.splitlines()[0] == "[S1]"
+    assert source_ids == {"a": "S1", "b": "S2"}
+
+
+def test_answer_citation_spans_match_the_ids_rendered_in_context() -> None:
+    hits = [_hit(chunk_id="a"), _hit(chunk_id="b", source_path="other.md")]
+    source_ids: dict[str, str] = {}
+
+    context = runtime_shared.build_answer_context(hits, source_ids)
+    answer = runtime_shared.build_agent_answer(
+        question="question",
+        answer="answer",
+        hits=hits,
+        diagnostics=models.AnswerDiagnostics(
+            requested_runtime="basic",
+            actual_runtime="basic",
+            vector_backend="local",
+            chat_provider=models.ProviderStatus(
+                provider="chat", mode="fallback"
+            ),
+            embedding_provider=models.ProviderStatus(
+                provider="embedding", mode="fallback"
+            ),
+            reranker=models.ProviderStatus(provider="none", mode="ready"),
+        ),
+        source_ids=source_ids,
+    )
+
+    assert [line for line in context.splitlines() if line.startswith("[S")] == [
+        "[S1]",
+        "[S2]",
+    ]
+    assert [span.source_id for span in answer.citation_spans] == ["S1", "S2"]
+    assert [hit.citation_span.source_id for hit in hits] == [None, None]
+
+
 def test_merge_hits_keeps_first_occurrence_only() -> None:
     existing = [_hit(chunk_id="a")]
 

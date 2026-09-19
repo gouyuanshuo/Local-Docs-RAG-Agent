@@ -31,6 +31,10 @@ _LOGGER = logging.getLogger(__name__)
 class AgentRuntimeContext:
     """What the agent's tools read and write during one run.
 
+    `source_ids` keeps each chunk's first model-visible label stable across
+    repeated searches. Retrieval statuses and their reason histories aggregate
+    every completed search instead of exposing only the most recent call.
+
     The agent decides whether to search at all, so both retrieval
     statuses start `unknown` and are replaced only if the search tool
     actually runs.
@@ -40,8 +44,10 @@ class AgentRuntimeContext:
     retrieved_hits: list[models.RetrievalHit] = dataclasses.field(
         default_factory=list
     )
-    # The agent decides whether to search at all, so both retrieval statuses
-    # start `unknown` and are only replaced if the search tool actually runs.
+    source_ids: dict[str, str] = dataclasses.field(default_factory=dict)
+    searches_run: int = 0
+    embedding_reasons: list[str] = dataclasses.field(default_factory=list)
+    reranker_reasons: list[str] = dataclasses.field(default_factory=list)
     embedding_status: models.ProviderStatus = dataclasses.field(
         default_factory=lambda: models.ProviderStatus(
             provider="embedding", mode="unknown", reason="search_not_run"
@@ -104,7 +110,7 @@ def answer_with_agents_sdk(
         _log_sdk_exception(exc)
         if not client.is_closed():
             asyncio.run(client.close())
-        return basic_runtime.answer_with_basic_runtime(
+        fallback_answer = basic_runtime.answer_with_basic_runtime(
             config,
             question,
             requested_runtime="agents_sdk",
@@ -112,15 +118,17 @@ def answer_with_agents_sdk(
                 f"runtime_fallback:agents_sdk_error:{exc.__class__.__name__}"
             ),
         )
+        return _preserve_search_diagnostics(fallback_answer, run_context)
 
     final_output = str(result.final_output).strip()
     if not final_output:
-        return basic_runtime.answer_with_basic_runtime(
+        fallback_answer = basic_runtime.answer_with_basic_runtime(
             config,
             question,
             requested_runtime="agents_sdk",
             runtime_reason="runtime_fallback:empty_agent_output",
         )
+        return _preserve_search_diagnostics(fallback_answer, run_context)
 
     diagnostics = models.AnswerDiagnostics(
         requested_runtime="agents_sdk",
@@ -137,6 +145,7 @@ def answer_with_agents_sdk(
         answer=final_output,
         hits=run_context.retrieved_hits,
         diagnostics=diagnostics,
+        source_ids=run_context.source_ids,
     )
 
 
@@ -215,10 +224,21 @@ def _build_sdk_agent(
         # truncating afterwards, so the reranker reorders the window the agent
         # actually asked for.
         outcome = tools.search_documents(ctx.context.config, query, top_k)
-        ctx.context.embedding_status = outcome.embedding_status
-        ctx.context.reranker_status = outcome.reranker_status
+        ctx.context.searches_run += 1
+        ctx.context.embedding_status = _aggregate_provider_status(
+            ctx.context.embedding_status,
+            outcome.embedding_status,
+            ctx.context.embedding_reasons,
+        )
+        ctx.context.reranker_status = _aggregate_provider_status(
+            ctx.context.reranker_status,
+            outcome.reranker_status,
+            ctx.context.reranker_reasons,
+        )
         runtime_shared.merge_hits(ctx.context.retrieved_hits, outcome.hits)
-        return runtime_shared.format_tool_search_results(outcome.hits)
+        return runtime_shared.format_tool_search_results(
+            outcome.hits, ctx.context.source_ids
+        )
 
     @agents.function_tool
     def get_current_time() -> str:
@@ -243,6 +263,54 @@ def _build_sdk_agent(
         ).strip(),
         tools=[list_local_documents, search_local_documents, get_current_time],
     )
+
+
+def _aggregate_provider_status(
+    current: models.ProviderStatus,
+    incoming: models.ProviderStatus,
+    reasons: list[str],
+) -> models.ProviderStatus:
+    if incoming.reason is not None and incoming.reason not in reasons:
+        reasons.append(incoming.reason)
+    if current.mode == "unknown" and current.reason == "search_not_run":
+        mode = incoming.mode
+    else:
+        priority: dict[models.ProviderMode, int] = {
+            "ready": 0,
+            "live": 1,
+            "unknown": 2,
+            "fallback": 3,
+        }
+        mode = max((current.mode, incoming.mode), key=priority.__getitem__)
+    return models.ProviderStatus(
+        provider=incoming.provider,
+        mode=mode,
+        reason=";".join(reasons) if reasons else None,
+    )
+
+
+def _preserve_search_diagnostics(
+    answer: models.AgentAnswer,
+    run_context: AgentRuntimeContext,
+) -> models.AgentAnswer:
+    if run_context.searches_run == 0:
+        return answer
+    embedding_status = _aggregate_provider_status(
+        run_context.embedding_status,
+        answer.diagnostics.embedding_provider,
+        run_context.embedding_reasons,
+    )
+    reranker_status = _aggregate_provider_status(
+        run_context.reranker_status,
+        answer.diagnostics.reranker,
+        run_context.reranker_reasons,
+    )
+    diagnostics = dataclasses.replace(
+        answer.diagnostics,
+        embedding_provider=embedding_status,
+        reranker=reranker_status,
+    )
+    return dataclasses.replace(answer, diagnostics=diagnostics)
 
 
 async def _run_agent(

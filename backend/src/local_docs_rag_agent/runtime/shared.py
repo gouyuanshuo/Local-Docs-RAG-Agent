@@ -15,16 +15,30 @@ column 0 and the body is the final field in its block.
 
 from __future__ import annotations
 
+import dataclasses
+
 from local_docs_rag_agent.core import models
 
 
-def build_answer_context(hits: list[models.RetrievalHit]) -> str:
-    """Return hits rendered as the context handed to a chat provider."""
+def build_answer_context(
+    hits: list[models.RetrievalHit],
+    source_ids: dict[str, str] | None = None,
+) -> str:
+    """Return hits rendered as the context handed to a chat provider.
+
+    Args:
+      hits: Retrieved evidence in the order shown to the provider.
+      source_ids: Optional answer-local chunk-id mapping to populate and reuse.
+
+    Returns:
+      Labelled evidence blocks, or an explicit no-evidence message.
+    """
     if not hits:
         return "No supporting documents were retrieved."
+    active_source_ids = source_ids if source_ids is not None else {}
     return "\n\n".join(
         _render_hit_block(
-            index,
+            _source_id(hit, active_source_ids),
             fields=(
                 ("source", hit.chunk.source_path),
                 ("title", hit.chunk.title),
@@ -35,17 +49,29 @@ def build_answer_context(hits: list[models.RetrievalHit]) -> str:
             body_label="content",
             body=hit.chunk.text,
         )
-        for index, hit in enumerate(hits, start=1)
+        for hit in hits
     )
 
 
-def format_tool_search_results(hits: list[models.RetrievalHit]) -> str:
-    """Return hits rendered as the agent search tool's result."""
+def format_tool_search_results(
+    hits: list[models.RetrievalHit],
+    source_ids: dict[str, str] | None = None,
+) -> str:
+    """Return hits rendered as the agent search tool's result.
+
+    Args:
+      hits: Retrieved evidence in search-result order.
+      source_ids: Optional run-local chunk-id mapping to populate and reuse.
+
+    Returns:
+      Labelled result blocks, or an explicit no-results message.
+    """
     if not hits:
         return "No relevant chunks were found."
+    active_source_ids = source_ids if source_ids is not None else {}
     return "\n\n".join(
         _render_hit_block(
-            index,
+            _source_id(hit, active_source_ids),
             fields=(
                 ("source_path", hit.chunk.source_path),
                 ("title", hit.chunk.title),
@@ -57,7 +83,7 @@ def format_tool_search_results(hits: list[models.RetrievalHit]) -> str:
             body_label="text",
             body=hit.chunk.text,
         )
-        for index, hit in enumerate(hits, start=1)
+        for hit in hits
     )
 
 
@@ -75,9 +101,25 @@ def collect_citations(hits: list[models.RetrievalHit]) -> list[str]:
 
 def collect_citation_spans(
     hits: list[models.RetrievalHit],
+    source_ids: dict[str, str] | None = None,
 ) -> list[models.CitationSpan]:
-    """Return the exact source spans backing each hit, in retrieval order."""
-    return [hit.citation_span for hit in hits]
+    """Return answer-owned source spans in retrieval order.
+
+    Args:
+      hits: Retrieved evidence whose spans back the answer.
+      source_ids: Optional answer-local chunk-id mapping to populate and reuse.
+
+    Returns:
+      Copies of the retrieval spans carrying their answer-local source ids.
+    """
+    active_source_ids = source_ids if source_ids is not None else {}
+    return [
+        dataclasses.replace(
+            hit.citation_span,
+            source_id=_source_id(hit, active_source_ids),
+        )
+        for hit in hits
+    ]
 
 
 def merge_hits(
@@ -97,20 +139,40 @@ def build_agent_answer(
     answer: str,
     hits: list[models.RetrievalHit],
     diagnostics: models.AnswerDiagnostics,
+    source_ids: dict[str, str] | None = None,
 ) -> models.AgentAnswer:
-    """Return the final answer, citing the hits that produced it."""
+    """Return the final answer, citing the hits that produced it.
+
+    Args:
+      question: The question that was answered.
+      answer: The generated answer text.
+      hits: Retrieved evidence accumulated for the answer.
+      diagnostics: Runtime and provider behavior behind the answer.
+      source_ids: Optional model-visible chunk-id mapping to preserve.
+
+    Returns:
+      The answer with copied citation spans carrying model-visible ids.
+    """
     return models.AgentAnswer(
         question=question,
         answer=answer,
         citations=collect_citations(hits),
-        citation_spans=collect_citation_spans(hits),
+        citation_spans=collect_citation_spans(hits, source_ids),
         retrieved_chunks=hits,
         diagnostics=diagnostics,
     )
 
 
+def _source_id(hit: models.RetrievalHit, source_ids: dict[str, str]) -> str:
+    source_id = source_ids.get(hit.chunk.chunk_id)
+    if source_id is None:
+        source_id = f"S{len(source_ids) + 1}"
+        source_ids[hit.chunk.chunk_id] = source_id
+    return source_id
+
+
 def _render_hit_block(
-    index: int,
+    source_id: str,
     *,
     fields: tuple[tuple[str, str], ...],
     body_label: str,
@@ -120,7 +182,7 @@ def _render_hit_block(
     # almost always contains a line starting at column 0, which stops
     # `textwrap.dedent` from removing the template's indentation and would leave
     # every label indented.
-    lines = [f"[S{index}]"]
+    lines = [f"[{source_id}]"]
     lines.extend(f"{label}: {value}" for label, value in fields)
     lines.append(f"{body_label}: {body}")
     return "\n".join(lines)

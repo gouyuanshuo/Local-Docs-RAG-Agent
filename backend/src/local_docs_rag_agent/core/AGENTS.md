@@ -8,7 +8,7 @@ import `config`, `rag`, `runtime`, `evals`, `providers`, or `api`.
 | Symbol | File | Role |
 | --- | --- | --- |
 | option `Literal`s and tuples | `constants.py` | Single closed set for runtimes, chunk, backends, retrieval, rerankers |
-| `DocumentChunk`, `RetrievalHit`, `AgentAnswer`, `Eval*` | `models.py` | Framework-free records |
+| `DocumentChunk`, `CitationSpan`, `RetrievalHit`, `AgentAnswer`, `Eval*` | `models.py` | Framework-free records |
 | `LocalDocsError` and subclasses | `exceptions.py` | Expected failures with `code` / `action_hint` |
 | `text`, `choice`, `load_project_dotenv`, … | `env.py` | Typed process-env readers |
 | `atomic_write_text` | `file_io.py` | Sibling-tmp + fsync + replace |
@@ -25,6 +25,9 @@ Import: `from local_docs_rag_agent.core import constants` then
   `ProviderUnavailableError` / `VectorStoreError` to 503 (mapping lives in
   delivery).
 - Atomic write must not leave a truncated index/manifest.
+- `CitationSpan.source_id` is optional retrieval-time metadata. Runtime answer
+  assembly sets it on copied spans to the exact answer-local id shown to the
+  model; stored retrieval spans remain unlabelled.
 
 ## May change
 

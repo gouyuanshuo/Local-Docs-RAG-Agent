@@ -138,6 +138,30 @@ def _retrieval_outcome() -> models.RetrievalOutcome:
     )
 
 
+def _search_outcome(
+    *,
+    chunk_id: str,
+    source_path: str,
+    embedding_status: models.ProviderStatus,
+    reranker_status: models.ProviderStatus,
+) -> models.RetrievalOutcome:
+    chunk = models.DocumentChunk(
+        chunk_id=chunk_id,
+        source_path=source_path,
+        title=chunk_id.upper(),
+        text=f"Evidence for {chunk_id}.",
+        chunk_index=0,
+        start_char=0,
+        end_char=len(f"Evidence for {chunk_id}."),
+        embedding=[1.0],
+    )
+    return models.RetrievalOutcome(
+        hits=[scoring.build_retrieval_hit(chunk, 0.9)],
+        embedding_status=embedding_status,
+        reranker_status=reranker_status,
+    )
+
+
 @pytest.mark.parametrize("api_style", ["responses", "chat_completions"])
 def test_real_sdk_registers_tools(api_style: str) -> None:
     config = _config(api_style)
@@ -188,6 +212,10 @@ def test_real_sdk_public_runtime_uses_fake_runner_offline(
 
     assert answer.answer == "Offline SDK answer."
     assert answer.diagnostics.actual_runtime == "agents_sdk"
+    assert answer.diagnostics.embedding_provider.mode == "unknown"
+    assert answer.diagnostics.embedding_provider.reason == "search_not_run"
+    assert answer.diagnostics.reranker.mode == "unknown"
+    assert answer.diagnostics.reranker.reason == "search_not_run"
     assert registered_tools == {
         "list_local_documents",
         "search_local_documents",
@@ -238,6 +266,227 @@ def test_agents_runtime_uses_fake_runner_and_preserves_diagnostics(
     assert FakeRunner.calls[0]["max_turns"] == config.agents_max_turns
     assert "docs/attention.md" in str(FakeRunner.calls[0]["tool_output"])
     assert isinstance(FakeAgent.created[0].model, expected_model_type)
+
+
+@pytest.mark.parametrize(
+    (
+        "first_mode",
+        "first_reason",
+        "second_mode",
+        "second_reason",
+        "expected_reason",
+    ),
+    [
+        (
+            "fallback",
+            "primary_failed",
+            "live",
+            "provider_recovered",
+            "primary_failed;provider_recovered",
+        ),
+        (
+            "live",
+            "provider_available",
+            "fallback",
+            "later_failed",
+            "provider_available;later_failed",
+        ),
+    ],
+)
+def test_agents_searches_keep_source_ids_and_conservative_statuses(
+    monkeypatch: pytest.MonkeyPatch,
+    first_mode: models.ProviderMode,
+    first_reason: str,
+    second_mode: models.ProviderMode,
+    second_reason: str,
+    expected_reason: str,
+) -> None:
+    fake_module = _install_fake_agents(monkeypatch)
+    client = FakeAsyncOpenAI()
+    tool_outputs: list[str] = []
+
+    class ThreeSearchRunner:
+        @staticmethod
+        async def run(
+            agent: FakeAgent,
+            question: str,
+            *,
+            context: agents_sdk.AgentRuntimeContext,
+            max_turns: int,
+        ) -> types.SimpleNamespace:
+            del question, max_turns
+            wrapper = FakeRunContextWrapper(context)
+            tool_outputs.extend(
+                [
+                    agent.tools[1](wrapper, "find a", 1),
+                    agent.tools[1](wrapper, "find b", 1),
+                    agent.tools[1](wrapper, "find a again", 1),
+                ]
+            )
+            return types.SimpleNamespace(
+                final_output="Combined evidence. [S1] [S2]"
+            )
+
+    fake_module.__dict__["Runner"] = ThreeSearchRunner
+    monkeypatch.setattr(agents_sdk, "_supports_agents_sdk", lambda: True)
+    monkeypatch.setattr(
+        openai_client, "build_async_openai_client", lambda **kwargs: client
+    )
+    statuses = [
+        models.ProviderStatus(
+            provider="test-provider", mode=first_mode, reason=first_reason
+        ),
+        models.ProviderStatus(
+            provider="test-provider", mode=second_mode, reason=second_reason
+        ),
+        models.ProviderStatus(
+            provider="test-provider", mode=first_mode, reason=first_reason
+        ),
+    ]
+    outcomes = iter(
+        [
+            _search_outcome(
+                chunk_id="a",
+                source_path="a.md",
+                embedding_status=statuses[0],
+                reranker_status=statuses[0],
+            ),
+            _search_outcome(
+                chunk_id="b",
+                source_path="b.md",
+                embedding_status=statuses[1],
+                reranker_status=statuses[1],
+            ),
+            _search_outcome(
+                chunk_id="a",
+                source_path="a.md",
+                embedding_status=statuses[2],
+                reranker_status=statuses[2],
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        tools, "search_documents", lambda config, query, top_k: next(outcomes)
+    )
+
+    answer = agents_sdk.answer_with_agents_sdk(
+        _config("responses"), "combine a and b"
+    )
+
+    assert [output.splitlines()[0] for output in tool_outputs] == [
+        "[S1]",
+        "[S2]",
+        "[S1]",
+    ]
+    assert [hit.chunk.chunk_id for hit in answer.retrieved_chunks] == ["a", "b"]
+    assert [span.source_id for span in answer.citation_spans] == ["S1", "S2"]
+    assert [hit.citation_span.source_id for hit in answer.retrieved_chunks] == [
+        None,
+        None,
+    ]
+    assert answer.diagnostics.embedding_provider.mode == "fallback"
+    assert answer.diagnostics.embedding_provider.reason == expected_reason
+    assert answer.diagnostics.reranker.mode == "fallback"
+    assert answer.diagnostics.reranker.reason == expected_reason
+    assert client.closed is True
+
+
+@pytest.mark.parametrize("failure_kind", ["runner_error", "empty_output"])
+def test_agents_fallback_preserves_prior_search_degradation(
+    monkeypatch: pytest.MonkeyPatch,
+    failure_kind: str,
+) -> None:
+    fake_module = _install_fake_agents(monkeypatch)
+    client = FakeAsyncOpenAI()
+
+    class SearchThenFallbackRunner:
+        @staticmethod
+        async def run(
+            agent: FakeAgent,
+            question: str,
+            *,
+            context: agents_sdk.AgentRuntimeContext,
+            max_turns: int,
+        ) -> types.SimpleNamespace:
+            del question, max_turns
+            agent.tools[1](FakeRunContextWrapper(context), "find a", 1)
+            if failure_kind == "runner_error":
+                raise RuntimeError("runner stopped after search")
+            return types.SimpleNamespace(final_output="   ")
+
+    fake_module.__dict__["Runner"] = SearchThenFallbackRunner
+    monkeypatch.setattr(agents_sdk, "_supports_agents_sdk", lambda: True)
+    monkeypatch.setattr(
+        openai_client, "build_async_openai_client", lambda **kwargs: client
+    )
+    monkeypatch.setattr(
+        tools,
+        "search_documents",
+        lambda config, query, top_k: _search_outcome(
+            chunk_id="a",
+            source_path="a.md",
+            embedding_status=models.ProviderStatus(
+                provider="embedding",
+                mode="fallback",
+                reason="tool_embedding_failed",
+            ),
+            reranker_status=models.ProviderStatus(
+                provider="reranker",
+                mode="fallback",
+                reason="tool_reranker_failed",
+            ),
+        ),
+    )
+    basic_answer = models.AgentAnswer(
+        question="combine a and b",
+        answer="Basic fallback answer.",
+        citations=[],
+        citation_spans=[],
+        retrieved_chunks=[],
+        diagnostics=models.AnswerDiagnostics(
+            requested_runtime="agents_sdk",
+            actual_runtime="basic",
+            vector_backend="local",
+            chat_provider=models.ProviderStatus(
+                provider="chat",
+                mode="fallback",
+                reason="runtime_fallback:agents_sdk_error:RuntimeError",
+            ),
+            embedding_provider=models.ProviderStatus(
+                provider="embedding",
+                mode="live",
+                reason="basic_embedding_recovered",
+            ),
+            reranker=models.ProviderStatus(
+                provider="reranker",
+                mode="live",
+                reason="basic_reranker_recovered",
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        basic_runtime,
+        "answer_with_basic_runtime",
+        lambda *args, **kwargs: basic_answer,
+    )
+
+    answer = agents_sdk.answer_with_agents_sdk(
+        _config("responses"), "combine a and b"
+    )
+
+    assert answer.diagnostics.embedding_provider.mode == "fallback"
+    assert (
+        answer.diagnostics.embedding_provider.reason
+        == "tool_embedding_failed;basic_embedding_recovered"
+    )
+    assert answer.diagnostics.reranker.mode == "fallback"
+    assert (
+        answer.diagnostics.reranker.reason
+        == "tool_reranker_failed;basic_reranker_recovered"
+    )
+    assert basic_answer.diagnostics.embedding_provider.mode == "live"
+    assert basic_answer.diagnostics.reranker.mode == "live"
+    assert client.closed is True
 
 
 def test_agents_runtime_closes_client_and_exposes_runner_fallback(

@@ -17,6 +17,9 @@ Internals: `dispatch.py`, `basic.py`, `agents_sdk.py`, `shared.py`.
 
 - Citation blocks: `[S1]` at column 0, `content:` last. Extractive chat
   fallback parses this; indentation lies and claims no context.
+- Source ids are answer-local and first-seen by `chunk_id`. Basic and Agents
+  SDK answers copy the exact ids shown to the model onto their citation spans;
+  retrieval-owned hits and spans remain unchanged.
 - `requested_runtime` vs `actual_runtime` always recorded.
 - Agents SDK uses a request-owned client; never a process-global OpenAI
   client.
@@ -25,6 +28,11 @@ Internals: `dispatch.py`, `basic.py`, `agents_sdk.py`, `shared.py`.
 - SDK registration and run failures log only their class and innermost frame
   module, function, and line; they never render request data or exception text.
 - Search goes through `rag.retrieve` (via `tools.search_documents`).
+- Agents SDK search diagnostics aggregate across the whole run. Either
+  fallback direction stays `fallback`; all distinct reasons, including live
+  recovery reasons, retain first-seen order. SDK-to-basic fallback preserves
+  prior tool-search degradation; a run with no search stays
+  `unknown/search_not_run`.
 
 ## May change
 

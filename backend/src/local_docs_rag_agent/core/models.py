@@ -99,7 +99,7 @@ class DocumentChunk:
 
 @dataclasses.dataclass(slots=True)
 class CitationSpan:
-    """The exact source offsets backing one citation."""
+    """The exact source offsets and answer-local id backing one citation."""
 
     source_path: str
     chunk_id: str
@@ -107,6 +107,7 @@ class CitationSpan:
     start_char: int
     end_char: int
     text: str
+    source_id: str | None = None
 
 
 @dataclasses.dataclass(slots=True)
