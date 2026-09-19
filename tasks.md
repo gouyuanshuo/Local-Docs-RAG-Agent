@@ -159,11 +159,18 @@ Current theme:
 - [x] Enforce the complete backend dependency direction, delivery-framework
       isolation, the public RAG facade, and generic store capabilities with AST
       regression tests covering absolute and relative imports
-  - Documentation close-out: all 10 focused docs tests pass, including the
-    three link/path/index checks; focused Ruff, Ruff format, and mypy pass for
-    `tests/test_docs.py`; four comparison default/planning checks and
-    `git diff --check` pass. No live provider/Qdrant or frontend run was made
-    for this documentation-only task.
+  - Documentation/import close-out: 57 focused tests and 61 CLI/comparison
+    tests pass. Three independent audit repair rounds closed root-facade and
+    unknown-package checker escapes, generated build inventory and cache-cold
+    wording gaps, and incomplete extension recipes. The final re-review is
+    Ready with no remaining finding.
+- [x] Audit Stage 4 after implementation: the combined review is Ready after
+      `65bfcd0` closed one bootstrap-liveness finding and two Minor
+      coverage/config gaps. At the repaired HEAD, locked Ruff, format, DOC201,
+      mypy, all 449 tests, and compileall pass on Python 3.11/3.13; frozen Node
+      22/pnpm passes all 15 frontend tests and the production build. Independent
+      wheel, explicit-static, no-key local, import-boundary, and secret scans
+      also pass. Live providers, live Qdrant, and Windows remain unverified.
 - [ ] Resolve the upstream Starlette/AnyIO `BlockingPortal` deprecation warning
       or add a narrowly justified filter after the dependency lock is selected
 
