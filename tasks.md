@@ -171,6 +171,9 @@ Current theme:
       22/pnpm passes all 15 frontend tests and the production build. Independent
       wheel, explicit-static, no-key local, import-boundary, and secret scans
       also pass. Live providers, live Qdrant, and Windows remain unverified.
+- [x] Make the documented backend development command portable across Linux
+      and Windows by launching through locked `uv`; verify it serves loopback
+      health/info/documents on this Linux host. Keep PowerShell setup guidance.
 - [ ] Resolve the upstream Starlette/AnyIO `BlockingPortal` deprecation warning
       or add a narrowly justified filter after the dependency lock is selected
 

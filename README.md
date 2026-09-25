@@ -201,18 +201,33 @@ The files you will reach for most often:
 
 ## Quick start
 
-```powershell
+```bash
 uv python install 3.13
 uv sync --locked --all-extras --python 3.13
 pnpm install --frozen-lockfile
-copy .env.example .env
-pnpm run dev:backend   # API on http://127.0.0.1:8000
-pnpm run dev           # UI on http://127.0.0.1:5173
+cp .env.example .env
 ```
+
+On Windows PowerShell, use `Copy-Item .env.example .env` in place of `cp`;
+the other commands are the same.
+
+Start the API in one terminal:
+
+```bash
+pnpm run dev:backend
+```
+
+Start the UI in a second terminal:
+
+```bash
+pnpm run dev
+```
+
+Open `http://127.0.0.1:5173`; the API listens on `http://127.0.0.1:8000`.
 
 No API key is needed for a first run: answers are marked `fallback` rather
 than failing. The [getting-started guide](docs/development/getting-started.md)
-walks through each step, including POSIX shells and a first question, and the
+walks through each step, including PowerShell and a first question, and the
 [CLI](docs/reference/cli.md) and [HTTP API](docs/reference/http-api.md)
 references list every command and endpoint.
 

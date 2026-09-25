@@ -48,13 +48,11 @@ pnpm install --frozen-lockfile
 
 ## 3. Configure
 
-```powershell
-copy .env.example .env
-```
-
 ```bash
 cp .env.example .env
 ```
+
+On Windows PowerShell, use `Copy-Item .env.example .env` instead.
 
 The app loads a project-local `.env` on start, without overriding variables
 already exported in your shell. `.env` is gitignored; only `.env.example` is
@@ -83,8 +81,8 @@ Backend, with reload:
 pnpm run dev:backend
 ```
 
-This runs uvicorn on `http://127.0.0.1:8000` using the Windows virtual
-environment path. Elsewhere, run it through the locked environment:
+The package script runs uvicorn through the locked `uv` environment on Linux
+and Windows. The equivalent direct command in a POSIX shell is:
 
 ```bash
 uv run --locked --all-extras python -m uvicorn \
