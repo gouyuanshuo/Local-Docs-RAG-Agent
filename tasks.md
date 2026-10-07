@@ -289,6 +289,35 @@ Current theme:
 - [x] Production code outside `rag/` uses the rag facade
       (`tests/test_import_graph.py`)
 
+### Ubuntu runner migration (2026-10-07)
+
+- [x] Validate the existing CI gates on Ubuntu 26.04 without adding an OS
+      matrix or changing toolchain versions, actions, dependencies, or locks.
+  - Baseline: `3ec7f27`, [CI #14](https://github.com/gouyuanshuo/Local-Docs-RAG-Agent/actions/runs/36241580061)
+    passed on Ubuntu 24.04.
+  - Runner-only commit: `023de4e`,
+    [CI #16](https://github.com/gouyuanshuo/Local-Docs-RAG-Agent/actions/runs/37597283922).
+    All four jobs passed on Ubuntu 26.04.1, image `20260927.149.1`.
+    Backend Python 3.11/3.13 each passed 449 tests and all existing gates;
+    the real SDK regression passed 3 tests on each. Frontend passed 15 tests
+    and its production build. The wheel built and served health outside the
+    checkout after installation into a fresh environment.
+  - Decision: pin all three job definitions to `ubuntu-26.04`. This uses the
+    validated OS generation now and makes the next OS generation an explicit
+    migration rather than a moving `ubuntu-latest` change. Versioned labels
+    still receive image updates; this does not pin an exact image release.
+    Keep the existing two Python entries and single frontend/package jobs.
+  - uv caches missed on both backend jobs and the wheel job; the frontend
+    reused the existing pnpm package cache. This is an equivalent workflow
+    migration check, not a separate cache-cold frontend validation.
+  - No system-package, prebuilt-binary, or Action failure occurred in these
+    gates, so no compatibility repair or Ubuntu 24.04 fallback was needed.
+    The existing Starlette/AnyIO deprecation and pnpm esbuild build-script
+    warning remain; no unrelated dependency change was made.
+  - Migration source: [runner-images #14748](https://github.com/actions/runner-images/issues/14748).
+    Future compatibility failures can temporarily use `ubuntu-24.04` while
+    a specific failing system package, binary, or Action is repaired.
+
 ### Follow-ups
 
 - [ ] Consider grouping `AppConfig` into per-concern sub-configs if the field count
